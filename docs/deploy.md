@@ -1,6 +1,6 @@
 # Деплой и настройка
 
-Инструкция для продакшена: Cloudflare Worker + D1, Telegram Mini App, Stars и Adsgram. Для локальной разработки достаточно раздела «Быстрый старт» в README.
+Инструкция для продакшена: Cloudflare Worker и D1, Telegram Mini App, Stars и Adsgram. Для локальной разработки достаточно раздела о запуске в README.
 
 ## 0. Что понадобится
 
@@ -10,7 +10,7 @@
 - аккаунт в кабинете [Adsgram](https://adsgram.ai) (для rewarded-видео);
 - публичный HTTPS-домен: подойдёт `*.workers.dev` или свой домен в Cloudflare.
 
-Проверь авторизацию wrangler:
+Проверьте авторизацию wrangler:
 
 ```bash
 npx wrangler login
@@ -52,7 +52,7 @@ npx wrangler d1 execute pawn-vs-all --remote --command "SELECT name FROM sqlite_
 
 ## 2. Переменные
 
-Публичные значения — в `wrangler.jsonc`:
+Публичные значения в `wrangler.jsonc`:
 
 ```jsonc
 "vars": {
@@ -76,9 +76,9 @@ npx wrangler secret put BOT_TOKEN
 npx wrangler secret put WEBHOOK_SECRET
 ```
 
-`WEBHOOK_SECRET` — любая случайная строка (например, `openssl rand -hex 32`). Telegram будет присылать её в заголовке `X-Telegram-Bot-Api-Secret-Token`.
+`WEBHOOK_SECRET` любая случайная строка (например, `openssl rand -hex 32`). Telegram будет присылать её в заголовке `X-Telegram-Bot-Api-Secret-Token`.
 
-Для локальной разработки секреты можно положить в `.dev.vars` (шаблон — `.dev.vars.example`). Этот файл уже в `.gitignore`.
+Для локальной разработки секреты можно положить в `.dev.vars` (шаблон `.dev.vars.example`). Этот файл уже в `.gitignore`.
 
 ## 3. Сборка и деплой
 
@@ -98,20 +98,19 @@ curl https://<worker>.workers.dev/api/health
 # {"ok":true,...}
 ```
 
-Если `health` вернул 503 — не применены миграции или неверный `database_id`.
+Если `health` вернул 503, значит не применены миграции или неверный `database_id`.
 
 ## 4. Telegram: Mini App и меню
 
 1. Открой [@BotFather](https://t.me/BotFather) → `/newbot`, получи токен.
-2. `/newapp` → выбери бота → название `Пешка против всех` → описание → иконка 512×512 → URL `https://<worker>.workers.dev/`.
-   Иконка для бота готова: `public/icon-512.png` (512×512, тёмная доска с золотой пешкой). Её же можно использовать для обложек в каталогах.
+2. `/newapp` → выбери бота → название `Пешка против всех` → описание → иконка 512×512 (файл `public/icon-512.png`) → URL `https://<worker>.workers.dev/`.
 3. `/setmenubutton` → выбери бота → URL приложения → текст кнопки `Играть`.
 4. Команды:
 
 ```
-start - Открыть игру
-play - Играть
-help - Как играть
+start Открыть игру
+play Играть
+help Как играть
 ```
 
 5. Для ссылок-вызовов и рефералов задай `BOT_USERNAME` и перезапусти деплой.
@@ -133,7 +132,7 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/setWebhook" \
 curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 ```
 
-В `last_error_message` должно быть пусто. Если видишь `401 Unauthorized` — секрет в `setWebhook` не совпадает с секретом Worker.
+В `last_error_message` должно быть пусто. Если видишь `401 Unauthorized` секрет в `setWebhook` не совпадает с секретом Worker.
 
 > Для локального теста бота нужен публичный туннель (Cloudflare Tunnel, ngrok). Укажи его в `WEBAPP_URL` и в webhook. Telegram не достучится до `localhost`.
 
@@ -141,9 +140,9 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 
 Отдельный платёжный провайдер для Stars не нужен. Worker создаёт счёт через `createInvoiceLink` в валюте `XTR`:
 
-- `lives` — 25 ⭐, восстанавливает все 5 жизней;
-- `noads` — 150 ⭐, навсегда отключает рекламу;
-- `skins` — 50 ⭐, открывает золото/неон/королевский скин и сразу надевает золотой.
+- `lives` 25 звёзд, восстанавливает все 5 жизней;
+- `noads` 150 звёзд, навсегда отключает рекламу;
+- `skins` 50 звёзд, открывает золото/неон/королевский скин и сразу надевает золотой.
 
 Поток:
 
@@ -159,7 +158,7 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 - протестируй оплату в реальном Telegram (тестовый режим Stars недоступен в обычном браузере);
 - проверь, что после оплаты профиль обновился без перезапуска;
 - проверь, что повторный webhook не выдаёт товар второй раз;
-- проверь возврат: `noads` должен снова включить рекламу, `skins` — вернуть классический скин;
+- проверь возврат: `noads` должен снова включить рекламу, `skins` вернуть классический скин;
 - выплаты Stars доступны в кабинете бота через BotFather (условия Telegram могут меняться).
 
 ## 6. Adsgram
@@ -171,16 +170,16 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 
 Особенности:
 
-- В браузере SDK не загрузится (CORS/окружение) — это нормально, клиент показывает демо-заглушку только при `DEV_MODE=true`. В продакшене при недоступной рекламе пользователь увидит тост «Реклама временно недоступна».
+- В браузере SDK не загрузится (CORS/окружение) это нормально, клиент показывает демо-заглушку только при `DEV_MODE=true`. В продакшене при недоступной рекламе пользователь увидит тост «Реклама временно недоступна».
 - Один контроллер `init()` кэшируется на странице; не вызывай `init` на каждый показ.
-- Награда начисляется только после `done` от SDK. Сервер дополнительно проверяет кулдауны: жизнь — 45 секунд, монеты — 60, щит — 20, и запрещает награды при `ad_free`.
-- Для больших объёмов можно подключить server-side verification Adsgram (см. их документацию); текущая реализация — клиентский `done` + серверные лимиты.
+- Награда начисляется только после `done` от SDK. Сервер дополнительно проверяет кулдауны: жизнь 45 секунд, монеты 60, щит 20, и запрещает награды при `ad_free`.
+- Для больших объёмов можно подключить server-side verification Adsgram (см. их документацию); текущая реализация клиентский `done` + серверные лимиты.
 
 ## 7. Продакшен-чек-лист
 
 - [ ] `database_id` заменён, миграции применены.
 - [ ] `BOT_TOKEN` и `WEBHOOK_SECRET` заданы как секреты.
-- [ ] `DEV_MODE: "false"`, `WEBAPP_URL` — HTTPS, `BOT_USERNAME` заполнен.
+- [ ] `DEV_MODE: "false"`, `WEBAPP_URL` HTTPS, `BOT_USERNAME` заполнен.
 - [ ] `getWebhookInfo` без ошибок.
 - [ ] Mini App открывается из кнопки бота и из меню.
 - [ ] В Telegram проходит первый уровень, сохранение переживает закрытие.

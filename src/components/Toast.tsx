@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { cn } from '../lib/format';
-import { Icon, type IconName } from './Icon';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -10,10 +9,10 @@ export interface ToastItem {
   kind: ToastKind;
 }
 
-const ICONS: Record<ToastKind, IconName> = {
-  success: 'check',
-  error: 'close',
-  info: 'spark',
+const LABELS: Record<ToastKind, string> = {
+  success: 'Готово',
+  error: 'Ошибка',
+  info: 'Заметка',
 };
 
 export function ToastStack({ items, onDismiss }: { items: ToastItem[]; onDismiss: (id: number) => void }): ReactNode {
@@ -26,9 +25,7 @@ export function ToastStack({ items, onDismiss }: { items: ToastItem[]; onDismiss
           className={cn('toast', `toast-${item.kind}`)}
           onClick={() => onDismiss(item.id)}
         >
-          <span className="toast-icon">
-            <Icon name={ICONS[item.kind]} size={16} />
-          </span>
+          <span className="toast-kind">{LABELS[item.kind]}</span>
           <span>{item.message}</span>
         </button>
       ))}

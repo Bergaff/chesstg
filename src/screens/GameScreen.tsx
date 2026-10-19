@@ -10,7 +10,6 @@ import {
   BONUSES,
   PIECE_GLYPH,
   PIECE_NAME,
-  SKINS,
   analyzeState,
   applyAction,
   applyActions,
@@ -40,7 +39,6 @@ import type {
 } from '../lib/types';
 import { Board } from '../components/Board';
 import { HeartsRow } from '../components/Hud';
-import { Icon } from '../components/Icon';
 import { Modal } from '../components/Modal';
 import { RulesModal } from '../components/RulesModal';
 
@@ -50,9 +48,11 @@ interface GameScreenProps {
   mode: GameMode;
   onExit: () => void;
   onNoLives: () => void;
+  onTerms: () => void;
+  onPrivacy: () => void;
 }
 
-export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactNode {
+export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: GameScreenProps): ReactNode {
   const { profile, config, setProfile, refresh, toast, showAd, goShop, goShopStars } = useApp();
   const [phase, setPhase] = useState<Phase>('loading');
   const [run, setRun] = useState<RunPayload | null>(null);
@@ -243,7 +243,7 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
         }
         setStartError(error.message);
       } else {
-        setStartError('Не удалось загрузить поле. Проверь связь.');
+        setStartError('Не удалось загрузить поле. Проверьте связь.');
       }
       changePhase('loading');
     }
@@ -475,7 +475,7 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
     if (adBusy || adLifeClaimed) return;
     setAdBusy(true);
     try {
-      const rewarded = await showAd('+1 ❤️');
+      const rewarded = await showAd('+1 жизнь');
       if (!rewarded) return;
       const response = await api<AdRewardResponse>('/api/ads/reward', {
         method: 'POST',
@@ -545,7 +545,7 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
     const payload = endless ? `ch_0_${profile.endlessBest}` : `ch_${level}_${level}`;
     const url = bot ? `https://t.me/${bot}?startapp=${payload}` : config.webappUrl;
     const text = endless
-      ? `Мой рекорд в «Пешке против всех» — ${profile.endlessBest} клеток. Слабо выше?`
+      ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
       : kind === 'win'
         ? `Я прошёл уровень ${result?.level ?? profile.level} в «Пешке против всех». Слабо повторить?`
         : `Я пал на ${result?.level ?? profile.level} уровне в «Пешке против всех». Сможешь лучше?`;
@@ -557,31 +557,33 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
   if (!state || !run) {
     return (
       <div className="screen game-screen game-loading">
-        <div className="game-loading-inner">
+        <div className="loading-state">
           {startError ? (
             <>
-              <div className="result-orb result-orb-danger"><Icon name="close" size={30} /></div>
-              <h2 className="modal-title">Поле не загрузилось</h2>
+              <span className="loading-mark serif" aria-hidden="true">♟</span>
+              <h2 className="modal-title" style={{ margin: '0 auto 8px' }}>Поле не загрузилось</h2>
               <p className="modal-text">{startError}</p>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-gold" onClick={() => void start()}>
+              <div className="modal-actions" style={{ width: '100%' }}>
+                <button type="button" className="btn btn-primary" onClick={() => void start()}>
                   Повторить
                 </button>
-                <button type="button" className="btn btn-text" onClick={onExit}>
+                <button type="button" className="btn btn-quiet" onClick={onExit}>
                   В меню
                 </button>
               </div>
             </>
           ) : (
             <>
-              <div className="loading-pawn">♟</div>
-              <span className="eyebrow">Расставляем фигуры</span>
-              <p className="loading-hint">Готовим поле…</p>
+              <span className="loading-mark serif" aria-hidden="true">♟</span>
+              <span className="label">Расставляем фигуры</span>
+              <p className="loading-text">Готовим поле</p>
             </>
           )}
-          <button type="button" className="btn btn-text" onClick={onExit}>
-            В меню
-          </button>
+          {!startError && (
+            <button type="button" className="btn btn-quiet" onClick={onExit}>
+              В меню
+            </button>
+          )}
         </div>
       </div>
     );
@@ -596,56 +598,49 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
   return (
     <div className="screen game-screen">
       <header className="game-top">
-        <button type="button" className="icon-btn game-back" onClick={requestExit} aria-label="Назад">
-          <Icon name="back" size={20} />
+        <button type="button" className="back-btn" onClick={requestExit} aria-label="Назад">
+          ←
         </button>
-        <div className="game-title">
-          <span>{isEndless ? 'Бесконечный' : 'Кампания'}</span>
-          <b>{isEndless ? `Высота ${state.score}` : `Уровень ${run.level}`}</b>
+        <div className="game-heading">
+          <span className="label">{isEndless ? 'Бесконечный режим' : 'Кампания'}</span>
+          <b className="game-title">
+            {isEndless ? `Высота ${state.score}` : `Уровень ${run.level}`}
+          </b>
         </div>
         <div className="game-hud">
-          <span className="game-hud-pill">
-            <Icon name="heart" size={14} />
-            {profile.lives}
+          <span className="hud-item">
+            <span className="label">Жизни</span>
+            <b>{profile.lives}</b>
           </span>
-          <span className="game-hud-pill">
-            <Icon name="coin" size={14} />
-            {formatNumber(profile.coins)}
+          <span className="hud-item">
+            <span className="label">Монеты</span>
+            <b>{formatNumber(profile.coins)}</b>
           </span>
         </div>
       </header>
 
       <div className="game-status">
-        <span className="status-chip">
-          <Icon name="spark" size={13} />
-          Ход {state.moves + 1}
-        </span>
-        {isEndless && (
-          <span className="status-chip">
-            <Icon name="flame" size={13} />
-            Волна {state.tier}
-          </span>
-        )}
-        {!isEndless && <span className="status-chip">{styles}×{styles}</span>}
+        <span className="status-item">Ход {state.moves + 1}</span>
+        <span className="status-sep" aria-hidden="true">/</span>
+        <span className="status-item">{isEndless ? `Волна ${state.tier}` : `Поле ${styles}×${styles}`}</span>
         {state.shield > 0 && (
-          <span className="status-chip chip-shield">
-            <Icon name="shield" size={13} />
-            Щит {state.shield}
-          </span>
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item on">щит {state.shield}</span>
+          </>
         )}
         {state.freeze > 0 && (
-          <span className="status-chip chip-freeze">
-            <Icon name="snow" size={13} />
-            Мороз {state.freeze}
-          </span>
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item on">фигуры заморожены</span>
+          </>
         )}
       </div>
 
       <div className="board-area">
         <div className="goal-line">
-          <span className="goal-crown"><Icon name="crown" size={13} /></span>
-          <span>{isEndless ? 'Поднимайся выше. Поле бесконечно' : 'Финиш на верхнем ряду'}</span>
-          {isEndless && <b>{state.score}</b>}
+          <span>{isEndless ? 'Поднимайтесь выше, поле растёт' : 'Дойти до верхнего ряда'}</span>
+          <span className="num">{state.score > 0 ? `${state.score} кл.` : ''}</span>
         </div>
         <Board
           state={state}
@@ -658,8 +653,6 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
         />
       </div>
 
-      {phase === 'resolving' && <div className="resolve-bar" aria-hidden="true" />}
-
       <div className="game-controls">
         <div className="buff-row">
           <button
@@ -668,22 +661,24 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
             onClick={() => void useHint()}
             disabled={!canPlay || bonusBusy}
           >
-            <span className="buff-icon icon-bulb"><Icon name="bulb" size={19} /></span>
-            <span className="buff-copy">
-              <b>Подсказка</b>
-              <small>{profile.inventory.hint > 0 ? `×${profile.inventory.hint}` : `${BONUSES.hint.price} 🪙`}</small>
+            <span className="buff-name">Подсказка</span>
+            <span className="buff-meta">
+              {profile.inventory.hint > 0 ? `в запасе ${profile.inventory.hint}` : `${BONUSES.hint.price} монет`}
             </span>
           </button>
           <button
             type="button"
-            className={cn('buff-btn', state.freeze > 0 && 'buff-active')}
+            className={cn('buff-btn', state.freeze > 0 && 'active')}
             onClick={() => void useFreeze()}
             disabled={!canPlay || bonusBusy || state.freeze > 0}
           >
-            <span className="buff-icon icon-freeze"><Icon name="snow" size={19} /></span>
-            <span className="buff-copy">
-              <b>{state.freeze > 0 ? `Мороз ${state.freeze}` : 'Заморозка'}</b>
-              <small>{state.freeze > 0 ? 'активно' : profile.inventory.freeze > 0 ? `×${profile.inventory.freeze}` : `${BONUSES.freeze.price} 🪙`}</small>
+            <span className="buff-name">{state.freeze > 0 ? `Мороз ${state.freeze}` : 'Заморозка'}</span>
+            <span className="buff-meta">
+              {state.freeze > 0
+                ? 'фигуры стоят'
+                : profile.inventory.freeze > 0
+                  ? `в запасе ${profile.inventory.freeze}`
+                  : `${BONUSES.freeze.price} монет`}
             </span>
           </button>
           <button
@@ -692,18 +687,20 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
             onClick={() => void useUndo()}
             disabled={!canPlay || bonusBusy || lastMoveIndex < 0}
           >
-            <span className="buff-icon icon-undo"><Icon name="undo" size={19} /></span>
-            <span className="buff-copy">
-              <b>Отмена</b>
-              <small>{historyDepth === 0 ? 'нет ходов' : profile.inventory.undo > 0 ? `×${profile.inventory.undo}` : `${BONUSES.undo.price} 🪙`}</small>
+            <span className="buff-name">Отмена</span>
+            <span className="buff-meta">
+              {historyDepth === 0
+                ? 'ходов нет'
+                : profile.inventory.undo > 0
+                  ? `в запасе ${profile.inventory.undo}`
+                  : `${BONUSES.undo.price} монет`}
             </span>
           </button>
         </div>
 
         {moves.length === 0 && canPlay ? (
-          <button type="button" className="btn skip-btn" onClick={handleSkip}>
-            Все ходы закрыты · Пропустить
-            <Icon name="chevronRight" size={19} />
+          <button type="button" className="skip-btn" onClick={handleSkip}>
+            Все ходы закрыты. Пропустить
           </button>
         ) : (
           <div className="move-row">
@@ -713,13 +710,13 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
                 <button
                   key={dx}
                   type="button"
-                  className={cn('move-btn', dx === 0 && 'move-btn-forward', !available && 'move-btn-off')}
+                  className={cn('move-btn', dx === 0 && 'primary', !available && 'off')}
                   disabled={!available}
                   onClick={() => handleMove(dx)}
                   aria-label={dx === -1 ? 'Влево-вперёд' : dx === 0 ? 'Вперёд' : 'Вправо-вперёд'}
                 >
-                  <span className="move-arrow" style={{ transform: `rotate(${dx * 45}deg)` }}>
-                    <Icon name="arrowUp" size={26} />
+                  <span className="move-glyph-lg" aria-hidden="true">
+                    {dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
                   </span>
                   <span className="move-label">{dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо'}</span>
                 </button>
@@ -728,64 +725,72 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
           </div>
         )}
         <p className="control-hint">
-          {playerAlive ? 'Ходят только вперёд. Пешка не бьёт фигуры.' : 'Пешка поймана.'}
+          {playerAlive ? 'Пешка ходит только вперёд и не бьёт фигуры.' : 'Пешка поймана.'}
         </p>
       </div>
 
       {preOpen && (
-        <Modal dismissible={false} onClose={() => undefined} className="pre-modal">
-          <div className="pre-head">
-            <span className="eyebrow">{isEndless ? 'Забег' : `Поле ${styles}×${styles}`}</span>
-            <h2 className="modal-title" id="pre-title">
-              {isEndless ? 'Бесконечный режим' : `Уровень ${run.level}`}
-            </h2>
-            <p className="modal-text">
-              {isEndless
-                ? 'Поле растёт вверх каждые пять клеток. Сложность — каждые пять ходов. Сколько продержишься?'
-                : 'Дойди до верхнего ряда. Фигуры ходят после тебя и пытаются подобраться ближе.'}
-            </p>
+        <Modal dismissible={false} onClose={() => undefined} labelledBy="pre-title">
+          <span className="label">{isEndless ? 'Забег' : `Поле ${styles} на ${styles}`}</span>
+          <h2 className="modal-title" id="pre-title">
+            {isEndless ? 'Бесконечный режим' : `Уровень ${run.level}`}
+          </h2>
+          <p className="modal-text">
+            {isEndless
+              ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
+              : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
+          </p>
+
+          <div className="pre-meta">
+            <div>
+              <span>Размер поля</span>
+              <b>{isEndless ? '6 на 9 и выше' : `${styles} на ${styles}`}</b>
+            </div>
+            <div>
+              <span>Фигур на поле</span>
+              <b>{run.initial.enemies.length}</b>
+            </div>
+            <div>
+              <span>Жизней в запасе</span>
+              <b>{profile.lives}</b>
+            </div>
           </div>
 
-          <div className="pre-pieces">
-            <div className="pre-pieces-title">На поле</div>
-            <div className="pre-piece-list">
-              {levelTypes.map((type) => (
-                <span className="pre-piece" key={type}>
-                  <em>{PIECE_GLYPH[type]}</em>
-                  <span>{PIECE_NAME[type]}</span>
-                </span>
-              ))}
-            </div>
-            {unlockedNow.length > 0 && (
-              <div className="pre-unlock">
-                <Icon name="spark" size={15} />
-                Новая фигура: {unlockedNow.map((type) => PIECE_NAME[type]).join(', ')}
-              </div>
-            )}
+          <div className="pre-piece-list">
+            {levelTypes.map((type) => (
+              <span className="pre-piece" key={type}>
+                <em>{PIECE_GLYPH[type]}</em>
+                <span>{PIECE_NAME[type]}</span>
+              </span>
+            ))}
           </div>
+
+          {unlockedNow.length > 0 && (
+            <p className="pre-unlock">
+              Новая фигура: {unlockedNow.map((type) => PIECE_NAME[type]).join(', ')}
+            </p>
+          )}
 
           {!profile.adFree && (
             <button
               type="button"
-              className={cn('shield-offer', shieldUsed && 'is-used')}
+              className="shield-offer"
               onClick={() => void watchShield()}
               disabled={adBusy || shieldUsed || state.shield > 0}
             >
-              <span className="shield-offer-icon"><Icon name="shield" size={20} /></span>
               <span>
-                <b>{adBusy ? 'Загружаем рекламу…' : shieldUsed ? 'Щит уже взят' : 'Щит на 3 хода'}</b>
-                <small>За просмотр рекламы · один раз за забег</small>
+                <b>{adBusy ? 'Загружаем ролик' : shieldUsed ? 'Щит уже взят' : 'Щит на три хода'}</b>
+                <small>За просмотр рекламы, один раз за забег</small>
               </span>
-              <Icon name="play" size={16} />
+              <span className="arrow" aria-hidden="true">→</span>
             </button>
           )}
 
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={beginPlay}>
-              <Icon name="play" size={17} />
+            <button type="button" className="btn btn-primary" onClick={beginPlay}>
               Начать
             </button>
-            <button type="button" className="btn btn-text" onClick={() => setRulesOpen(true)}>
+            <button type="button" className="btn btn-quiet" onClick={() => setRulesOpen(true)}>
               Как играть
             </button>
           </div>
@@ -794,20 +799,21 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
 
       {phase === 'finishing' && !finishError && (
         <div className="finishing-veil">
-          <span className="spinner" />
-          <span>Сохраняем результат…</span>
+          <span className="loading-text">Сохраняем результат</span>
         </div>
       )}
 
       {finishError && (
         <Modal dismissible={false} onClose={() => undefined}>
-          <div className="result-orb result-orb-danger"><Icon name="close" size={28} /></div>
+          <span className="label">Сбой</span>
           <h2 className="modal-title">Результат не сохранился</h2>
-          <p className="modal-text">{finishError}. Проверь связь и попробуй ещё раз — партия осталась на сервере.</p>
+          <p className="modal-text">
+            {finishError}. Партия осталась на сервере, можно повторить отправку.
+          </p>
           <div className="modal-actions">
             <button
               type="button"
-              className="btn btn-gold"
+              className="btn btn-primary"
               onClick={() => {
                 if (runRef.current) {
                   setFinishError(null);
@@ -817,7 +823,7 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
             >
               Повторить
             </button>
-            <button type="button" className="btn btn-text" onClick={onExit}>
+            <button type="button" className="btn btn-quiet" onClick={onExit}>
               В меню
             </button>
           </div>
@@ -853,34 +859,35 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
 
       {result && phase === 'quit' && (
         <Modal dismissible={false} onClose={() => undefined}>
-          <div className="result-orb"><Icon name="star" size={30} /></div>
-          <span className="eyebrow">Забег завершён</span>
+          <span className="label">Забег</span>
           <h2 className="modal-title">{result.newBest ? 'Новый рекорд' : 'Забег завершён'}</h2>
           <p className="modal-text">
-            {result.newBest ? `Ты поднялся на ${result.bestScore ?? result.score} клеток.` : `Ты остановился на ${result.score} клетках.`}
-            {result.coinsEarned > 0 ? ` Награда: +${result.coinsEarned} 🪙` : ''}
+            {result.newBest
+              ? `Высота ${result.bestScore ?? result.score} клеток.`
+              : `Остановились на высоте ${result.score} клеток.`}
+            {result.coinsEarned > 0 ? ` Награда: ${result.coinsEarned} монет.` : ''}
           </p>
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={onExit}>В меню</button>
-            <button type="button" className="btn btn-ghost" onClick={() => void shareResult('win')}>Поделиться</button>
+            <button type="button" className="btn btn-primary" onClick={onExit}>В меню</button>
+            <button type="button" className="btn btn-outline" onClick={() => void shareResult('win')}>Поделиться</button>
           </div>
         </Modal>
       )}
 
       {quitOpen && (
         <Modal onClose={() => setQuitOpen(false)}>
-          <div className="result-orb"><Icon name="clock" size={28} /></div>
-          <h2 className="modal-title">{isEndless ? 'Завершить забег?' : 'Выйти в меню?'}</h2>
+          <span className="label">Пауза</span>
+          <h2 className="modal-title">{isEndless ? 'Завершить забег' : 'Выйти в меню'}</h2>
           <p className="modal-text">
             {isEndless
               ? 'Результат попадёт в рекорды, но продолжить этот забег уже не получится.'
-              : 'Партия сохранится. Ты сможешь продолжить с этого хода.'}
+              : 'Партия сохранится, можно вернуться к этому ходу позже.'}
           </p>
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={confirmExit}>
+            <button type="button" className="btn btn-primary" onClick={confirmExit}>
               {isEndless ? 'Завершить' : 'Выйти'}
             </button>
-            <button type="button" className="btn btn-text" onClick={() => setQuitOpen(false)}>
+            <button type="button" className="btn btn-quiet" onClick={() => setQuitOpen(false)}>
               Остаться
             </button>
           </div>
@@ -889,23 +896,29 @@ export function GameScreen({ mode, onExit, onNoLives }: GameScreenProps): ReactN
 
       {noCoins && (
         <Modal onClose={() => setNoCoins(false)} showClose>
-          <div className="result-orb"><Icon name="coin" size={30} /></div>
+          <span className="label">Баланс</span>
           <h2 className="modal-title">Не хватает монет</h2>
           <p className="modal-text">
-            Монеты дают за победы. Ещё немного можно получить за просмотр рекламы в главном меню или в магазине.
+            Монеты дают за пройденные уровни и рекорды. Ещё немного можно получить за рекламу в меню.
           </p>
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={() => { setNoCoins(false); goShop(); }}>
+            <button type="button" className="btn btn-primary" onClick={() => { setNoCoins(false); goShop(); }}>
               В магазин
             </button>
-            <button type="button" className="btn btn-text" onClick={() => setNoCoins(false)}>
+            <button type="button" className="btn btn-quiet" onClick={() => setNoCoins(false)}>
               Понятно
             </button>
           </div>
         </Modal>
       )}
 
-      {rulesOpen && <RulesModal onClose={() => setRulesOpen(false)} />}
+      {rulesOpen && (
+        <RulesModal
+          onClose={() => setRulesOpen(false)}
+          onTerms={onTerms}
+          onPrivacy={onPrivacy}
+        />
+      )}
     </div>
   );
 }
@@ -924,52 +937,46 @@ function WinModal({
   isEndless: boolean;
 }): ReactNode {
   return (
-    <Modal dismissible={false} onClose={() => undefined} className="result-modal win-modal">
-      <div className="confetti" aria-hidden="true">
-        {Array.from({ length: 14 }).map((_, index) => (
-          <span key={index} className={`confetti-piece c${index % 5}`} style={{ left: `${6 + index * 6.5}%`, animationDelay: `${index * 70}ms` }} />
-        ))}
+    <Modal dismissible={false} onClose={() => undefined} className="result-modal" labelledBy="win-title">
+      <div className="result-hero">
+        <div className="result-mark" aria-hidden="true">♔</div>
+        <span className="label label-accent">{isEndless ? 'Бесконечный режим' : `Уровень ${result.level}`}</span>
+        <h2 className="modal-title" id="win-title">Пешка дошла</h2>
+        <p className="modal-text">Верхний ряд взят, пешка цела.</p>
       </div>
-      <div className="result-orb result-orb-gold">
-        <Icon name="crown" size={34} />
-      </div>
-      <span className="eyebrow">{isEndless ? 'Бесконечный режим' : `Уровень ${result.level}`}</span>
-      <h2 className="modal-title">Финиш!</h2>
-      <p className="modal-text">Пешка прошла поле и осталась цела. Красиво.</p>
 
-      <div className="result-rewards">
-        <span className="reward-pill">
-          <Icon name="coin" size={16} />
-          +{result.coinsEarned}
-        </span>
+      <div className="reward-list">
+        <div className="reward-item">
+          <span>Монеты за уровень</span>
+          <b>+{result.coinsEarned}</b>
+        </div>
         {result.newBest && (
-          <span className="reward-pill reward-best">
-            <Icon name="trophy" size={16} />
-            Рекорд {result.bestScore}
-          </span>
+          <div className="reward-item">
+            <span>Новый рекорд высоты</span>
+            <b>{result.bestScore}</b>
+          </div>
         )}
+        <div className="reward-item">
+          <span>Следующий уровень</span>
+          <b>{result.nextLevel}</b>
+        </div>
       </div>
 
       {result.endlessUnlockedNow && (
-        <div className="unlock-banner">
-          <Icon name="infinity" size={22} />
-          <div>
-            <b>Бесконечный режим открыт</b>
-            <span>Поле будет расти, пока ты держишься.</span>
-          </div>
+        <div className="callout">
+          <span className="label label-accent">Открыто</span>
+          <span>Бесконечный режим. Поле растёт, пока вы держитесь.</span>
         </div>
       )}
 
       <div className="modal-actions">
-        <button type="button" className="btn btn-gold" onClick={onNext}>
+        <button type="button" className="btn btn-primary" onClick={onNext}>
           {isEndless ? 'Ещё забег' : 'Следующий уровень'}
-          <Icon name="chevronRight" size={18} />
         </button>
-        <button type="button" className="btn btn-ghost" onClick={onShare}>
-          <Icon name="share" size={16} />
+        <button type="button" className="btn btn-outline" onClick={onShare}>
           Бросить вызов
         </button>
-        <button type="button" className="btn btn-text" onClick={onMenu}>
+        <button type="button" className="btn btn-quiet" onClick={onMenu}>
           В меню
         </button>
       </div>
@@ -1011,69 +1018,65 @@ function LoseModal({
   const canRetry = profile.lives > 0;
 
   return (
-    <Modal dismissible={false} onClose={() => undefined} className="result-modal lose-modal">
-      <div className="result-orb result-orb-danger">
-        <span className="result-enemy">{captured ? PIECE_GLYPH[captured] : '♟'}</span>
+    <Modal dismissible={false} onClose={() => undefined} className="result-modal" labelledBy="lose-title">
+      <div className="result-hero">
+        <div className="result-mark danger" aria-hidden="true">
+          <span className="result-glyph">{captured ? PIECE_GLYPH[captured] : '♟'}</span>
+        </div>
+        <span className="label">{isEndless ? `Высота ${result.score}` : `Уровень ${result.level}`}</span>
+        <h2 className="modal-title" id="lose-title">Пешка поймана</h2>
+        <p className="modal-text">
+          {captured ? `${PIECE_NAME[captured]} добрался до вашей пешки.` : 'Фигура добралась до вашей пешки.'}{' '}
+          Минус одна жизнь.
+        </p>
       </div>
-      <span className="eyebrow">{isEndless ? `Высота ${result.score}` : `Уровень ${result.level}`}</span>
-      <h2 className="modal-title">Пешка поймана</h2>
-      <p className="modal-text">
-        {captured ? `${PIECE_NAME[captured]} добрался(ась) до твоей пешки.` : 'Фигура добралась до твоей пешки.'} Минус одна жизнь.
-      </p>
 
-      <div className="lose-lives">
+      <div className="lives-line">
+        <span>Осталось жизней</span>
         <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
-        <span className="lose-heart">−1 ❤️</span>
       </div>
 
       {result.newBest && (
-        <div className="unlock-banner record-banner">
-          <Icon name="trophy" size={20} />
-          <div>
-            <b>Новый рекорд: {result.bestScore}</b>
-            <span>+{result.coinsEarned} 🪙 за высоту</span>
-          </div>
+        <div className="callout">
+          <span className="label label-accent">Рекорд</span>
+          <span>
+            Высота {result.bestScore} клеток, награда {result.coinsEarned} монет.
+          </span>
         </div>
       )}
 
       {!canRetry && (
-        <div className="lose-timer">
-          <Icon name="clock" size={16} />
-          Новая жизнь через <b>{formatDuration(remaining)}</b>
+        <div className="timer-line">
+          <span>Новая жизнь через</span>
+          <b>{formatDuration(remaining)}</b>
         </div>
       )}
 
       <div className="modal-actions">
         {canRetry && (
-          <button type="button" className="btn btn-gold" onClick={onRetry}>
-            <Icon name="play" size={16} />
+          <button type="button" className="btn btn-primary" onClick={onRetry}>
             {isEndless ? 'Новый забег' : 'Ещё раз'}
           </button>
         )}
-
         {!adFree && !adClaimed && (
           <button
             type="button"
-            className={cn('btn', canRetry ? 'btn-ghost' : 'btn-gold')}
+            className={canRetry ? 'btn btn-outline' : 'btn btn-primary'}
             onClick={onWatchLife}
             disabled={adBusy}
           >
-            <Icon name="play" size={16} />
-            {adBusy ? 'Загружаем…' : 'Смотреть рекламу +1 ❤️'}
+            {adBusy ? 'Загружаем ролик' : 'Смотреть рекламу за жизнь'}
           </button>
         )}
-
         {!canRetry && (
-          <button type="button" className="btn btn-ghost" onClick={onShop}>
-            Магазин · +5 жизней за 25 ⭐
+          <button type="button" className="btn btn-outline" onClick={onShop}>
+            Магазин: пять жизней за 25 звёзд
           </button>
         )}
-
-        <button type="button" className="btn btn-text" onClick={onShare}>
-          <Icon name="share" size={15} />
+        <button type="button" className="btn btn-quiet" onClick={onShare}>
           Бросить вызов
         </button>
-        <button type="button" className="btn btn-text" onClick={onMenu}>
+        <button type="button" className="btn btn-quiet" onClick={onMenu}>
           В меню
         </button>
       </div>

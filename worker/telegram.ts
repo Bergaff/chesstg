@@ -59,14 +59,15 @@ export async function sendWelcome(env: WorkerEnv, chatId: number, firstName: str
   const link = appLink(env, payload);
   const start = botStartLink(env, payload);
   const text =
-    `♟ <b>Пешка против всех</b>\n\n` +
-    `${escapeHtml(firstName)}, проведи пешку на другую сторону доски и не попадись фигурам.\n\n` +
-    `❤️ 5 жизней\n🏆 Кампания и бесконечный режим\n💡 Подсказки, заморозка и отмена хода\n\n` +
-    `Жми «Играть» — и вперёд!`;
+    `<b>Пешка против всех</b>\n\n` +
+    `${escapeHtml(firstName)}, проведите пешку на другую сторону доски и не попадитесь фигурам.\n\n` +
+    `Пять жизней, кампания и бесконечный режим.\n` +
+    `Подсказки, заморозка и отмена хода.\n\n` +
+    `Нажмите «Играть», чтобы начать.`;
   const reply_markup = {
     inline_keyboard: [
-      [{ text: '♟ Играть', web_app: { url: link } }],
-      ...(start ? [[{ text: '🔗 Поделиться игрой', url: `https://t.me/share/url?url=${encodeURIComponent(start)}&text=${encodeURIComponent('Пешка против всех — попробуй дойти до края доски!')}` }]] : []),
+      [{ text: 'Играть', web_app: { url: link } }],
+      ...(start ? [[{ text: 'Поделиться игрой', url: `https://t.me/share/url?url=${encodeURIComponent(start)}&text=${encodeURIComponent('Пешка против всех: попробуйте дойти до края доски.')}` }]] : []),
     ],
   };
   await callTelegram(env, 'sendMessage', {
@@ -82,13 +83,13 @@ export async function sendHelp(env: WorkerEnv, chatId: number): Promise<void> {
   await callTelegram(env, 'sendMessage', {
     chat_id: chatId,
     text:
-      '♟ <b>Как играть</b>\n\n' +
+      '<b>Как играть</b>\n\n' +
       'Пешка ходит только вперёд и по диагонали вперёд. Назад и вбок нельзя.\n' +
-      'Фигуры ходят по классическим шахматным правилам и охотятся на тебя.\n' +
-      'Дойди до верхнего ряда — и уровень твой.\n\n' +
-      '❤️ Жизни восстанавливаются по одной каждые 30 минут.\n' +
-      '🪙 Монеты дают за победы, они тратятся на бонусы.\n\n' +
-      'Команды: /play — открыть игру, /help — эта справка.',
+      'Фигуры ходят по классическим шахматным правилам и охотятся на игрока.\n' +
+      'Дойдите до верхнего ряда, и уровень пройден.\n\n' +
+      'Жизни восстанавливаются по одной каждые 30 минут.\n' +
+      'Монеты дают за победы, они тратятся на бонусы.\n\n' +
+      'Команды: /play открыть игру, /help эта справка.',
     parse_mode: 'HTML',
   });
 }
@@ -109,7 +110,7 @@ export async function answerPreCheckout(
 export async function notifyReferrer(env: WorkerEnv, chatId: number, name: string, bonus: number): Promise<void> {
   await callTelegram(env, 'sendMessage', {
     chat_id: chatId,
-    text: `🎉 По твоей ссылке пришёл ${escapeHtml(name)}! Начислено ${bonus} 🪙.`,
+    text: `По вашей ссылке пришёл ${escapeHtml(name)}. Начислено ${bonus} монет.`,
     disable_web_page_preview: true,
   });
 }

@@ -18,6 +18,8 @@ export interface AppContextValue {
   goShop: () => void;
   goShopStars: () => void;
   goRecords: () => void;
+  openTerms: () => void;
+  openPrivacy: () => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApp } from '../context/AppContext';
 import { api, ApiError } from '../lib/api';
-import { cn, formatNumber, initialOf } from '../lib/format';
+import { cn, formatNumber } from '../lib/format';
 import { shareContent } from '../lib/telegram';
 import type { LeaderboardResponse, LeaderboardRow } from '../lib/types';
-import { Icon } from '../components/Icon';
 
 interface RecordsScreenProps {
   onBack: () => void;
@@ -44,7 +43,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
   async function shareInvite() {
     const link = data?.inviteLink ?? config.webappUrl;
-    const text = 'Сыграй в «Пешку против всех»: проведи пешку через поле и не попадись фигурам. У меня уже есть рекорд — попробуй побить.';
+    const text = 'Загляните в «Пешку против всех»: пешка идёт через поле, фигуры охотятся. У меня уже есть рекорд, попробуйте побить.';
     const status = await shareContent(text, link);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
     if (status === 'failed') toast('Не удалось поделиться', 'error');
@@ -57,7 +56,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
     const url = bot ? `https://t.me/${bot}?startapp=${payload}` : config.webappUrl;
     const text =
       metric === 'endless'
-        ? `Мой рекорд в «Пешке против всех» — ${profile.endlessBest} клеток. Слабо выше?`
+        ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
         : `Я дошёл до ${profile.maxLevel} уровня в «Пешке против всех». Сможешь лучше?`;
     const status = await shareContent(text, url);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
@@ -65,8 +64,6 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
   }
 
   const rows = data?.rows ?? [];
-  const podium = rows.slice(0, 3);
-  const rest = rows.slice(3);
   const myRank = data?.myRank ?? 0;
   const valueFor = (row: LeaderboardRow) =>
     metric === 'endless' ? `${formatNumber(row.endlessBest)} клеток` : `уровень ${row.maxLevel}`;
@@ -74,73 +71,57 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
   return (
     <div className="screen records-screen">
       <header className="page-top">
-        <button type="button" className="icon-btn" onClick={onBack} aria-label="Назад">
-          <Icon name="back" size={20} />
+        <button type="button" className="back-btn" onClick={onBack} aria-label="Назад">
+          ←
         </button>
-        <div className="page-title">
-          <span>Таблица лидеров</span>
-          <b>Рекорды</b>
+        <div className="page-heading" style={{ flex: 1 }}>
+          <span className="label">Таблица лидеров</span>
+          <h1 className="page-title">Рекорды</h1>
         </div>
-        <button type="button" className="icon-btn" onClick={() => void shareRecord()} aria-label="Поделиться рекордом">
-          <Icon name="share" size={19} />
+        <button type="button" className="btn btn-quiet" style={{ minHeight: 30, padding: '0 4px', fontSize: 11 }} onClick={() => void shareRecord()}>
+          Поделиться
         </button>
       </header>
 
-      <div className="records-stats">
-        <div className="record-stat">
-          <span className="record-stat-icon icon-infinity"><Icon name="infinity" size={17} /></span>
-          <b>{formatNumber(profile.endlessBest)}</b>
-          <span>клеток</span>
-        </div>
-        <div className="record-stat">
-          <span className="record-stat-icon icon-trophy"><Icon name="trophy" size={17} /></span>
-          <b>{profile.maxLevel}</b>
-          <span>уровень</span>
-        </div>
-        <div className="record-stat">
-          <span className="record-stat-icon icon-users"><Icon name="users" size={17} /></span>
-          <b>{invitedCount}</b>
-          <span>друзей</span>
-        </div>
+      <div className="metric-row">
+        <span className="metric-key">Рекорд высоты</span>
+        <span className="metric-val">{formatNumber(profile.endlessBest)}</span>
+      </div>
+      <div className="metric-row">
+        <span className="metric-key">Достигнутый уровень</span>
+        <span className="metric-val">{profile.maxLevel}</span>
+      </div>
+      <div className="metric-row">
+        <span className="metric-key">Приглашено друзей</span>
+        <span className="metric-val">{invitedCount}</span>
       </div>
 
-      <div className="segmented metric-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={metric === 'endless'} className={metric === 'endless' ? 'active' : ''} onClick={() => setMetric('endless')}>
-          <Icon name="infinity" size={15} />
+      <div className="tabs" role="tablist" style={{ marginTop: 20 }}>
+        <button type="button" role="tab" aria-selected={metric === 'endless'} className={cn('tab', metric === 'endless' && 'active')} onClick={() => setMetric('endless')}>
           Бесконечный
         </button>
-        <button type="button" role="tab" aria-selected={metric === 'campaign'} className={metric === 'campaign' ? 'active' : ''} onClick={() => setMetric('campaign')}>
-          <Icon name="trophy" size={15} />
+        <button type="button" role="tab" aria-selected={metric === 'campaign'} className={cn('tab', metric === 'campaign' && 'active')} onClick={() => setMetric('campaign')}>
           Кампания
         </button>
       </div>
 
-      <div className="scope-row">
-        <button type="button" className={scope === 'global' ? 'scope-pill active' : 'scope-pill'} onClick={() => setScope('global')}>
-          <Icon name="spark" size={13} />
-          Глобально
+      <div className="filter-row">
+        <button type="button" className={cn('filter', scope === 'global' && 'active')} onClick={() => setScope('global')}>
+          Мировая таблица
         </button>
-        <button type="button" className={scope === 'friends' ? 'scope-pill active' : 'scope-pill'} onClick={() => setScope('friends')}>
-          <Icon name="users" size={13} />
+        <button type="button" className={cn('filter', scope === 'friends' && 'active')} onClick={() => setScope('friends')}>
           Друзья
         </button>
-        {myRank > 0 && <span className="my-rank">твоё место #{myRank}</span>}
+        {myRank > 0 && <span className="my-rank">ваше место: {myRank}</span>}
       </div>
 
-      {loading && (
-        <div className="leader-skeleton">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <span key={index} className="skeleton-row" />
-          ))}
-        </div>
-      )}
+      {loading && <p className="loading-line">Загружаем таблицу.</p>}
 
       {!loading && error && (
         <div className="empty-state">
-          <div className="empty-orb"><Icon name="close" size={26} /></div>
           <h3>Рекорды не загрузились</h3>
           <p>{error}</p>
-          <button type="button" className="btn btn-ghost" onClick={() => void load()}>
+          <button type="button" className="btn btn-outline" onClick={() => void load()}>
             Повторить
           </button>
         </div>
@@ -148,16 +129,14 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
       {!loading && !error && rows.length === 0 && (
         <div className="empty-state">
-          <div className="empty-orb"><Icon name="trophy" size={28} /></div>
-          <h3>{scope === 'friends' ? 'Пока только ты' : 'Рекордов ещё нет'}</h3>
+          <h3>{scope === 'friends' ? 'Пока только вы' : 'Рекордов ещё нет'}</h3>
           <p>
             {scope === 'friends'
-              ? 'Пригласи друга — он появится в этом списке. Telegram не отдаёт контакты без разрешения, поэтому друзья считаются по твоей ссылке.'
-              : 'Пройди первый уровень или заверши забег — и твоё имя появится в таблице.'}
+              ? 'Пригласите друга, и он появится в этом списке. Telegram не отдаёт контакты без разрешения, поэтому друзья считаются по вашей ссылке.'
+              : 'Пройдите первый уровень или завершите забег, и имя появится в таблице.'}
           </p>
           {scope === 'friends' && (
-            <button type="button" className="btn btn-gold" onClick={() => void shareInvite()}>
-              <Icon name="users" size={17} />
+            <button type="button" className="btn btn-primary" onClick={() => void shareInvite()}>
               Пригласить друга
             </button>
           )}
@@ -166,69 +145,49 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
       {!loading && !error && rows.length > 0 && (
         <>
-          <div className="podium">
-            {[1, 0, 2].map((index) => {
-              const row = podium[index];
-              if (!row) return <div key={`empty-${index}`} className={cn('podium-card', 'podium-empty', `place-${index + 1}`)} />;
-              return (
-                <div key={row.rank} className={cn('podium-card', `place-${index + 1}`, row.isMe && 'is-me')}>
-                  {index === 0 && <span className="podium-crown"><Icon name="crown" size={18} /></span>}
-                  <span className={cn('podium-avatar', `place-${index + 1}`)}>
-                    {initialOf(row.name)}
-                  </span>
-                  <span className="podium-name">{row.isMe ? 'Ты' : row.name}</span>
-                  <span className="podium-value">{valueFor(row)}</span>
-                  <span className="podium-place">{index + 1}</span>
-                </div>
-              );
-            })}
+          <div className="rank-head">
+            <span className="label">{metric === 'endless' ? 'Клеток' : 'Уровень'}</span>
+            <span className="label">{scope === 'friends' ? 'Друзья' : 'Все игроки'}</span>
           </div>
-
-          <div className="leader-list">
-            {rest.map((row) => (
-              <div key={`${row.rank}-${row.name}`} className={cn('leader-row', row.isMe && 'is-me')}>
-                <span className="leader-rank">{row.rank}</span>
-                <span className="leader-avatar">{initialOf(row.name)}</span>
-                <span className="leader-name">
+          <div className="rank-list">
+            {rows.map((row) => (
+              <div key={`${row.rank}-${row.name}`} className={cn('rank-row', row.isMe && 'is-me')}>
+                <span className="rank-no">{row.rank}</span>
+                <span className="rank-name">
                   {row.name}
-                  {row.isMe && <em>ты</em>}
+                  {row.isMe && <em>вы</em>}
                 </span>
-                <span className="leader-value">{valueFor(row)}</span>
+                <span className="rank-value">{valueFor(row)}</span>
               </div>
             ))}
           </div>
 
           {myRank > 0 && (
-            <div className="my-rank-row">
-              <Icon name="spark" size={15} />
-              Твоё место: <b>#{myRank}</b>
+            <div className="rank-head">
+              <span className="label">Ваше место</span>
+              <span className="rank-value">{myRank}</span>
             </div>
           )}
         </>
       )}
 
       {scope === 'friends' && rows.length > 0 && (
-        <div className="invite-card">
-          <div className="invite-art"><Icon name="users" size={24} /></div>
-          <div>
-            <b>Позови друга</b>
-            <p>Он появится в таблице друзей, а вы оба получите по 25 🪙.</p>
-          </div>
-          <button type="button" className="btn btn-gold" onClick={() => void shareInvite()}>
-            <Icon name="share" size={15} />
-            Позвать
+        <div className="invite-block">
+          <b>Позвать друга</b>
+          <p>Он появится в таблице друзей, а вы оба получите по 25 монет.</p>
+          <button type="button" className="btn btn-outline" onClick={() => void shareInvite()}>
+            Отправить ссылку
           </button>
         </div>
       )}
 
       <p className="records-footnote">
         {scope === 'friends'
-          ? 'Друзья — те, кто пришёл по твоей ссылке. Контакты Telegram игра не запрашивает.'
+          ? 'Друзья это те, кто пришёл по вашей ссылке. Контакты Telegram игра не запрашивает.'
           : 'Рекорд фиксируется после завершения забега. Гости в мировой таблице не участвуют.'}
       </p>
 
       <button type="button" className="records-shop-link" onClick={goShop}>
-        <Icon name="bag" size={15} />
         Заглянуть в магазин
       </button>
     </div>

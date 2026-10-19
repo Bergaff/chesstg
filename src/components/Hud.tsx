@@ -1,42 +1,31 @@
 import type { ReactNode } from 'react';
 import type { Profile } from '../lib/types';
 import { formatNumber } from '../lib/format';
-import { Icon } from './Icon';
 
-interface HudProps {
-  profile: Profile;
-  onCoins?: () => void;
-  onLives?: () => void;
-  compact?: boolean;
-}
-
-export function Hud({ profile, onCoins, onLives, compact }: HudProps): ReactNode {
+export function Hud({ profile, onCoins, onLives }: { profile: Profile; onCoins?: () => void; onLives?: () => void; compact?: boolean }): ReactNode {
   return (
-    <div className={compact ? 'hud hud-compact' : 'hud'}>
-      <button type="button" className="hud-pill hud-lives" onClick={onLives} aria-label={`Жизни: ${profile.lives} из ${profile.maxLives}`}>
-        <Icon name="heart" size={16} />
-        <span>
-          <b>{profile.lives}</b>
-          <em>/{profile.maxLives}</em>
-        </span>
+    <>
+      <button type="button" className="topbar-stat" onClick={onLives} aria-label={`Жизни: ${profile.lives} из ${profile.maxLives}`}>
+        <span className="label">Жизни</span>
+        <b>
+          {profile.lives}<span style={{ color: 'var(--dim)' }}>/{profile.maxLives}</span>
+        </b>
       </button>
-      <button type="button" className="hud-pill hud-coins" onClick={onCoins} aria-label={`Монеты: ${profile.coins}`}>
-        <Icon name="coin" size={17} />
-        <span>{formatNumber(profile.coins)}</span>
+      <button type="button" className="topbar-stat" onClick={onCoins} aria-label={`Монеты: ${profile.coins}`}>
+        <span className="label">Монеты</span>
+        <b>{formatNumber(profile.coins)}</b>
       </button>
-    </div>
+    </>
   );
 }
 
 export function ProfileChip({ profile }: { profile: Profile }): ReactNode {
   return (
-    <div className="profile-chip">
-      <div className="profile-avatar">
-        <span>{profile.name.trim()[0]?.toUpperCase() ?? '♟'}</span>
-      </div>
-      <div className="profile-meta">
-        <span className="profile-name">{profile.name}</span>
-        <span className="profile-sub">
+    <div className="identity">
+      <div className="avatar">{profile.name.trim()[0]?.toUpperCase() ?? 'П'}</div>
+      <div>
+        <span className="identity-name">{profile.name}</span>
+        <span className="identity-sub">
           {profile.isGuest ? 'гостевой режим' : `уровень ${profile.maxLevel}`}
         </span>
       </div>
@@ -46,12 +35,15 @@ export function ProfileChip({ profile }: { profile: Profile }): ReactNode {
 
 export function HeartsRow({ lives, maxLives, className }: { lives: number; maxLives: number; className?: string }): ReactNode {
   return (
-    <div className={className ? `hearts-row ${className}` : 'hearts-row'} aria-label={`${lives} из ${maxLives} жизней`}>
+    <span
+      className={className ? `hearts ${className}` : 'hearts'}
+      aria-label={`${lives} из ${maxLives} жизней`}
+    >
       {Array.from({ length: maxLives }).map((_, index) => (
-        <span key={index} className={index < lives ? 'heart heart-full' : 'heart heart-empty'}>
-          <Icon name="heart" size={17} />
+        <span key={index} className={index < lives ? 'heart-filled' : 'heart-empty'}>
+          ♥
         </span>
       ))}
-    </div>
+    </span>
   );
 }

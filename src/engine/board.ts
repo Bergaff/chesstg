@@ -54,7 +54,7 @@ export function canSkip(state: GameState): boolean {
 
 /**
  * Клетки, куда вражеская фигура может пойти по классическим правилам.
- * Игрок — единственная фигура, которую враг может «съесть»; враги друг друга
+ * Игрок, единственная фигура, которую враг может «съесть»; враги друг друга
  * не бьют и не проходят сквозь друг друга.
  */
 export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
@@ -69,7 +69,7 @@ export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
   switch (enemy.type) {
     case 'pawn': {
       // Вражеская пешка идёт на 1 клетку вниз (к игроку) и бьёт по диагонали вниз.
-      // На клетку игрока вперёд пешка не встаёт — только бьёт диагонально.
+      // На клетку игрока вперёд пешка не встаёт, только бьёт диагонально.
       if (inside(state, enemy.x, enemy.y - 1)) {
         if (!isPlayerAt(state, enemy.x, enemy.y - 1) && !enemyAt(state, enemy.x, enemy.y - 1, enemy.id)) {
           moves.push({ x: enemy.x, y: enemy.y - 1 });
@@ -216,7 +216,7 @@ export function chooseEnemyMove(state: GameState, enemy: Enemy): Cell | null {
     if (a.chebyshev !== b.chebyshev) return a.chebyshev - b.chebyshev;
     if (a.alignment !== b.alignment) return b.alignment - a.alignment;
     // Из двух равных вариантов предпочитаем тот, что выше к финишу,
-    // затем левее — так поведение остаётся воспроизводимым.
+    // затем левее, так поведение остаётся воспроизводимым.
     if (a.y !== b.y) return b.y - a.y;
     return a.x - b.x;
   });

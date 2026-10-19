@@ -6,7 +6,7 @@ export type GameMode = 'campaign' | 'endless';
 
 export type GameStatus = 'playing' | 'won' | 'lost';
 
-/** -1 — влево-вперёд, 0 — вперёд, 1 — вправо-вперёд. */
+/** -1, влево-вперёд, 0, вперёд, 1, вправо-вперёд. */
 export type MoveDx = -1 | 0 | 1;
 
 export type BuffKind = 'freeze' | 'shield';

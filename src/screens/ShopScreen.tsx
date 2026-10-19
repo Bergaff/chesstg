@@ -15,15 +15,16 @@ import { api, ApiError } from '../lib/api';
 import { cn, formatNumber } from '../lib/format';
 import { getTg, hapticNotify, openInvoice } from '../lib/telegram';
 import type { BonusUseResponse, Profile } from '../lib/types';
-import { Icon } from '../components/Icon';
 import { Modal } from '../components/Modal';
 
 interface ShopScreenProps {
   onBack: () => void;
   initialTab?: ShopTab;
+  onTerms: () => void;
+  onPrivacy: () => void;
 }
 
-export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps): ReactNode {
+export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy }: ShopScreenProps): ReactNode {
   const { profile, config, setProfile, refresh, toast } = useApp();
   const [tab, setTab] = useState<ShopTab>(initialTab);
   const [buyingBonus, setBuyingBonus] = useState<BonusId | null>(null);
@@ -65,7 +66,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
       const response = await api<{ profile: Profile }>('/api/profile/skin', { method: 'POST', body: { skin } });
       setProfile(response.profile);
       hapticNotify('success');
-      toast(`${SKINS[skin].name} — теперь твой образ`, 'success');
+      toast(`${SKINS[skin].name}, теперь ваш образ`, 'success');
     } catch (error) {
       toast(error instanceof ApiError ? error.message : 'Не удалось выбрать скин', 'error');
     } finally {
@@ -119,7 +120,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
         setPurchaseDone(sku);
         hapticNotify('success');
       } else {
-        toast('Платёж обрабатывается. Проверь профиль через минуту.', 'info');
+        toast('Платёж обрабатывается. Проверьте профиль через минуту.', 'info');
       }
     } catch (error) {
       toast(error instanceof ApiError ? error.message : 'Покупка не прошла', 'error');
@@ -131,37 +132,40 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
   return (
     <div className="screen shop-screen">
       <header className="page-top">
-        <button type="button" className="icon-btn" onClick={onBack} aria-label="Назад">
-          <Icon name="back" size={20} />
+        <button type="button" className="back-btn" onClick={onBack} aria-label="Назад">
+          ←
         </button>
-        <div className="page-title">
-          <span>Витрина</span>
-          <b>Магазин</b>
+        <div className="page-heading" style={{ flex: 1 }}>
+          <span className="label">Витрина</span>
+          <h1 className="page-title">Магазин</h1>
         </div>
-        <span className="shop-coins">
-          <Icon name="coin" size={17} />
-          {formatNumber(profile.coins)}
-        </span>
+        <div className="page-side">
+          <span className="label">Монеты</span>
+          <b>{formatNumber(profile.coins)}</b>
+        </div>
       </header>
 
-      <div className="segmented shop-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === 'bonuses'} className={tab === 'bonuses' ? 'active' : ''} onClick={() => setTab('bonuses')}>
+      <div className="tabs" role="tablist">
+        <button type="button" role="tab" aria-selected={tab === 'bonuses'} className={cn('tab', tab === 'bonuses' && 'active')} onClick={() => setTab('bonuses')}>
           Бонусы
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'skins'} className={tab === 'skins' ? 'active' : ''} onClick={() => setTab('skins')}>
+        <button type="button" role="tab" aria-selected={tab === 'skins'} className={cn('tab', tab === 'skins' && 'active')} onClick={() => setTab('skins')}>
           Скины
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'stars'} className={tab === 'stars' ? 'active' : ''} onClick={() => setTab('stars')}>
+        <button type="button" role="tab" aria-selected={tab === 'stars'} className={cn('tab', tab === 'stars' && 'active')} onClick={() => setTab('stars')}>
           Звёзды
         </button>
       </div>
 
       {tab === 'bonuses' && (
-        <div className="shop-body">
+        <div>
           <div className="shop-intro">
-            <span className="eyebrow">За монеты</span>
-            <h2>Купи спокойствие</h2>
-            <p>Монеты дают за победы в кампании и рекорды в бесконечном режиме. Бонусы лежат в инвентаре до нужного момента.</p>
+            <span className="label">За монеты</span>
+            <h2>Бонусы на партию</h2>
+            <p>
+              Монеты начисляют за пройденные уровни и рекорды в бесконечном режиме. Бонусы лежат в
+              инвентаре и тратятся по команде.
+            </p>
           </div>
 
           <div className="shop-list">
@@ -170,73 +174,68 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
               const count = profile.inventory[kind];
               const affordable = profile.coins >= bonus.price;
               return (
-                <div className="shop-item" key={kind}>
-                  <span className={`shop-item-icon icon-${kind}`}>
-                    <Icon name={kind === 'hint' ? 'bulb' : kind === 'freeze' ? 'snow' : 'undo'} size={22} />
-                  </span>
-                  <div className="shop-item-copy">
-                    <div className="shop-item-head">
-                      <b>{bonus.name}</b>
-                      {count > 0 && <span className="owned-count">×{count}</span>}
+                <div className="shop-row" key={kind}>
+                  <div className="shop-row-main">
+                    <div className="shop-row-title">
+                      {bonus.name}
+                      {count > 0 && <span className="owned-count">в запасе {count}</span>}
                     </div>
-                    <p>{bonus.description}</p>
-                    <div className="shop-item-price">
-                      <Icon name="coin" size={14} />
-                      {bonus.price}
-                    </div>
+                    <p className="shop-row-desc">{bonus.description}</p>
+                    <div className="shop-row-price">{bonus.price} монет</div>
                   </div>
                   <button
                     type="button"
-                    className={cn('buy-btn', !affordable && 'is-poor')}
+                    className="buy-btn"
                     onClick={() => void buyBonus(kind)}
                     disabled={buyingBonus !== null || !affordable}
                   >
-                    {buyingBonus === kind ? '…' : 'Купить'}
+                    {buyingBonus === kind ? 'Покупка' : affordable ? 'Купить' : 'Мало монет'}
                   </button>
                 </div>
               );
             })}
           </div>
 
-          <div className="tip-card">
-            <Icon name="bulb" size={18} />
-            <p>Бонус можно купить прямо во время партии — цена спишется автоматически. Если монет не хватит, игра предложит заработать их за рекламу.</p>
+          <div className="notice">
+            <span className="label">Как это работает</span>
+            <span>
+              Бонус можно взять прямо в партии. Если монет не хватит, игра предложит посмотреть
+              рекламу в меню или дождаться новой награды.
+            </span>
           </div>
 
-          <button type="button" className="btn btn-ghost show-stars" onClick={() => setTab('stars')}>
-            <Icon name="star" size={17} />
-            Жизни и отключение рекламы за ⭐
-          </button>
+          <div className="legal-link-row">
+            <button type="button" onClick={onTerms}>Условия использования</button>
+            <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+          </div>
         </div>
       )}
 
       {tab === 'skins' && (
-        <div className="shop-body">
-          <div className={cn('skin-feature', ownedSet && 'is-owned')}>
-            <div className="skin-feature-art">
-              {(['gold', 'neon', 'royal'] as SkinId[]).map((skin) => (
-                <span key={skin} className={cn('skin-demo', `skin-${skin}`)}>
-                  <span>{SKINS[skin].pawn}</span>
-                </span>
-              ))}
+        <div>
+          <div className="skin-feature">
+            <div className="feature-pawns" aria-hidden="true">
+              <span>♟</span>
+              <span>♟</span>
+              <span>♟</span>
             </div>
-            <div className="skin-feature-copy">
-              <span className="eyebrow">Набор из трёх</span>
-              <h2>Другой образ пешки</h2>
-              <p>Золото, неон и королевский стиль. Скины меняют только внешний вид — правила остаются прежними.</p>
-            </div>
+            <span className="label label-accent">Набор из трёх</span>
+            <h2>{ownedSet ? 'Набор открыт' : 'Другой образ пешки'}</h2>
+            <p>
+              Золото, полночь и лилия. Скин меняет только вид пешки, правила остаются
+              прежними.
+            </p>
             {ownedSet ? (
-              <span className="owned-badge"><Icon name="check" size={14} /> Куплено</span>
+              <p className="modal-note">Все три образа уже в коллекции, выберите любой ниже.</p>
             ) : (
-              <button type="button" className="btn btn-gold" onClick={() => void buyProduct('skins')} disabled={paying !== null}>
-                <Icon name="star" size={16} />
-                {paying === 'skins' ? 'Открываем…' : `Набор · ${PRODUCTS.skins.stars} ⭐`}
+              <button type="button" className="btn btn-primary" onClick={() => void buyProduct('skins')} disabled={paying !== null}>
+                {paying === 'skins' ? 'Открываем' : `Набор за ${PRODUCTS.skins.stars} звёзд`}
               </button>
             )}
           </div>
 
-          <div className="section-label">Выбери образ</div>
-          <div className="skin-grid">
+          <span className="label section-label">Выберите образ</span>
+          <div className="skin-list">
             {SKIN_ORDER.map((skin) => {
               const owned = profile.skins.includes(skin);
               const active = profile.skin === skin;
@@ -244,57 +243,60 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
                 <button
                   type="button"
                   key={skin}
-                  className={cn('skin-card', active && 'is-active', !owned && 'is-locked')}
+                  className={cn('skin-row', active && 'active')}
                   onClick={() => void selectSkin(skin)}
                   disabled={selectingSkin !== null}
                 >
-                  <span className={cn('skin-preview', `skin-${skin}`)}>
-                    <span>{SKINS[skin].pawn}</span>
-                    {!owned && <span className="skin-lock"><Icon name="lock" size={14} /></span>}
+                  <span className={cn('skin-swatch', `skin-${skin}`)} aria-hidden="true">
+                    {SKINS[skin].pawn}
                   </span>
-                  <span className="skin-name">{SKINS[skin].name}</span>
-                  <span className="skin-desc">{owned ? (active ? 'выбран' : 'открыт') : 'в наборе'}</span>
-                  {active && <span className="skin-check"><Icon name="check" size={13} /></span>}
+                  <span className="skin-row-main">
+                    <span className="skin-name">{SKINS[skin].name}</span>
+                    <span className="skin-desc">
+                      {SKINS[skin].description}. {owned ? '' : 'Входит в набор.'}
+                    </span>
+                  </span>
+                  <span className="skin-state">{active ? 'выбран' : owned ? 'открыт' : 'закрыт'}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="tip-card">
-            <Icon name="spark" size={18} />
-            <p>Один набор открывает все три скина навсегда. Выбрать можно в любой момент, даже во время партии.</p>
-          </div>
+          <p className="ledger">
+            Один набор открывает все три скина навсегда. Выбрать можно в любой момент, даже в
+            середине партии.
+          </p>
         </div>
       )}
 
       {tab === 'stars' && (
-        <div className="shop-body">
+        <div>
           <div className="shop-intro">
-            <span className="eyebrow">Telegram Stars</span>
+            <span className="label">Telegram Stars</span>
             <h2>Поддержать игру</h2>
-            <p>Звёзды — внутренняя валюта Telegram. Покупки приходят мгновенно и сохраняются в профиле.</p>
+            <p>
+              Звёзды это внутренняя валюта Telegram. Покупки приходят сразу и остаются в профиле.
+            </p>
           </div>
 
           {!config.paymentsEnabled && (
-            <div className="notice-card">
-              <Icon name="spark" size={18} />
-              <p>В этой сборке оплата звёздами ещё не подключена. Настрой бота — и витрина заработает.</p>
+            <div className="notice">
+              <span className="label">Внимание</span>
+              <span>В этой сборке оплата звёздами ещё не подключена. Настройте бота, и витрина заработает.</span>
             </div>
           )}
 
-          <div className="shop-list stars-list">
+          <div className="shop-list">
             <ProductCard
               sku="lives"
-              icon="heart"
               disabled={profile.lives >= profile.maxLives || paying !== null}
-              note={profile.lives >= profile.maxLives ? 'Жизни уже полны' : 'Мгновенно восстановит все 5 жизней'}
+              note={profile.lives >= profile.maxLives ? 'Жизни уже полны' : 'Мгновенно восстанавливает все пять жизней'}
               onBuy={() => void buyProduct('lives')}
               paying={paying === 'lives'}
               owned={false}
             />
             <ProductCard
               sku="noads"
-              icon="shield"
               disabled={profile.adFree || paying !== null}
               note={profile.adFree ? 'Реклама уже отключена' : 'Никаких роликов и предложений навсегда'}
               onBuy={() => void buyProduct('noads')}
@@ -303,32 +305,38 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
             />
             <ProductCard
               sku="skins"
-              icon="crown"
               disabled={ownedSet || paying !== null}
-              note={ownedSet ? 'Все скины уже открыты' : 'Золото, неон и корона для пешки'}
+              note={ownedSet ? 'Все скины уже открыты' : 'Золото, полночь и лилия'}
               onBuy={() => void buyProduct('skins')}
               paying={paying === 'skins'}
               owned={ownedSet}
             />
           </div>
 
-          <p className="purchase-note">
-            Оплата проходит через Telegram. Если платёж не пришёл сразу, подожди минуту и обнови профиль.
+          <p className="stars-note">
+            Оплата проходит в Telegram. Если покупка не пришла сразу, подождите минуту и обновите
+            профиль. Возврат регулируется правилами Telegram.
           </p>
+
+          <div className="legal-link-row">
+            <button type="button" onClick={onTerms}>Условия использования</button>
+            <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+          </div>
         </div>
       )}
 
       {setModal && (
         <Modal onClose={() => setSetModal(false)} showClose>
-          <div className="result-orb result-orb-gold"><Icon name="crown" size={30} /></div>
-          <h2 className="modal-title">Набор скинов</h2>
-          <p className="modal-text">Три образа пешки — золото, неон и корона — открываются одним набором навсегда.</p>
+          <span className="label">Набор скинов</span>
+          <h2 className="modal-title">Три образа пешки</h2>
+          <p className="modal-text">
+            Золото, полночь и лилия открываются одним набором навсегда.
+          </p>
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={() => { setSetModal(false); void buyProduct('skins'); }} disabled={paying !== null}>
-              <Icon name="star" size={16} />
-              Купить за {PRODUCTS.skins.stars} ⭐
+            <button type="button" className="btn btn-primary" onClick={() => { setSetModal(false); void buyProduct('skins'); }} disabled={paying !== null}>
+              Купить за {PRODUCTS.skins.stars} звёзд
             </button>
-            <button type="button" className="btn btn-text" onClick={() => setSetModal(false)}>
+            <button type="button" className="btn btn-quiet" onClick={() => setSetModal(false)}>
               Позже
             </button>
           </div>
@@ -337,18 +345,17 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
 
       {purchaseDone && (
         <Modal onClose={() => setPurchaseDone(null)}>
-          <div className="result-orb result-orb-gold"><Icon name="check" size={32} /></div>
-          <span className="eyebrow">Готово</span>
+          <span className="label">Готово</span>
           <h2 className="modal-title">Покупка зачислена</h2>
           <p className="modal-text">
             {purchaseDone === 'lives'
-              ? 'Все пять жизней восстановлены. Возвращайся на поле.'
+              ? 'Все пять жизней восстановлены. Возвращайтесь на поле.'
               : purchaseDone === 'noads'
-                ? 'Реклама отключена навсегда. Спасибо, что поддерживаешь игру!'
+                ? 'Реклама отключена навсегда. Спасибо, что поддерживаете игру.'
                 : 'Набор скинов открыт. Золотой образ уже на пешке.'}
           </p>
           <div className="modal-actions">
-            <button type="button" className="btn btn-gold" onClick={() => setPurchaseDone(null)}>
+            <button type="button" className="btn btn-primary" onClick={() => setPurchaseDone(null)}>
               Отлично
             </button>
           </div>
@@ -360,7 +367,6 @@ export function ShopScreen({ onBack, initialTab = 'bonuses' }: ShopScreenProps):
 
 function ProductCard({
   sku,
-  icon,
   note,
   disabled,
   owned,
@@ -368,32 +374,25 @@ function ProductCard({
   onBuy,
 }: {
   sku: ProductSku;
-  icon: 'heart' | 'shield' | 'crown';
-  note: string;
   disabled: boolean;
   owned: boolean;
   paying: boolean;
+  note: string;
   onBuy: () => void;
 }): ReactNode {
   const product = PRODUCTS[sku];
   return (
-    <div className={cn('shop-item product-card', owned && 'is-owned')}>
-      <span className={cn('shop-item-icon', `product-${sku}`)}>
-        <Icon name={icon} size={22} />
-      </span>
-      <div className="shop-item-copy">
-        <div className="shop-item-head">
-          <b>{product.title}</b>
+    <div className="shop-row">
+      <div className="shop-row-main">
+        <div className="shop-row-title">
+          {product.title}
           {product.badge && <span className="owned-count">{product.badge}</span>}
         </div>
-        <p>{note}</p>
-        <div className="shop-item-price stars-price">
-          <Icon name="star" size={14} />
-          {product.stars}
-        </div>
+        <p className="shop-row-desc">{note}</p>
+        <div className="shop-row-price">{product.stars} звёзд</div>
       </div>
       <button type="button" className="buy-btn" onClick={onBuy} disabled={disabled}>
-        {owned ? 'Есть' : paying ? '…' : 'Купить'}
+        {owned ? 'Есть' : paying ? 'Оплата' : 'Купить'}
       </button>
     </div>
   );

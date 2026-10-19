@@ -46,7 +46,7 @@ function loadScript(src: string): Promise<void> {
 
 /**
  * Показывает Rewarded Video Adsgram.
- * true — ролик досмотрен, false — пользователь закрыл/реклама не вышла.
+ * true, ролик досмотрен, false, пользователь закрыл/реклама не вышла.
  */
 export async function showAdsgram(blockId: string, src: string): Promise<boolean> {
   if (!blockId) throw new Error('ads_not_configured');

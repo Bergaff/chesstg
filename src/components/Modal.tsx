@@ -1,18 +1,21 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { cn } from '../lib/format';
-import { Icon } from './Icon';
 
-interface ModalProps {
+export function Modal({
+  children,
+  onClose,
+  dismissible = true,
+  className,
+  showClose,
+  labelledBy,
+}: {
   children: ReactNode;
   onClose?: () => void;
   dismissible?: boolean;
   className?: string;
   showClose?: boolean;
   labelledBy?: string;
-}
-
-export function Modal({ children, onClose, dismissible = true, className, showClose, labelledBy }: ModalProps) {
+}) {
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -33,10 +36,10 @@ export function Modal({ children, onClose, dismissible = true, className, showCl
         if (event.target === event.currentTarget && dismissible) onClose?.();
       }}
     >
-      <div className={cn('modal', className)} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
+      <div className={className ? `modal ${className}` : 'modal'} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
         {showClose && (
-          <button type="button" className="modal-close icon-btn" aria-label="Закрыть" onClick={onClose}>
-            <Icon name="close" size={18} />
+          <button type="button" className="modal-close" aria-label="Закрыть" onClick={onClose}>
+            ×
           </button>
         )}
         {children}
@@ -44,8 +47,4 @@ export function Modal({ children, onClose, dismissible = true, className, showCl
     </div>,
     document.body,
   );
-}
-
-export function ModalActions({ children }: { children: ReactNode }) {
-  return <div className="modal-actions">{children}</div>;
 }

@@ -178,8 +178,8 @@ describe('UI smoke', () => {
     await boot();
     expect(screen.getByText('против всех')).toBeTruthy();
     expect(screen.getByText(/Продолжить|Играть/)).toBeTruthy();
-    expect(screen.getByText('Бонусы и скины')).toBeTruthy();
-    expect(screen.getByText('Лидеры и друзья')).toBeTruthy();
+    expect(screen.getByText(/Бонусы за монеты/)).toBeTruthy();
+    expect(screen.getByText(/Мировая таблица и друзья/)).toBeTruthy();
     expect(screen.getByText(/Гостевой режим/)).toBeTruthy();
     expect(screen.getByText('Реклама за монеты')).toBeTruthy();
   });
@@ -188,25 +188,25 @@ describe('UI smoke', () => {
     await boot();
     fireEvent.click(screen.getAllByRole('button', { name: 'Правила игры' })[0]);
     expect(await screen.findByRole('dialog')).toBeTruthy();
-    expect(screen.getByText('Ходи только вперёд')).toBeTruthy();
-    expect(screen.getByText(/Появляется с 15 уровня/)).toBeTruthy();
+    expect(screen.getByText('Только вперёд')).toBeTruthy();
+    expect(screen.getByText(/Появляется на пятнадцатом уровне/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Закрыть' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('ходит по экранам магазина и рекордов', async () => {
     await boot();
-    fireEvent.click(screen.getByText('Бонусы и скины').closest('button')!);
-    expect(await screen.findByText('Купи спокойствие')).toBeTruthy();
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    expect(await screen.findByText('Бонусы на партию')).toBeTruthy();
     expect(screen.getByText('Подсказка')).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'Скины' }));
     expect(await screen.findByText('Другой образ пешки')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
 
-    fireEvent.click(await screen.findByText('Лидеры и друзья'));
+    fireEvent.click(await screen.findByText(/Мировая таблица и друзья/));
     expect(await screen.findByText('Таблица лидеров')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('Гроссмейстер')).toBeTruthy());
-    expect(screen.getByText('клеток')).toBeTruthy();
+    expect(screen.getAllByText(/клеток/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
     expect(await screen.findByText('против всех')).toBeTruthy();
 
@@ -249,9 +249,9 @@ describe('UI smoke', () => {
     await screen.findByRole('grid', { name: 'Игровое поле' });
     fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
 
-    expect(await screen.findByText('Финиш!', undefined, { timeout: 3000 })).toBeTruthy();
-    expect(screen.getByText('Следующий уровень')).toBeTruthy();
-    expect(screen.getByText('+10')).toBeTruthy();
+    expect(await screen.findByText('Пешка дошла', undefined, { timeout: 3000 })).toBeTruthy();
+    expect(screen.getAllByText('Следующий уровень').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('+10').length).toBeGreaterThan(0);
     expect(screen.getByText('Бросить вызов')).toBeTruthy();
   });
 
@@ -285,15 +285,37 @@ describe('UI smoke', () => {
     expect(await screen.findByText('Пешка поймана', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText(/Минус одна жизнь/)).toBeTruthy();
     expect(screen.getByText('Ещё раз')).toBeTruthy();
-    expect(screen.getByText(/Смотреть рекламу \+1/)).toBeTruthy();
+    expect(screen.getByText('Смотреть рекламу за жизнь')).toBeTruthy();
+  });
+
+  it('открывает условия и политику из меню и магазина', async () => {
+    await boot();
+    fireEvent.click(screen.getByRole('button', { name: 'Условия' }));
+    expect(await screen.findByText('Условия использования')).toBeTruthy();
+    expect(screen.getByText('1. О сервисе')).toBeTruthy();
+    expect(screen.getByText(/Виртуальные ценности/)).toBeTruthy();
+
+    // переключение внутри правового экрана
+    fireEvent.click(screen.getByRole('button', { name: 'Политика конфиденциальности' }));
+    expect(await screen.findByText('Политика конфиденциальности')).toBeTruthy();
+    expect(screen.getByText('1. Какие данные мы получаем')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    expect(await screen.findByText('против всех')).toBeTruthy();
+
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    expect(await screen.findByText('Бонусы на партию')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Конфиденциальность' }));
+    expect(await screen.findByText('Политика конфиденциальности')).toBeTruthy();
+    expect(screen.getByText('5. Где хранятся данные')).toBeTruthy();
   });
 
   it('покупает бонус в магазине', async () => {
     await boot();
-    fireEvent.click(screen.getByText('Бонусы и скины').closest('button')!);
-    await screen.findByText('Купи спокойствие');
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    await screen.findByText('Бонусы на партию');
     fireEvent.click(screen.getAllByRole('button', { name: 'Купить' })[0]);
-    await waitFor(() => expect(screen.getByText('×1')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/в запасе 1/)).toBeTruthy());
     expect(screen.getByText('10')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/shop/bonus')).toBe(true);
   });

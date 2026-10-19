@@ -9,13 +9,13 @@ import { ToastStack, type ToastItem, type ToastKind } from './components/Toast';
 import { DemoAd } from './components/DemoAd';
 import { NoLivesModal } from './components/NoLivesModal';
 import { RulesModal } from './components/RulesModal';
-import { Icon } from './components/Icon';
 import { MenuScreen } from './screens/MenuScreen';
 import { GameScreen } from './screens/GameScreen';
 import { ShopScreen } from './screens/ShopScreen';
 import { RecordsScreen } from './screens/RecordsScreen';
+import { LegalScreen } from './screens/LegalScreen';
 
-type Screen = 'menu' | 'game' | 'shop' | 'records';
+type Screen = 'menu' | 'game' | 'shop' | 'records' | 'terms' | 'privacy';
 
 interface DemoRequest {
   label: string;
@@ -33,14 +33,20 @@ export default function App(): ReactNode {
   const [demoRequest, setDemoRequest] = useState<DemoRequest | null>(null);
   const [noLivesOpen, setNoLivesOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [legalReturn, setLegalReturn] = useState<Screen>('menu');
   const [reloadKey, setReloadKey] = useState(0);
 
   const toastId = useRef(0);
   const sessionRef = useRef<SessionResponse | null>(null);
+  const screenRef = useRef<Screen>('menu');
 
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
 
   useEffect(() => {
     initTelegram();
@@ -95,7 +101,7 @@ export default function App(): ReactNode {
       }
       try {
         const rewarded = await showAdsgram(config.adsgram.blockId, config.adsgram.src);
-        if (!rewarded) toast('Ролик закрыт — награда не начислена', 'info');
+        if (!rewarded) toast('Ролик закрыт, награда не начислена', 'info');
         return rewarded;
       } catch {
         toast('Реклама временно недоступна', 'error');
@@ -119,7 +125,7 @@ export default function App(): ReactNode {
         setSession(response);
         setBootError(null);
         if (response.referral?.rewarded) {
-          toast(`Приглашение сработало: +${response.referral.bonus} 🪙`, 'success');
+          toast(`Приглашение сработало: +${response.referral.bonus}  монет`, 'success');
         }
       } catch (error) {
         if (cancelled) return;
@@ -130,7 +136,7 @@ export default function App(): ReactNode {
               hint: 'Открой игру через кнопку в Telegram-боте. В браузере прогресс доступен только в гостевом режиме.',
             });
           } else if (error.code === 'network') {
-            setBootError({ message: 'Нет связи с сервером', hint: 'Проверь интернет и попробуй ещё раз.' });
+            setBootError({ message: 'Нет связи с сервером', hint: 'Проверьте интернет и попробуйте ещё раз.' });
           } else {
             setBootError({ message: error.message, hint: 'Попробуй обновить экран.' });
           }
@@ -192,6 +198,18 @@ export default function App(): ReactNode {
     void refresh();
   }, [refresh]);
 
+  const openLegal = useCallback((kind: 'terms' | 'privacy') => {
+    setLegalReturn((current) => (current === 'terms' || current === 'privacy' ? current : screenRef.current));
+    setRulesOpen(false);
+    setScreen(kind);
+    window.scrollTo(0, 0);
+  }, []);
+
+  const switchLegal = useCallback((kind: 'terms' | 'privacy') => {
+    setScreen(kind);
+    window.scrollTo(0, 0);
+  }, []);
+
   const play = useCallback(
     (mode: GameMode) => {
       if (!session) return;
@@ -235,32 +253,25 @@ export default function App(): ReactNode {
       goShop,
       goShopStars,
       goRecords,
+      openTerms: () => openLegal('terms'),
+      openPrivacy: () => openLegal('privacy'),
     };
-  }, [goMenu, goRecords, goShop, goShopStars, refresh, session, setProfile, showAd, toast]);
+  }, [goMenu, goRecords, goShop, goShopStars, openLegal, refresh, session, setProfile, showAd, toast]);
 
   if (!session || !contextValue) {
     return (
       <div className="boot-screen">
-        <div className="boot-art" aria-hidden="true">
-          <div className="boot-board">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className={(Math.floor(index / 3) + index) % 2 === 0 ? 'dark' : 'light'} />
-            ))}
-            <span className="boot-rook">♜</span>
-            <span className="boot-knight">♞</span>
-            <span className="boot-pawn">♟</span>
-          </div>
-        </div>
+        <span className="boot-mark" aria-hidden="true">♟</span>
         <h1 className="boot-title">
           Пешка <em>против всех</em>
         </h1>
         {bootError ? (
           <div className="boot-error">
-            <p className="boot-error-title">{bootError.message}</p>
-            <p className="boot-hint">{bootError.hint}</p>
+            <p className="boot-text" style={{ marginTop: 0 }}>{bootError.message}</p>
+            <p className="boot-text" style={{ marginTop: 0 }}>{bootError.hint}</p>
             <button
               type="button"
-              className="btn btn-gold"
+              className="btn btn-primary"
               onClick={() => {
                 setBootError(null);
                 setSession(null);
@@ -269,17 +280,14 @@ export default function App(): ReactNode {
             >
               Повторить
             </button>
-            <button type="button" className="btn btn-text" onClick={() => window.location.reload()}>
+            <button type="button" className="btn btn-quiet" onClick={() => window.location.reload()}>
               Перезагрузить
             </button>
           </div>
         ) : (
-          <div className="boot-loading">
-            <span className="spinner" />
-            <span>Расставляем фигуры…</span>
-          </div>
+          <p className="boot-text">Расставляем фигуры</p>
         )}
-        <footer className="boot-foot">Telegram Mini App · v1.0</footer>
+        <footer className="boot-foot">Telegram Mini App, 2026</footer>
       </div>
     );
   }
@@ -291,13 +299,36 @@ export default function App(): ReactNode {
           <MenuScreen
             onPlay={play}
             onOpenRules={() => setRulesOpen(true)}
+            onTerms={() => openLegal('terms')}
+            onPrivacy={() => openLegal('privacy')}
           />
         )}
         {screen === 'game' && (
-          <GameScreen key={gameKey} mode={gameMode} onExit={exitGame} onNoLives={handleNoLives} />
+          <GameScreen
+            key={gameKey}
+            mode={gameMode}
+            onExit={exitGame}
+            onNoLives={handleNoLives}
+            onTerms={() => openLegal('terms')}
+            onPrivacy={() => openLegal('privacy')}
+          />
         )}
-        {screen === 'shop' && <ShopScreen onBack={goMenu} initialTab={shopTab} />}
+        {screen === 'shop' && (
+          <ShopScreen
+            onBack={goMenu}
+            initialTab={shopTab}
+            onTerms={() => openLegal('terms')}
+            onPrivacy={() => openLegal('privacy')}
+          />
+        )}
         {screen === 'records' && <RecordsScreen onBack={goMenu} />}
+        {(screen === 'terms' || screen === 'privacy') && (
+          <LegalScreen
+            kind={screen}
+            onBack={() => setScreen(legalReturn === 'terms' || legalReturn === 'privacy' ? 'menu' : legalReturn)}
+            onSwitch={switchLegal}
+          />
+        )}
 
         <ToastStack
           items={toasts}
@@ -324,10 +355,18 @@ export default function App(): ReactNode {
             onClose={() => setNoLivesOpen(false)}
             onRefresh={refresh}
             onShop={goShopStars}
+            onTerms={() => openLegal('terms')}
+            onPrivacy={() => openLegal('privacy')}
           />
         )}
 
-        {rulesOpen && <RulesModal onClose={() => setRulesOpen(false)} />}
+        {rulesOpen && (
+          <RulesModal
+            onClose={() => setRulesOpen(false)}
+            onTerms={() => openLegal('terms')}
+            onPrivacy={() => openLegal('privacy')}
+          />
+        )}
       </div>
     </AppContext.Provider>
   );
@@ -336,9 +375,12 @@ export default function App(): ReactNode {
 export function BootFallback(): ReactNode {
   return (
     <div className="boot-screen">
-      <div className="boot-loading">
-        <span className="spinner" />
-        <span>Загружаем игру…</span>
+      <div className="boot-screen">
+        <span className="boot-mark" aria-hidden="true">♟</span>
+        <h1 className="boot-title">
+          Пешка <em>против всех</em>
+        </h1>
+        <p className="boot-text">Загружаем игру</p>
       </div>
     </div>
   );

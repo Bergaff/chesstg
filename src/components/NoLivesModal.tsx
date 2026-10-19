@@ -5,7 +5,6 @@ import { useCountdown } from '../lib/hooks';
 import { hapticNotify } from '../lib/telegram';
 import type { AdRewardResponse, AppConfig, Profile } from '../lib/types';
 import { HeartsRow } from './Hud';
-import { Icon } from './Icon';
 import { Modal } from './Modal';
 
 interface NoLivesModalProps {
@@ -16,6 +15,8 @@ interface NoLivesModalProps {
   onClose: () => void;
   onRefresh: () => Promise<void>;
   onShop: () => void;
+  onTerms: () => void;
+  onPrivacy: () => void;
 }
 
 export function NoLivesModal({
@@ -26,6 +27,8 @@ export function NoLivesModal({
   onClose,
   onRefresh,
   onShop,
+  onTerms,
+  onPrivacy,
 }: NoLivesModalProps): ReactNode {
   const [loading, setLoading] = useState(false);
   const remaining = useCountdown(profile.nextLifeAt, () => {
@@ -43,7 +46,6 @@ export function NoLivesModal({
       hapticNotify('success');
       onClose();
     } catch (error) {
-      /* ошибку показывает вызывающий экран через общий тост */
       if (error instanceof ApiError && error.code === 'cooldown') {
         onRefresh();
       }
@@ -53,42 +55,41 @@ export function NoLivesModal({
   }
 
   return (
-    <Modal onClose={onClose} showClose>
-      <div className="result-hero result-hero-empty">
-        <div className="result-orb">
-          <Icon name="heart" size={34} />
-        </div>
-        <span className="eyebrow">Передышка</span>
-        <h2 className="modal-title" id="no-lives-title">Жизни закончились</h2>
-        <p className="modal-text">
-          Новая жизнь появится через <b>{formatDuration(remaining)}</b>. Или восстанови силы прямо сейчас.
-        </p>
-      </div>
+    <Modal onClose={onClose} showClose labelledBy="no-lives-title">
+      <span className="label">Передышка</span>
+      <h2 className="modal-title" id="no-lives-title">
+        Жизни закончились
+      </h2>
+      <p className="modal-text">
+        Следующая жизнь появится через <b>{formatDuration(remaining)}</b>. Можно подождать или
+        восстановить силы сейчас.
+      </p>
 
-      <HeartsRow lives={profile.lives} maxLives={profile.maxLives} className="hearts-center" />
+      <div className="lives-line">
+        <span>В запасе</span>
+        <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
+      </div>
 
       <div className="modal-actions">
         {!profile.adFree && (
-          <button type="button" className="btn btn-gold" onClick={watchAd} disabled={loading}>
-            <Icon name="play" size={18} />
-            {loading ? 'Загружаем…' : 'Смотреть рекламу +1 ❤️'}
+          <button type="button" className="btn btn-primary" onClick={watchAd} disabled={loading}>
+            {loading ? 'Загрузка' : 'Смотреть рекламу за жизнь'}
           </button>
         )}
-        {profile.adFree && (
-          <div className="hint-line">
-            <Icon name="shield" size={16} /> Реклама отключена
-          </div>
-        )}
-        <button type="button" className="btn btn-ghost" onClick={onShop}>
-          Магазин · +5 жизней за 25 ⭐
+        {profile.adFree && <p className="modal-note">Реклама отключена, ждать придётся естественным путём.</p>}
+        <button type="button" className="btn btn-outline" onClick={onShop}>
+          Магазин: пять жизней за 25 звёзд
         </button>
-        <button type="button" className="btn btn-text" onClick={onClose}>
+        <button type="button" className="btn btn-quiet" onClick={onClose}>
           Подождать
         </button>
       </div>
-      {!config.paymentsEnabled && (
-        <p className="modal-footnote">Оплата звёздами станет доступна после подключения бота.</p>
-      )}
+
+      <div className="legal-link-row">
+        <button type="button" onClick={onTerms}>Условия использования</button>
+        <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+        {!config.paymentsEnabled && <span>Оплата звёздами станет доступна после подключения бота.</span>}
+      </div>
     </Modal>
   );
 }

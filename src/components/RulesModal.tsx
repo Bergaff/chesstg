@@ -1,48 +1,65 @@
 import type { ReactNode } from 'react';
 import { PIECE_GLYPH, PIECE_NAME, type PieceType } from '../engine';
-import { Icon } from './Icon';
 import { Modal } from './Modal';
 
 const ENEMIES: PieceType[] = ['pawn', 'rook', 'bishop', 'knight', 'queen'];
 
 const RULES: Record<PieceType, string> = {
-  pawn: 'Один шаг вниз. Бьёт по диагонали. Вперёд на тебя не нападает.',
-  rook: 'По горизонтали и вертикали на любое расстояние.',
-  bishop: 'По диагонали на любое расстояние.',
-  knight: 'Буквой Г: две клетки в одну сторону и одна в другую.',
-  queen: 'Как ладья и слон вместе. Появляется с 15 уровня.',
+  pawn: 'Шагает на одну клетку вниз и бьёт по диагонали вниз.',
+  rook: 'Ходит по горизонтали и вертикали на любое расстояние.',
+  bishop: 'Ходит по диагонали на любое расстояние.',
+  knight: 'Прыгает буквой Г: две клетки в одну сторону и одна в другую.',
+  queen: 'Сочетает ладью и слона. Появляется на пятнадцатом уровне.',
 };
 
-export function RulesModal({ onClose }: { onClose: () => void }): ReactNode {
+const WHEN: Record<PieceType, string> = {
+  pawn: 'с 1',
+  rook: 'с 3',
+  bishop: 'с 5',
+  knight: 'с 8',
+  queen: 'с 15',
+};
+
+export function RulesModal({
+  onClose,
+  onTerms,
+  onPrivacy,
+}: {
+  onClose: () => void;
+  onTerms: () => void;
+  onPrivacy: () => void;
+}): ReactNode {
   return (
-    <Modal onClose={onClose} showClose className="rules-modal">
-      <span className="eyebrow">Памятка</span>
-      <h2 className="modal-title" id="rules-title">Как играть</h2>
+    <Modal onClose={onClose} showClose className="" labelledBy="rules-title">
+      <span className="label">Памятка</span>
+      <h2 className="modal-title" id="rules-title">
+        Как играть
+      </h2>
       <p className="modal-text">
-        Ты — пешка. Фигуры охотятся по классическим шахматным правилам, но бьют только тебя.
-        Дойди до верхнего ряда и не дай себя поймать.
+        Пешка идёт через доску снизу вверх. Фигуры ходят по шахматным правилам и стараются её поймать.
+        Задача простая: довести пешку до верхнего ряда.
       </p>
 
       <ol className="rules-steps">
         <li>
           <span>1</span>
           <div>
-            <b>Ходи только вперёд</b>
+            <b>Только вперёд</b>
             <p>Прямо, влево-вперёд или вправо-вперёд. Назад и вбок нельзя.</p>
           </div>
         </li>
         <li>
           <span>2</span>
           <div>
-            <b>Обходи фигуры</b>
-            <p>Пешка не бьёт. Если все три клетки впереди закрыты — придётся пропустить ход.</p>
+            <b>Обход фигур</b>
+            <p>Пешка не бьёт. Если все три клетки впереди закрыты, ход пропускается, но фигуры всё равно двигаются.</p>
           </div>
         </li>
         <li>
           <span>3</span>
           <div>
-            <b>Дойди до края</b>
-            <p>Верхний ряд — победа. В бесконечном режиме забирайся как можно выше.</p>
+            <b>Верхний ряд</b>
+            <p>Любая клетка верхнего ряда приносит победу. В бесконечном режиме нужно подняться как можно выше.</p>
           </div>
         </li>
       </ol>
@@ -50,29 +67,33 @@ export function RulesModal({ onClose }: { onClose: () => void }): ReactNode {
       <div className="rules-pieces">
         <div className="rules-pieces-head">
           <span>Фигуры</span>
-          <span>Когда</span>
+          <span>Появляется</span>
         </div>
-        {ENEMIES.map((type, index) => (
+        {ENEMIES.map((type) => (
           <div className="rules-piece" key={type}>
             <span className={`rules-glyph rules-${type}`}>{PIECE_GLYPH[type]}</span>
             <div>
               <b>{PIECE_NAME[type]}</b>
               <p>{RULES[type]}</p>
             </div>
-            <span className="rules-when">{type === 'pawn' ? 'с 1' : type === 'rook' ? 'с 3' : type === 'bishop' ? 'с 5' : type === 'knight' ? 'с 8' : 'с 15'}</span>
+            <span className="rules-when">{WHEN[type]}</span>
           </div>
         ))}
       </div>
 
-      <div className="rules-meta">
-        <div><Icon name="heart" size={16} /> 5 жизней, +1 каждые 30 минут</div>
-        <div><Icon name="coin" size={16} /> монеты за уровни — на бонусы</div>
-        <div><Icon name="shield" size={16} /> щит защищает от фигур три хода</div>
-      </div>
+      <p className="rules-meta">
+        Пять жизней, одна новая каждые 30 минут. Монеты дают за уровни и рекорды, а тратятся на
+        подсказку, заморозку и отмену хода.
+      </p>
 
-      <button type="button" className="btn btn-gold" onClick={onClose}>
+      <button type="button" className="btn btn-primary btn-block" onClick={onClose}>
         Понятно
       </button>
+
+      <div className="legal-link-row">
+        <button type="button" onClick={onTerms}>Условия использования</button>
+        <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+      </div>
     </Modal>
   );
 }

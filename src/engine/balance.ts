@@ -8,7 +8,6 @@ export type BonusId = 'hint' | 'freeze' | 'undo';
 export interface BonusDef {
   id: BonusId;
   name: string;
-  icon: string;
   price: number;
   description: string;
 }
@@ -17,21 +16,18 @@ export const BONUSES: Record<BonusId, BonusDef> = {
   hint: {
     id: 'hint',
     name: 'Подсказка',
-    icon: '💡',
     price: 20,
     description: 'Подсветит безопасный путь на 2 хода',
   },
   freeze: {
     id: 'freeze',
     name: 'Заморозка',
-    icon: '❄️',
     price: 30,
     description: 'Враги не двигаются 2 хода',
   },
   undo: {
     id: 'undo',
     name: 'Отмена хода',
-    icon: '↩️',
     price: 15,
     description: 'Откатит последний ход и ответ врагов',
   },
@@ -44,7 +40,6 @@ export type ProductSku = 'lives' | 'noads' | 'skins';
 export interface ProductDef {
   sku: ProductSku;
   title: string;
-  icon: string;
   stars: number;
   description: string;
   badge?: string;
@@ -54,14 +49,12 @@ export const PRODUCTS: Record<ProductSku, ProductDef> = {
   lives: {
     sku: 'lives',
     title: '+5 жизней',
-    icon: '❤️',
     stars: 25,
     description: 'Мгновенно восстановит все жизни',
   },
   noads: {
     sku: 'noads',
     title: 'Без рекламы',
-    icon: '🚫',
     stars: 150,
     description: 'Навсегда отключает рекламные показы',
     badge: 'Навсегда',
@@ -69,9 +62,8 @@ export const PRODUCTS: Record<ProductSku, ProductDef> = {
   skins: {
     sku: 'skins',
     title: 'Набор скинов',
-    icon: '👑',
     stars: 50,
-    description: 'Три образа пешки: золото, неон и корона',
+    description: 'Три образа пешки: золото, полночь и лилия',
     badge: '3 скина',
   },
 };
@@ -89,10 +81,10 @@ export interface SkinDef {
 }
 
 export const SKINS: Record<SkinId, SkinDef> = {
-  classic: { id: 'classic', name: 'Классика', description: 'Строгая белая пешка', pawn: '♟', free: true },
+  classic: { id: 'classic', name: 'Классика', description: 'Костяная пешка', pawn: '♟', free: true },
   gold: { id: 'gold', name: 'Золото', description: 'Пешка из чистого золота', pawn: '♟' },
-  neon: { id: 'neon', name: 'Неон', description: 'Киберпанк-подсветка', pawn: '♟' },
-  royal: { id: 'royal', name: 'Корона', description: 'Пешка с королевским титулом', pawn: '⚜' },
+  neon: { id: 'neon', name: 'Полночь', description: 'Сдержанный холодный оттенок', pawn: '♟' },
+  royal: { id: 'royal', name: 'Корона', description: 'Литейная форма с лилией', pawn: '⚜' },
 };
 
 export const SKIN_ORDER: SkinId[] = ['classic', 'gold', 'neon', 'royal'];
@@ -128,7 +120,7 @@ export interface LivesState {
 
 /**
  * Начисляет восстановленные жизни по времени.
- * livesAt — момент, от которого идёт текущий 30-минутный таймер.
+ * livesAt, момент, от которого идёт текущий 30-минутный таймер.
  */
 export function materializeLives(lives: number, livesAt: number, now: number): LivesState {
   const safeLives = Math.max(0, Math.min(MAX_LIVES, Math.floor(lives)));

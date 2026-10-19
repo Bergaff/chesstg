@@ -519,7 +519,7 @@ app.post('/api/bonus/use', async (c) => {
   }
 
   if (Number(charged.meta?.changes ?? 0) === 0) {
-    fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price} 🪙`, { price, kind });
+    fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price}`, { price, kind });
   }
 
   if (kind === 'freeze') {
@@ -561,7 +561,7 @@ app.post('/api/shop/bonus', async (c) => {
     .run();
 
   if (Number(updated.meta?.changes ?? 0) === 0) {
-    fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price} 🪙`, { price, kind });
+    fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price}`, { price, kind });
   }
 
   const fresh = await getUserById(c.env, authCtx.user.id);
@@ -599,7 +599,7 @@ const AD_COOLDOWN: Record<'life' | 'coins' | 'shield', number> = {
 
 app.post('/api/ads/reward', async (c) => {
   const authCtx = auth(c);
-  if (authCtx.user.ad_free) fail(403, 'ad_free', 'Реклама отключена — бонусы за просмотр недоступны');
+  if (authCtx.user.ad_free) fail(403, 'ad_free', 'Реклама отключена, награды за просмотр недоступны');
 
   const body = await readJson(c);
   const kind = body.kind;

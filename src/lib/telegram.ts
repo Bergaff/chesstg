@@ -8,8 +8,8 @@ export function initTelegram(): void {
   try {
     tg.ready();
     tg.expand();
-    tg.setHeaderColor('#080a10');
-    tg.setBackgroundColor('#080a10');
+    tg.setHeaderColor('#17160f');
+    tg.setBackgroundColor('#17160f');
   } catch {
     /* старые версии клиента */
   }

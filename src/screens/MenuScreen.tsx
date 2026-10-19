@@ -10,16 +10,17 @@ import { api, ApiError } from '../lib/api';
 import { cn, formatDuration, formatNumber } from '../lib/format';
 import { useCountdown, useNow } from '../lib/hooks';
 import type { AdRewardResponse } from '../lib/types';
-import { Hud, HeartsRow, ProfileChip } from '../components/Hud';
-import { Icon } from '../components/Icon';
+import { HeartsRow, Hud, ProfileChip } from '../components/Hud';
 import { ChallengeBanner } from '../components/ChallengeBanner';
 
 interface MenuScreenProps {
   onPlay: (mode: GameMode) => void;
   onOpenRules: () => void;
+  onTerms: () => void;
+  onPrivacy: () => void;
 }
 
-export function MenuScreen({ onPlay, onOpenRules }: MenuScreenProps): ReactNode {
+export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScreenProps): ReactNode {
   const { profile, config, active, challenge, setProfile, refresh, toast, showAd, goShop, goShopStars, goRecords } = useApp();
   const [challengeHidden, setChallengeHidden] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
@@ -34,7 +35,7 @@ export function MenuScreen({ onPlay, onOpenRules }: MenuScreenProps): ReactNode 
     if (adLoading || cooldownLeft > 0 || profile.adFree) return;
     setAdLoading(true);
     try {
-      const rewarded = await showAd(`+${AD_COINS_REWARD} 🪙`);
+      const rewarded = await showAd(`+${AD_COINS_REWARD} монет`);
       if (!rewarded) return;
       const response = await api<AdRewardResponse>('/api/ads/reward', {
         method: 'POST',
@@ -67,12 +68,11 @@ export function MenuScreen({ onPlay, onOpenRules }: MenuScreenProps): ReactNode 
 
   return (
     <div className="screen menu-screen">
-      <div className="menu-aurora" aria-hidden="true" />
-      <header className="menu-top">
+      <header className="topbar">
         <ProfileChip profile={profile} />
-        <div className="menu-top-side">
-          <Hud profile={profile} compact onCoins={goShop} onLives={goShopStars} />
-          <button type="button" className="icon-btn rules-btn" onClick={onOpenRules} aria-label="Правила игры">
+        <div className="topbar-actions">
+          <Hud profile={profile} onCoins={goShop} onLives={goShopStars} />
+          <button type="button" className="help-btn" onClick={onOpenRules} aria-label="Правила игры">
             ?
           </button>
         </div>
@@ -82,154 +82,133 @@ export function MenuScreen({ onPlay, onOpenRules }: MenuScreenProps): ReactNode 
         <ChallengeBanner challenge={challenge} onAccept={() => onPlay('campaign')} onClose={() => setChallengeHidden(true)} />
       )}
 
-      <section className="hero">
-        <div className="hero-stage" aria-hidden="true">
-          <div className="hero-halo" />
-          <div className="hero-board">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className={(Math.floor(index / 3) + index) % 2 === 0 ? 'hero-cell dark' : 'hero-cell light'} />
-            ))}
-            <span className="hero-enemy" style={{ gridArea: '1 / 1' }}>♜</span>
-            <span className="hero-enemy" style={{ gridArea: '1 / 2' }}>♛</span>
-            <span className="hero-enemy" style={{ gridArea: '1 / 3' }}>♞</span>
-            <span className="hero-enemy soft" style={{ gridArea: '2 / 1' }}>♝</span>
-            <span className="hero-enemy soft" style={{ gridArea: '2 / 3' }}>♟</span>
-          </div>
-          <div className={cn('hero-pawn', `skin-${profile.skin}`)}>
-            <span>{SKINS[profile.skin]?.pawn ?? '♟'}</span>
-          </div>
-          <span className="hero-spark s1">✦</span>
-          <span className="hero-spark s2">✦</span>
-          <span className="hero-spark s3">✧</span>
-        </div>
-
-        <span className="eyebrow">Шахматная головоломка в Telegram</span>
-        <h1 className="wordmark">
+      <section className="masthead">
+        <span className="label masthead-kicker">Шахматная головоломка в Telegram</span>
+        <h1 className="masthead-title serif">
           <span>Пешка</span>
           <em>против всех</em>
         </h1>
-        <p className="tagline">Дойди до последней линии. Не дай фигурам себя поймать.</p>
+        <p className="masthead-sub">
+          Дойти до последней линии и не попасться фигурам. Один неверный шаг заканчивает партию.
+        </p>
       </section>
 
-      <div className="menu-cta">
-        <button type="button" className="btn btn-gold play-cta" onClick={() => onPlay('campaign')}>
-          <span className="play-orb">
-            <Icon name="play" size={19} />
+      <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>
+        <span className="cta-body">
+          <span className="label">{campaignRun ? 'Незаконченная партия' : 'Кампания'}</span>
+          <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
+          <span className="cta-meta">
+            {campaignRun
+              ? `Уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
+              : profile.levelsCleared > 0
+                ? `Уровень ${profile.level}, пройдено ${profile.levelsCleared}`
+                : 'Уровень 1, путь начинается'}
           </span>
-          <span className="play-copy">
-            <b>{campaignRun ? 'Продолжить' : 'Играть'}</b>
-            <small>
-              {campaignRun
-                ? `Уровень ${campaignRun.level} · ход ${campaignRun.moves + 1}`
-                : profile.levelsCleared > 0
-                  ? `Уровень ${profile.level} · ${profile.levelsCleared} пройдено`
-                  : 'Уровень 1 · путь начинается'}
-            </small>
-          </span>
-          <Icon name="chevronRight" size={21} className="cta-chevron" />
-        </button>
+        </span>
+        <span className="cta-arrow" aria-hidden="true">→</span>
+      </button>
 
-        <div className="menu-stats">
-          <div>
-            <b>{profile.maxLevel}</b>
-            <span>уровень</span>
-          </div>
-          <div>
-            <b>{formatNumber(profile.endlessBest)}</b>
-            <span>рекорд</span>
-          </div>
-          <div>
-            <b>{profile.lives}<em>/{profile.maxLives}</em></b>
-            <span>жизни</span>
-          </div>
+      <dl className="menu-stats">
+        <div className="stat-row">
+          <dt>Достигнутый уровень</dt>
+          <dd className="serif">{profile.maxLevel}</dd>
         </div>
+        <div className="stat-row">
+          <dt>Рекорд в бесконечном режиме</dt>
+          <dd className="serif">
+            {formatNumber(profile.endlessBest)}
+            <small>клеток</small>
+          </dd>
+        </div>
+        <div className="stat-row">
+          <dt>Скин</dt>
+          <dd className="serif">{SKINS[profile.skin]?.name ?? 'Классика'}</dd>
+        </div>
+      </dl>
+
+      <div className="section-head">
+        <span className="label">Разделы</span>
+        <span className="label">{profile.lives < profile.maxLives ? 'жизни восстанавливаются' : 'все жизни в запасе'}</span>
       </div>
 
-      <div className="menu-grid">
+      <div className="menu-list">
         <button
           type="button"
-          className={cn('menu-card menu-card-endless', !profile.endlessUnlocked && 'is-locked')}
+          className={cn('menu-row', !profile.endlessUnlocked && 'locked')}
           onClick={playEndless}
           aria-disabled={!profile.endlessUnlocked}
         >
-          <span className="menu-card-icon icon-infinity">
-            <Icon name="infinity" size={23} />
-          </span>
-          <span className="menu-card-copy">
-            <b>Бесконечный</b>
-            <small>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Бесконечный режим</span>
+            <span className="menu-row-desc">
               {!profile.endlessUnlocked
-                ? 'Откроется после 10 уровня'
+                ? 'Откроется после десятого уровня'
                 : endlessRun
-                  ? `Продолжить · ${endlessRun.score} клеток`
-                  : `Рекорд · ${profile.endlessBest} клеток`}
-            </small>
+                  ? `Незаконченный забег, высота ${endlessRun.score}`
+                  : `Рекорд ${profile.endlessBest} клеток, сложность растёт каждые пять ходов`}
+            </span>
           </span>
-          {!profile.endlessUnlocked ? (
-            <span className="menu-lock"><Icon name="lock" size={15} /></span>
-          ) : (
-            <Icon name="chevronRight" size={18} className="menu-card-chevron" />
-          )}
+          <span className="menu-row-end">{profile.endlessUnlocked ? '→' : 'закрыт'}</span>
         </button>
 
-        <button type="button" className="menu-card" onClick={goShop}>
-          <span className="menu-card-icon icon-shop"><Icon name="bag" size={21} /></span>
-          <span className="menu-card-copy">
-            <b>Магазин</b>
-            <small>Бонусы и скины</small>
+        <button type="button" className="menu-row" onClick={goShop}>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Магазин</span>
+            <span className="menu-row-desc">Бонусы за монеты, скины и покупки за звёзды</span>
           </span>
+          <span className="menu-row-end">→</span>
         </button>
 
-        <button type="button" className="menu-card" onClick={goRecords}>
-          <span className="menu-card-icon icon-trophy"><Icon name="trophy" size={21} /></span>
-          <span className="menu-card-copy">
-            <b>Рекорды</b>
-            <small>Лидеры и друзья</small>
+        <button type="button" className="menu-row" onClick={goRecords}>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Рекорды</span>
+            <span className="menu-row-desc">Мировая таблица и друзья, пришедшие по ссылке</span>
           </span>
+          <span className="menu-row-end">→</span>
         </button>
       </div>
 
-      {profile.lives < profile.maxLives && <LivesPool onShop={goShop} onRefresh={refresh} />}
+      {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
 
       {!profile.adFree && (
         <button
           type="button"
-          className={cn('ad-card', (adLoading || cooldownLeft > 0) && 'is-disabled')}
+          className="ad-row"
           onClick={claimCoins}
           disabled={adLoading || cooldownLeft > 0}
         >
-          <span className="ad-card-icon"><Icon name="play" size={18} /></span>
-          <span className="ad-card-copy">
-            <b>{adLoading ? 'Загружаем рекламу…' : cooldownLeft > 0 ? `Следующая награда через ${formatDuration(cooldownLeft)}` : 'Реклама за монеты'}</b>
-            <small>Rewarded video · раз в минуту</small>
+          <span className="ad-row-main">
+            <span className="ad-row-title">
+              {adLoading
+                ? 'Загружаем ролик'
+                : cooldownLeft > 0
+                  ? `Следующая награда через ${formatDuration(cooldownLeft)}`
+                  : 'Реклама за монеты'}
+            </span>
+            <span className="ad-row-desc">Добровольный просмотр, не чаще одного раза в минуту</span>
           </span>
-          <span className="ad-card-reward">+{AD_COINS_REWARD} <Icon name="coin" size={16} /></span>
+          <span className="ad-row-reward">+{AD_COINS_REWARD}</span>
         </button>
       )}
 
       {profile.isGuest && (
-        <div className="guest-note">
-          <Icon name="spark" size={14} />
-          <span>Гостевой режим: прогресс хранится только в этом браузере.</span>
-        </div>
+        <p className="guest-note">
+          Гостевой режим: прогресс хранится только в этом браузере. Чтобы сохранить его в Telegram,
+          откройте игру через бота.
+        </p>
       )}
 
       <footer className="menu-footer">
-        <button type="button" onClick={onOpenRules}>Правила игры</button>
-        <span className="dot">·</span>
-        <span>v1.0.0</span>
-        {profile.adFree && (
-          <>
-            <span className="dot">·</span>
-            <span className="footer-badge"><Icon name="shield" size={12} /> без рекламы</span>
-          </>
-        )}
-        {config.devMode && (
-          <>
-            <span className="dot">·</span>
-            <span className="footer-dev">dev</span>
-          </>
-        )}
+        <button type="button" onClick={onOpenRules}>Правила</button>
+        <span className="sep">/</span>
+        <button type="button" onClick={onTerms}>Условия</button>
+        <span className="sep">/</span>
+        <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+        <span className="sep">/</span>
+        <span>2026</span>
+        {profile.adFree && <span className="sep">/</span>}
+        {profile.adFree && <span>без рекламы</span>}
+        <span className="footer-mode">{config.devMode ? 'dev' : 'v1.0'}</span>
       </footer>
     </div>
   );
@@ -243,21 +222,18 @@ function LivesPool({ onShop, onRefresh }: { onShop: () => void; onRefresh: () =>
   const progress = Math.min(1, Math.max(0, 1 - remaining / LIFE_REGEN_MS));
 
   return (
-    <div className="resource-card lives-pool">
-      <div className="resource-main">
+    <div className="resource-row">
+      <span className="resource-main">
         <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
-        <div className="resource-caption">
-          <Icon name="clock" size={14} />
-          <span>
-            Следующая жизнь через <b>{formatDuration(remaining)}</b>
-          </span>
-        </div>
-        <div className="lives-progress" aria-hidden="true">
-          <span style={{ width: `${progress * 100}%` }} />
-        </div>
-      </div>
-      <button type="button" className="resource-action" onClick={onShop} aria-label="В магазин">
-        <Icon name="plus" size={18} />
+        <span className="resource-caption">
+          Следующая жизнь через <b>{formatDuration(remaining)}</b>
+        </span>
+        <span className="resource-note">
+          {progress > 0 ? 'Отсчёт идёт' : 'Отсчёт начнётся после потери жизни'}
+        </span>
+      </span>
+      <button type="button" className="btn btn-outline" style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }} onClick={onShop}>
+        Пополнить
       </button>
     </div>
   );
