@@ -761,11 +761,13 @@ app.get('/api/leaderboard', async (c) => {
     .first<{ rank: number }>();
 
   const inviteLink = botStartLink(c.env, `ref_${user.invite_code}`);
+  // Гости не попадают в мировую таблицу, значит и места в ней у них нет.
+  const ranked = friends || !user.is_guest;
   return c.json({
     metric,
     scope: friends ? 'friends' : 'global',
     rows,
-    myRank: Number(rankRow?.rank ?? 0),
+    myRank: ranked ? Number(rankRow?.rank ?? 0) : 0,
     invitedCount: await invitedCount(c.env, user.id),
     inviteLink,
   });
