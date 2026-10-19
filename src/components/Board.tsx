@@ -1,0 +1,177 @@
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  PIECE_GLYPH,
+  SKINS,
+  endlessViewport,
+  type Cell,
+  type GameState,
+  type MoveDx,
+  type MoveOption,
+  type SkinId,
+} from '../engine';
+import { cn } from '../lib/format';
+import { Icon } from './Icon';
+
+interface BoardProps {
+  state: GameState;
+  moves: MoveOption[];
+  hint: Cell[];
+  skin: SkinId;
+  interactive: boolean;
+  onMove: (dx: MoveDx) => void;
+  turn: number;
+}
+
+const FRAME_PAD = 8;
+
+export function Board({ state, moves, hint, skin, interactive, onMove, turn }: BoardProps): ReactNode {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = wrapRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setBox({ width: rect.width, height: rect.height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const viewport = useMemo(
+    () => (state.mode === 'endless' ? endlessViewport(state) : { from: 0, to: state.height }),
+    [state],
+  );
+  const cols = state.width;
+  const rows = viewport.to - viewport.from;
+  const gap = cols >= 5 ? 4 : 5;
+  const availableWidth = Math.max(0, box.width - FRAME_PAD * 2);
+  const availableHeight = Math.max(0, box.height - FRAME_PAD * 2);
+  const cell =
+    availableWidth > 0 && availableHeight > 0
+      ? Math.floor(
+          Math.min(
+            (availableWidth - gap * (cols - 1)) / cols,
+            (availableHeight - gap * (rows - 1)) / rows,
+          ),
+        )
+      : 0;
+  const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
+  const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
+
+  const playerGlyph = SKINS[skin]?.pawn ?? '♟';
+  const frozen = state.freeze > 0;
+
+  return (
+    <div className="board-measure" ref={wrapRef}>
+      <div className="board-glow" aria-hidden="true" />
+      <div
+        className={cn('board-frame', state.status === 'lost' && 'board-lost')}
+        style={{
+          width: boardWidth > 0 ? boardWidth + FRAME_PAD * 2 : undefined,
+          height: boardHeight > 0 ? boardHeight + FRAME_PAD * 2 : undefined,
+          opacity: cell > 0 ? 1 : 0,
+        }}
+      >
+        <div
+          className={cn('board', frozen && 'board-frozen', state.shield > 0 && 'board-shielded')}
+          style={{
+            width: boardWidth || undefined,
+            height: boardHeight || undefined,
+            gap,
+            fontSize: cell ? Math.round(cell * 0.58) : undefined,
+            gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
+            gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
+          }}
+          role="grid"
+          aria-label="Игровое поле"
+        >
+          {Array.from({ length: rows }).map((_, rowIndex) =>
+            Array.from({ length: cols }).map((__, colIndex) => {
+              const y = viewport.to - 1 - rowIndex;
+              const x = colIndex;
+              const dark = (x + y) % 2 === 0;
+              const enemy = state.enemies.find((e) => e.x === x && e.y === y);
+              const isPlayer = state.player.x === x && state.player.y === y;
+              const move = moves.find((m) => m.x === x && m.y === y);
+              const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
+              const isFinish = state.mode === 'campaign' && y === state.height - 1;
+              const isLast = isPlayer && (state.moves > 0 || turn > 0);
+              const captured = state.status === 'lost' && isPlayer;
+
+              return (
+                <button
+                  key={`${x}-${y}`}
+                  type="button"
+                  role="gridcell"
+                  className={cn(
+                    'cell',
+                    dark ? 'cell-dark' : 'cell-light',
+                    isFinish && 'cell-finish',
+                    move && interactive && 'cell-move',
+                    hintIndex >= 0 && 'cell-hint',
+                    hintIndex === 1 && 'cell-hint-2',
+                    isLast && 'cell-last',
+                    captured && 'cell-captured',
+                  )}
+                  style={{ width: cell || undefined, height: cell || undefined }}
+                  onClick={() => {
+                    if (move && interactive) onMove(move.dx);
+                  }}
+                  disabled={!move || !interactive}
+                  aria-label={
+                    enemy
+                      ? `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
+                      : isPlayer
+                        ? `Клетка ${x + 1}, ${y + 1}: твоя пешка`
+                        : `Клетка ${x + 1}, ${y + 1}`
+                  }
+                >
+                  {isFinish && <span className="finish-trace" aria-hidden="true" />}
+                  {move && interactive && <span className="move-dot" aria-hidden="true" />}
+                  {hintIndex >= 0 && (
+                    <span className={cn('hint-ring', hintIndex === 1 && 'hint-ring-2')} aria-hidden="true">
+                      <b>{hintIndex + 1}</b>
+                    </span>
+                  )}
+                  {enemy && (
+                    <span
+                      key={`${enemy.id}-${turn}`}
+                      className={cn('piece enemy-piece', `enemy-${enemy.type}`, frozen && 'enemy-iced')}
+                    >
+                      <span className="piece-glyph">{PIECE_GLYPH[enemy.type]}</span>
+                      {frozen && (
+                        <span className="enemy-status" aria-hidden="true">
+                          <Icon name="snow" size={10} />
+                        </span>
+                      )}
+                    </span>
+                  )}
+                  {isPlayer && (
+                    <span key={`player-${x}-${y}`} className={cn('piece player-piece', `skin-${skin}`)}>
+                      <span className="player-disc">
+                        <span className="player-glyph">{playerGlyph}</span>
+                      </span>
+                      {state.shield > 0 && (
+                        <span className="player-bubble player-shield" aria-hidden="true">
+                          <Icon name="shield" size={10} />
+                        </span>
+                      )}
+                      {state.freeze > 0 && (
+                        <span className="player-bubble player-frost" aria-hidden="true">
+                          <Icon name="snow" size={10} />
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              );
+            }),
+          )}
+        </div>
+      </div>
+      {cell === 0 && <div className="board-placeholder" />}
+    </div>
+  );
+}

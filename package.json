@@ -1,0 +1,43 @@
+{
+  "name": "pawn-vs-all",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Пешка против всех — Telegram Mini App на Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "build": "vite build",
+    "preview": "npm run build && wrangler dev --ip 0.0.0.0 --port 8787",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "test": "vitest run",
+    "test:api": "vitest run src/engine/api.integration.test.ts",
+    "test:watch": "vitest",
+    "db:local": "wrangler d1 migrations apply pawn-vs-all --local",
+    "db:remote": "wrangler d1 migrations apply pawn-vs-all --remote",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.13.13",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "jsdom": "^30.1.3",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.4",
+    "vitest": "^3.2.7",
+    "wrangler": "^4.151.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

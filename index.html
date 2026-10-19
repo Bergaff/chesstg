@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#080a10" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Пешка против всех — шахматная головоломка в Telegram. Проведи пешку через поле и не попадись фигурам."
+    />
+    <meta property="og:title" content="Пешка против всех" />
+    <meta
+      property="og:description"
+      content="Шахматная головоломка в Telegram: одна пешка против всех фигур."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Пешка против всех</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #080a10;
+        color: #f5f0e6;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      #root {
+        min-height: 100vh;
+      }
+      .boot-static {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-size: 14px;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #8b8fa3;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-static">Пешка против всех</div>
+    </div>
+    <noscript>Для игры нужен JavaScript.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+# Скопируй в .dev.vars и заполни для локальной проверки Telegram/платежей.
+# .dev.vars в git не попадает.
+
+BOT_TOKEN=
+WEBHOOK_SECRET=
+
+# Публичные переменные обычно задаются в wrangler.jsonc (vars).
+# Здесь можно переопределить их для локального запуска:
+# WEBAPP_URL=http://localhost:8787
+# BOT_USERNAME=
+# ALLOW_GUESTS=true
+# DEV_MODE=true
+# ADSGRAM_SRC=https://sad.adsgram.ai/js/sad.min.js
+# ADSGRAM_BLOCK_ID=
