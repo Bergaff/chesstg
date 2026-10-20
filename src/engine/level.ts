@@ -1,6 +1,6 @@
 import { anyEnemyAttacksPlayer, legalMoves } from './board';
 import { Rng, mix32 } from './rng';
-import { analyzeState } from './solver';
+import { auditState, difficultyBand } from './audit';
 import type { GameState, PieceType } from './types';
 
 export const MAX_BOARD = 6;
@@ -144,9 +144,14 @@ function fallbackLevel(level: number, seed: number): GameState {
 }
 
 /**
- * Генерирует уровень кампании. Каждый уровень проверяется перебором:
- * должен существовать путь наверх, враги не должны бить стартовую клетку,
- * и у игрока обязан быть хотя бы один ход вперёд.
+ * Генерирует уровень кампании.
+ *
+ * Кандидат проходит три обязательные проверки: пешке есть куда идти,
+ * стартовая клетка не под боем, решение существует. Затем уровень
+ * оценивается разбором (`auditState`) и сравнивается с целевой полосой
+ * сложности: слишком простые расстановки отбрасываются, слишком тяжёлые
+ * тоже. Если за отведённые попытки полосу взять не удалось, возвращается
+ * лучший из решаемых вариантов.
  */
 export function createCampaignLevel(level: number, seed: number): GameState {
   const target = pieceCountForLevel(level);
@@ -157,21 +162,37 @@ export function createCampaignLevel(level: number, seed: number): GameState {
     counts.push(count);
   }
 
+  const band = difficultyBand(level);
+  const maxAudits = 260;
+  let audits = 0;
+  let best: { state: GameState; score: number; delta: number } | null = null;
+
   for (const count of counts) {
-    const attempts = count === maxCount ? 70 : 45;
+    const attempts = count === maxCount ? 160 : 60;
     for (let attempt = 0; attempt < attempts; attempt++) {
       const candidate = buildCandidate(level, seed, attempt, count);
-      if (candidate.enemies.length < Math.min(1, count)) continue;
+      if (candidate.enemies.length < 1) continue;
       if (legalMoves(candidate).length === 0) continue;
       if (anyEnemyAttacksPlayer(candidate)) continue;
-      const analysis = analyzeState(candidate, {
-        maxDepth: sizeForLevel(level) + 2,
-        maxNodes: 3500,
-      });
-      if (analysis.solvable) return { ...candidate, lastEvent: 'level' };
+
+      const report = auditState(candidate);
+      audits += 1;
+      if (!report.solvable) continue;
+
+      const delta = Math.abs(report.score - band.target);
+      if (!best || delta < best.delta || (delta === best.delta && report.score > best.score)) {
+        best = { state: candidate, score: report.score, delta };
+      }
+
+      if (report.score >= band.min && report.score <= band.max) {
+        return { ...candidate, lastEvent: 'level' };
+      }
+      if (audits >= maxAudits) break;
     }
+    if (audits >= maxAudits) break;
   }
 
+  if (best) return { ...best.state, lastEvent: 'level' };
   return fallbackLevel(level, seed);
 }
 

@@ -310,6 +310,25 @@ describe('UI smoke', () => {
     expect(screen.getByText('5. Где хранятся данные')).toBeTruthy();
   });
 
+  it('открывает лабораторию и проверяет расстановки', async () => {
+    await boot();
+    fireEvent.click(screen.getByText('Лаборатория').closest('button')!);
+    expect(await screen.findByText('Перебор расстановок уровня с проверкой решения. Для каждой расстановки считается оценка требовательности: плотность фигур, шаги под боем, число безопасных ходов и длина решения.')).toBeTruthy();
+    expect(screen.getByText('Целевая оценка')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить расстановки' }));
+    expect(await screen.findByText('С решением', undefined, { timeout: 4000 })).toBeTruthy();
+    expect(screen.getByText('полный перебор · 9')).toBeTruthy();
+    expect(screen.getAllByText(/оценка/).length).toBeGreaterThan(0);
+
+    const toggles = screen.getAllByRole('button', { name: 'Показать решение' });
+    fireEvent.click(toggles[0]);
+    expect(screen.getByRole('button', { name: 'Скрыть решение' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    expect(await screen.findByText('против всех')).toBeTruthy();
+  });
+
   it('покупает бонус в магазине', async () => {
     await boot();
     fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);

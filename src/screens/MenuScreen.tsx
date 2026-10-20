@@ -18,9 +18,10 @@ interface MenuScreenProps {
   onOpenRules: () => void;
   onTerms: () => void;
   onPrivacy: () => void;
+  onLab: () => void;
 }
 
-export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScreenProps): ReactNode {
+export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy, onLab }: MenuScreenProps): ReactNode {
   const { profile, config, active, challenge, setProfile, refresh, toast, showAd, goShop, goShopStars, goRecords } = useApp();
   const [challengeHidden, setChallengeHidden] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
@@ -163,6 +164,14 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span className="menu-row-main">
             <span className="menu-row-title">Рекорды</span>
             <span className="menu-row-desc">Мировая таблица и друзья, пришедшие по ссылке</span>
+          </span>
+          <span className="menu-row-end">→</span>
+        </button>
+
+        <button type="button" className="menu-row" onClick={onLab}>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Лаборатория</span>
+            <span className="menu-row-desc">Перебор расстановок и проверка решений</span>
           </span>
           <span className="menu-row-end">→</span>
         </button>
