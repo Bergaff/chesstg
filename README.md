@@ -182,7 +182,7 @@ curl "https://api.telegram.org/bot$BOT_TOKEN/setWebhook" \
 После деплоя:
 
 1. В `wrangler.jsonc` замените `WEBAPP_URL` на `https://<worker>.workers.dev` или свой домен, `BOT_USERNAME` на username бота. Для продакшена поставьте `DEV_MODE: "false"`.
-2. В BotFather: `/newapp`, выберите бота, укажите URL приложения. Там же `/setmenubutton` с тем же URL. Иконка 512×512 лежит в `public/icon-512.png`.
+2. В BotFather: `/newapp` (Mini App, не `/newgame`), выберите бота, укажите URL приложения. Там же `/setmenubutton` с тем же URL. Иконка 512×512 лежит в `public/icon-512.png`.
 3. Проверьте `/api/health`, откройте Mini App из бота, пройдите уровень.
 4. Для Stars дополнительно ничего не подключается: счёт выставляется в `XTR` через `createInvoiceLink`, оплату подтверждает `pre_checkout_query`.
 5. Adsgram: создайте блок Rewarded Video в кабинете, вставьте `ADSGRAM_BLOCK_ID`, задеплойте заново.
