@@ -201,6 +201,15 @@ npm run deploy</pre>
               </StatusLine>
             )}
 
+            {status.secretSet && !secret.trim() && (
+              <StatusLine kind="error">
+                В воркере уже задан WEBHOOK_SECRET. Вставьте то же значение в поле секрета, иначе Telegram
+                будет присылать запросы без заголовка и получит отказ 403. Если секрет утерян, задайте новый:
+                впишите его здесь, сохраните, затем выполните wrangler secret put WEBHOOK_SECRET с тем же
+                значением.
+              </StatusLine>
+            )}
+
             <div className="adm-checks">
               <label className="adm-check">
                 <input type="checkbox" checked={commands} onChange={(event) => setCommands(event.target.checked)} />
@@ -221,7 +230,7 @@ npm run deploy</pre>
                 type="button"
                 className="adm-btn adm-btn-primary"
                 onClick={() => void connect()}
-                disabled={busy !== '' || !appUrl.trim()}
+                disabled={busy !== '' || !appUrl.trim() || (status.secretSet && !secret.trim())}
               >
                 {busy === 'setup' ? 'Подключаем' : 'Подключить бота'}
               </button>
