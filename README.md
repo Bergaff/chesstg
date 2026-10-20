@@ -150,10 +150,10 @@ npm run build       # production-сборка в dist/
 
 | Переменная | Где | Назначение |
 | --- | --- | --- |
-| `WEBAPP_URL` | vars | Публичный HTTPS-адрес приложения для кнопок бота |
+| `WEBAPP_URL` | vars | Публичный HTTPS-адрес приложения для кнопок бота. Можно оставить пустым: домен возьмётся из запроса к вебхуку |
 | `BOT_USERNAME` | vars | Username бота без `@`, нужен для ссылок-вызовов |
 | `ALLOW_GUESTS` | vars | `true` разрешает браузерный гостевой режим |
-| `DEV_MODE` | vars | `true` включает демо-рекламу и разрешает webhook без секрета |
+| `DEV_MODE` | vars | По умолчанию `false`. `true` включает демо-рекламу и разрешает webhook без секрета, только для локальной разработки |
 | `ADSGRAM_SRC` | vars | URL SDK Adsgram |
 | `ADSGRAM_BLOCK_ID` | vars | ID блока Rewarded Video |
 | `BOT_TOKEN` | secret | Токен бота из BotFather |
@@ -178,19 +178,17 @@ npm run db:remote
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put WEBHOOK_SECRET
 npm run deploy
-
-# webhook
-curl "https://api.telegram.org/bot$BOT_TOKEN/setWebhook" \
-  -d "url=https://<worker>.workers.dev/api/telegram/webhook" \
-  -d "secret_token=$WEBHOOK_SECRET" \
-  -d 'allowed_updates=["message","pre_checkout_query"]'
 ```
+
+Вебхук проще поставить из админки: `/admin` → вкладка `Бот` → `Подключить бота`. Она же ставит команды и кнопку меню.
+
+> Деплой из панели Cloudflare (Workers Builds) требует указать команду сборки. Без неё `wrangler deploy` падает на отсутствующей папке `dist`: поставьте `npm run build` в поле Build command либо `npm run deploy` в поле Deploy command. Подробнее в [`docs/deploy.md`](docs/deploy.md#деплой-из-панели-cloudflare-workers-builds).
 
 После деплоя:
 
 1. В `wrangler.jsonc` замените `WEBAPP_URL` на `https://<worker>.workers.dev` или свой домен, `BOT_USERNAME` на username бота. Для продакшена поставьте `DEV_MODE: "false"`.
-2. В BotFather: `/newapp` (Mini App, не `/newgame`), выберите бота, укажите URL приложения. Там же `/setmenubutton` с тем же URL. Иконка 512×512 лежит в `public/icon-512.png`.
-3. Проверьте `/api/health`, откройте Mini App из бота, пройдите уровень.
+2. В BotFather: `/newapp` (Mini App, не `/newgame`), выберите бота, укажите URL приложения. Кнопку меню и команды ставит вкладка `Бот` в админке, вручную через `/setmenubutton` их дублировать не нужно. Иконка 512×512 лежит в `public/icon-512.png`.
+3. Проверьте `/api/health`: в `warnings` должен остаться пустой массив. Откройте Mini App из бота, пройдите уровень.
 4. Для Stars дополнительно ничего не подключается: счёт выставляется в `XTR` через `createInvoiceLink`, оплату подтверждает `pre_checkout_query`.
 5. Adsgram: создайте блок Rewarded Video в кабинете, вставьте `ADSGRAM_BLOCK_ID`, задеплойте заново.
 

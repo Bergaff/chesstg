@@ -39,3 +39,11 @@ export function initialOf(name: string): string {
 export function cn(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(' ');
 }
+
+/** Адрес игры для ссылок: рабочий https из конфига, иначе текущий домен. */
+export function appBaseUrl(webappUrl: string): string {
+  const value = webappUrl.trim().replace(/\/+$/, '');
+  if (value.startsWith('https://')) return value;
+  if (typeof window !== 'undefined' && window.location?.origin) return window.location.origin;
+  return value;
+}

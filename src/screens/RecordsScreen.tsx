@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApp } from '../context/AppContext';
 import { api, ApiError } from '../lib/api';
-import { cn, formatNumber } from '../lib/format';
+import { appBaseUrl, cn, formatNumber } from '../lib/format';
 import { shareContent } from '../lib/telegram';
 import type { LeaderboardResponse, LeaderboardRow } from '../lib/types';
 
@@ -42,7 +42,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
   }, [load]);
 
   async function shareInvite() {
-    const link = data?.inviteLink ?? config.webappUrl;
+    const link = data?.inviteLink ?? appBaseUrl(config.webappUrl);
     const text = 'Загляните в «Пешку против всех»: пешка идёт через поле, фигуры охотятся. У меня уже есть рекорд, попробуйте побить.';
     const status = await shareContent(text, link);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
@@ -53,7 +53,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
     const bot = config.botUsername;
     const payload =
       metric === 'endless' ? `ch_0_${profile.endlessBest}` : `ch_${profile.maxLevel}_${profile.maxLevel}`;
-    const url = bot ? `https://t.me/${bot}?startapp=${payload}` : config.webappUrl;
+    const url = bot ? `https://t.me/${bot}?startapp=${payload}` : appBaseUrl(config.webappUrl);
     const text =
       metric === 'endless'
         ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`

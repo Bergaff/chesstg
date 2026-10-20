@@ -138,10 +138,44 @@ async function sessionBody(env: WorkerEnv, authCtx: AppEnv['Variables']['auth'],
 app.get('/api/health', async (c) => {
   try {
     await c.env.DB.prepare('SELECT 1').first();
-    return c.json({ ok: true, now: nowMs(), service: 'pawn-vs-all' });
   } catch {
     return c.json({ ok: false, error: 'db_unavailable' }, 503);
   }
+
+  // Публичный список того, что забыли настроить при деплое. Секретов тут нет,
+  // только отметки «задано или нет».
+  const warnings: string[] = [];
+  const webappUrl = c.env.WEBAPP_URL?.trim() ?? '';
+  const origin = new URL(c.req.url).origin;
+  if (!webappUrl) {
+    warnings.push('webapp_url_missing');
+  } else if (!webappUrl.startsWith('https://')) {
+    warnings.push('webapp_url_not_https');
+  } else {
+    try {
+      if (new URL(webappUrl).origin !== origin) warnings.push('webapp_url_origin_mismatch');
+    } catch {
+      warnings.push('webapp_url_invalid');
+    }
+  }
+  if (!c.env.BOT_TOKEN?.trim()) warnings.push('bot_token_missing');
+  if (!c.env.WEBHOOK_SECRET?.trim()) warnings.push('webhook_secret_missing');
+  if (!c.env.ADMIN_SECRET?.trim()) {
+    warnings.push('admin_secret_missing');
+  } else if (!c.env.ADMIN_PASSWORD?.trim() && !c.env.ADMIN_PASSWORD_HASH?.trim()) {
+    warnings.push('admin_password_missing');
+  }
+  if (!c.env.ADSGRAM_BLOCK_ID?.trim()) warnings.push('adsgram_block_missing');
+  if (c.env.DEV_MODE === 'true') warnings.push('dev_mode');
+
+  return c.json({
+    ok: true,
+    now: nowMs(),
+    service: 'pawn-vs-all',
+    origin,
+    config: publicConfig(c.env),
+    warnings,
+  });
 });
 
 app.get('/api/config', (c) => c.json({ config: publicConfig(c.env) }));
@@ -812,6 +846,16 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
+/**
+ * Ссылки в сообщениях бота должны вести на реальный домен. Если в переменных
+ * остался localhost или пустое значение, подставляем origin запроса.
+ */
+function withRequestOrigin(env: WorkerEnv, origin: string): WorkerEnv {
+  const configured = (env.WEBAPP_URL ?? '').trim();
+  if (configured.startsWith('https://')) return env;
+  return { ...env, WEBAPP_URL: origin.startsWith('https://') ? origin : '' };
+}
+
 async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Promise<void> {
   const message = record(update.message);
   if (message) {
@@ -895,7 +939,7 @@ app.post('/api/telegram/webhook', async (c) => {
   }
 
   try {
-    await handleUpdate(c.env, update);
+    await handleUpdate(withRequestOrigin(c.env, new URL(c.req.url).origin), update);
   } catch (error) {
     console.error('Webhook handling error', error instanceof Error ? error.message : String(error));
   }

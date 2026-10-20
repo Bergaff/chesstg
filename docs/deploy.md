@@ -67,7 +67,8 @@ npx wrangler d1 execute pawn-vs-all --remote --command "SELECT name FROM sqlite_
 }
 ```
 
-- `DEV_MODE: "false"` отключает демо-рекламу и требует секрет для webhook.
+- `WEBAPP_URL` можно оставить пустым: тогда ссылки в сообщениях бота собираются из домена, на который пришёл вебхук. Явное значение нужно для своего домена и для корректных ссылок в клиенте.
+- `DEV_MODE: "false"` отключает демо-рекламу и требует секрет для webhook. Это значение по умолчанию в репозитории. Локально демо включается строкой `DEV_MODE=true` в `.dev.vars`.
 - `ALLOW_GUESTS` оставь `true`, если хочешь, чтобы ссылку можно было открыть в обычном браузере. Для полностью закрытого продукта поставь `false` и удали гостевые записи.
 - `WEBAPP_URL` должен быть HTTPS и без слэша на конце.
 
@@ -104,6 +105,23 @@ npm run deploy
 
 `npm run deploy` собирает SPA в `dist/`, затем выполняет `wrangler deploy`. Worker раздаёт статику через binding `ASSETS`, а `/api/*` обрабатывает Hono. SPA-фолбэк настроен, поэтому прямые ссылки работают.
 
+### Деплой из панели Cloudflare (Workers Builds)
+
+Если проект подключён к git в панели, Cloudflare сам ставит зависимости и запускает команду деплоя. Сборку он не угадывает, поэтому её нужно указать явно, иначе `wrangler deploy` падает с ошибкой:
+
+```
+The directory specified by the "assets.directory" field in your configuration file does not exist: /opt/buildhome/repo/dist
+```
+
+Это значит, что `npm run build` не выполнялся и папки `dist` нет. Откройте проект в панели: `Workers & Pages` → проект → `Settings` → `Build`, и заполните:
+
+| Поле | Значение |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+
+Второй вариант: оставить поле сборки пустым, а в деплой вписать `npm run deploy`. Этот скрипт сначала собирает, потом деплоит. Смешивать не нужно: если в деплое стоит `npm run deploy`, сборка выполнится дважды.
+
 Проверка:
 
 ```bash
@@ -111,7 +129,7 @@ curl https://<worker>.workers.dev/api/health
 # {"ok":true,...}
 ```
 
-Если `health` вернул 503, значит не применены миграции или неверный `database_id`.
+Если `health` вернул 503, значит не применены миграции или неверный `database_id`. Ответ `health` содержит поле `warnings` со списком того, что забыли настроить: `webapp_url_not_https`, `webapp_url_origin_mismatch`, `bot_token_missing`, `webhook_secret_missing`, `admin_secret_missing`, `adsgram_block_missing`, `dev_mode` и другие. Пустой массив значит, что всё на месте.
 
 ## 4. Telegram: Mini App и меню
 
@@ -283,6 +301,9 @@ npx wrangler rollback <deployment-id>
 | `503 auth_not_configured` | Не задан `BOT_TOKEN`. |
 | `401 guests_disabled` | `ALLOW_GUESTS=false`, а запрос без `tma`-заголовка. |
 | `health` 503 | Нет миграций / неверный `database_id`. |
+| `assets.directory ... does not exist: .../dist` при сборке в панели | В Workers Builds не указана команда сборки. Поставьте `npm run build` либо деплой-команду `npm run deploy`. |
+| `health` отдаёт `dev_mode` в `warnings` | В `wrangler.jsonc` остался `DEV_MODE: "true"`. Для продакшена нужно `false` и повторный деплой. |
+| `webapp_url_origin_mismatch` | `WEBAPP_URL` не совпадает с доменом воркера. Ссылки в сообщениях бота будут вести не туда. |
 | Пустая страница на `/` | Не собран `dist/`; запусти `npm run build` и задеплой. |
 | Реклама не показывается | Не задан `ADSGRAM_BLOCK_ID`, блок отклонён модерацией или открыт браузер вместо Telegram. |
 | Платёж «обрабатывается» | Webhook не доставлен: проверь `getWebhookInfo`, секрет и `allowed_updates`. |

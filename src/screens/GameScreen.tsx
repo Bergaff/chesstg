@@ -25,7 +25,7 @@ import {
 } from '../engine';
 import { useApp } from '../context/AppContext';
 import { api, ApiError, saveOnExit } from '../lib/api';
-import { cn, formatDuration, formatNumber } from '../lib/format';
+import { appBaseUrl, cn, formatDuration, formatNumber } from '../lib/format';
 import { useCountdown } from '../lib/hooks';
 import { hapticImpact, hapticNotify, setClosingConfirmation, shareContent } from '../lib/telegram';
 import type {
@@ -543,7 +543,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     const level = result?.maxLevel ?? profile.maxLevel;
     const endless = mode === 'endless';
     const payload = endless ? `ch_0_${profile.endlessBest}` : `ch_${level}_${level}`;
-    const url = bot ? `https://t.me/${bot}?startapp=${payload}` : config.webappUrl;
+    const url = bot ? `https://t.me/${bot}?startapp=${payload}` : appBaseUrl(config.webappUrl);
     const text = endless
       ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
       : kind === 'win'

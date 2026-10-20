@@ -6,9 +6,10 @@ WEBHOOK_SECRET=
 
 # Публичные переменные обычно задаются в wrangler.jsonc (vars).
 # Здесь можно переопределить их для локального запуска:
-# WEBAPP_URL=http://localhost:8787
+# WEBAPP_URL=
 # BOT_USERNAME=
 # ALLOW_GUESTS=true
+# Локально удобно включить демо-рекламу и приём вебхука без секрета:
 # DEV_MODE=true
 # ADSGRAM_SRC=https://sad.adsgram.ai/js/sad.min.js
 # ADSGRAM_BLOCK_ID=

@@ -39,9 +39,12 @@ export async function callTelegram<T = unknown>(
 }
 
 export function appLink(env: WorkerEnv, startParam?: string): string {
-  const base = (env.WEBAPP_URL?.trim() || 'https://example.com').replace(/\/$/, '');
+  const configured = (env.WEBAPP_URL?.trim() ?? '').replace(/\/+$/, '');
+  // Без https кнопка web_app в Telegram не работает. Пусть лучше останется
+  // ссылка на бота, чем вебхук, ведущий на localhost.
+  if (!configured.startsWith('https://')) return '';
   const safe = startParam?.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
-  return safe ? `${base}/?startapp=${encodeURIComponent(safe)}` : `${base}/`;
+  return safe ? `${configured}/?startapp=${encodeURIComponent(safe)}` : `${configured}/`;
 }
 
 export function botStartLink(env: WorkerEnv, payload?: string): string | null {
@@ -64,9 +67,14 @@ export async function sendWelcome(env: WorkerEnv, chatId: number, firstName: str
     `Пять жизней, кампания и бесконечный режим.\n` +
     `Подсказки, заморозка и отмена хода.\n\n` +
     `Нажмите «Играть», чтобы начать.`;
+  const playButton = link
+    ? { text: 'Играть', web_app: { url: link } }
+    : start
+      ? { text: 'Играть', url: start }
+      : null;
   const reply_markup = {
     inline_keyboard: [
-      [{ text: 'Играть', web_app: { url: link } }],
+      ...(playButton ? [[playButton]] : []),
       ...(start ? [[{ text: 'Поделиться игрой', url: `https://t.me/share/url?url=${encodeURIComponent(start)}&text=${encodeURIComponent('Пешка против всех: попробуйте дойти до края доски.')}` }]] : []),
     ],
   };

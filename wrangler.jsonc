@@ -19,10 +19,10 @@
     }
   ],
   "vars": {
-    "WEBAPP_URL": "http://localhost:8787",
-    "BOT_USERNAME": "",
+    "WEBAPP_URL": "",
+    "BOT_USERNAME": "pawn_vs_all_bot",
     "ALLOW_GUESTS": "true",
-    "DEV_MODE": "true",
+    "DEV_MODE": "false",
     "ADSGRAM_SRC": "https://sad.adsgram.ai/js/sad.min.js",
     "ADSGRAM_BLOCK_ID": ""
   },
