@@ -2,15 +2,17 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { AdminError, fetchStatus, login, logout } from './api';
 import { OverviewView } from './views/OverviewView';
 import { LevelsView } from './views/LevelsView';
+import { LabView } from './views/LabView';
 import { UsersView } from './views/UsersView';
 import { PaymentsView } from './views/PaymentsView';
 import { formatDateTime } from './ui';
 
-type Tab = 'overview' | 'levels' | 'users' | 'payments';
+type Tab = 'overview' | 'levels' | 'lab' | 'users' | 'payments';
 
 const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'overview', title: 'Обзор' },
   { id: 'levels', title: 'Уровни' },
+  { id: 'lab', title: 'Лаборатория' },
   { id: 'users', title: 'Игроки' },
   { id: 'payments', title: 'Платежи' },
 ];
@@ -131,6 +133,7 @@ npx wrangler secret put ADMIN_SECRET</pre>
       <main className="adm-main">
         {tab === 'overview' && <OverviewView onUnauthorized={onUnauthorized} />}
         {tab === 'levels' && <LevelsView onUnauthorized={onUnauthorized} />}
+        {tab === 'lab' && <LabView onUnauthorized={onUnauthorized} />}
         {tab === 'users' && <UsersView onUnauthorized={onUnauthorized} />}
         {tab === 'payments' && <PaymentsView onUnauthorized={onUnauthorized} />}
       </main>

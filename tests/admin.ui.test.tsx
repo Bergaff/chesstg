@@ -126,6 +126,17 @@ describe('админка', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Уровни' }));
     expect(await screen.findByText('Проверка генератора')).toBeTruthy();
-    expect(screen.getByText('Лаборатория расстановок')).toBeTruthy();
+    expect(screen.queryByText('Лаборатория расстановок')).toBeNull();
+  });
+
+  it('держит лабораторию отдельной вкладкой', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+    expect(await screen.findByText('Лаборатория расстановок')).toBeTruthy();
+    expect(screen.getByText('Запустить разбор')).toBeTruthy();
+    expect(screen.getByText('Сохранённые отчёты')).toBeTruthy();
   });
 });
