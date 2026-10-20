@@ -631,6 +631,44 @@ body {
   color: var(--dim);
 }
 
+.adm-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 14px 0 12px;
+}
+
+.adm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.adm-check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.adm-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.adm-list li::marker {
+  color: var(--dim);
+}
+
 .adm-progress {
   margin-top: 10px;
   font-size: 11.5px;

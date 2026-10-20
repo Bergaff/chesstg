@@ -1,5 +1,7 @@
 import type {
   AdminStatus,
+  BotSetupResponse,
+  BotStatusResponse,
   LevelsResponse,
   LevelCheckReport,
   OverviewResponse,
@@ -159,4 +161,24 @@ export function saveReport(kind: 'placements' | 'levels', spec: unknown, summary
 
 export function deleteReport(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/reports/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function fetchBotStatus(): Promise<BotStatusResponse> {
+  return request<BotStatusResponse>('/bot');
+}
+
+export function setupBot(payload: {
+  appUrl: string;
+  secret: string;
+  commands: boolean;
+  menuButton: boolean;
+}): Promise<BotSetupResponse> {
+  return request<BotSetupResponse>('/bot/setup', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function disableBotWebhook(): Promise<{ status: BotStatusResponse }> {
+  return request<{ status: BotStatusResponse }>('/bot/webhook/off', { method: 'POST' });
 }

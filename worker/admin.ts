@@ -642,3 +642,179 @@ adminApp.delete('/reports/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM audit_runs WHERE id = ?').bind(c.req.param('id')).run();
   return c.json({ ok: true });
 });
+
+/* ─────────────────────────── бот и вебхук ─────────────────────────── */
+
+interface TelegramReply<T> {
+  ok: boolean;
+  result?: T;
+  description?: string;
+}
+
+const TELEGRAM_API = 'https://api.telegram.org';
+const WEBHOOK_PATH = '/api/telegram/webhook';
+
+/** Прямой вызов Bot API с текстом ошибки, чтобы показать его в админке. */
+async function telegramCall<T>(
+  env: WorkerEnv,
+  method: string,
+  payload: Record<string, unknown> = {},
+): Promise<TelegramReply<T>> {
+  const token = env.BOT_TOKEN?.trim();
+  if (!token) return { ok: false, description: 'Не задан BOT_TOKEN' };
+  try {
+    const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = (await response.json()) as TelegramReply<T>;
+    return { ok: Boolean(data.ok), result: data.result, description: data.description };
+  } catch (error) {
+    console.error('Telegram request failed', String(error).slice(0, 200));
+    return { ok: false, description: 'Нет связи с Telegram. Проверьте исходящие запросы воркера.' };
+  }
+}
+
+/** Адрес приложения: https, без слэша на конце. */
+export function normalizeAppUrl(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:') return null;
+    return url.origin + url.pathname.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+/** Полный адрес вебхука: к домену добавляется путь, если его нет. */
+export function normalizeWebhookUrl(value: string): string | null {
+  const base = normalizeAppUrl(value);
+  if (!base) return null;
+  if (base.endsWith(WEBHOOK_PATH)) return base;
+  return `${base}${WEBHOOK_PATH}`;
+}
+
+interface WebhookInfo {
+  url?: string;
+  pending_update_count?: number;
+  last_error_message?: string;
+  last_error_date?: number;
+  ip_address?: string;
+}
+
+async function readBotStatus(env: WorkerEnv, origin: string) {
+  const appUrl = normalizeAppUrl(env.WEBAPP_URL ?? '') ?? '';
+  const expectedUrl = `${origin}${WEBHOOK_PATH}`;
+  const configured = Boolean(env.BOT_TOKEN?.trim());
+  const base = {
+    configured,
+    expectedUrl,
+    appUrl,
+    webappUrl: (env.WEBAPP_URL ?? '').trim(),
+    webappUrlOk: Boolean(appUrl) && appUrl === normalizeAppUrl(origin),
+    secretSet: Boolean(env.WEBHOOK_SECRET?.trim()),
+    devMode: env.DEV_MODE === 'true',
+    checkedAt: Date.now(),
+  };
+  if (!configured) {
+    return {
+      ...base,
+      username: '',
+      webhook: null,
+      botError: 'Не задан BOT_TOKEN',
+    };
+  }
+  const me = await telegramCall<{ username?: string; first_name?: string }>(env, 'getMe');
+  const info = await telegramCall<WebhookInfo>(env, 'getWebhookInfo');
+  const webhook = info.ok && info.result
+    ? {
+        url: info.result.url ?? '',
+        pending: Number(info.result.pending_update_count ?? 0),
+        lastError: info.result.last_error_message ?? '',
+        lastErrorAt: Number(info.result.last_error_date ?? 0) * 1000 || null,
+      }
+    : null;
+  return {
+    ...base,
+    username: me.result?.username ?? '',
+    webhook,
+    botError: me.ok ? '' : me.description ?? 'Telegram не ответил',
+  };
+}
+
+adminApp.get('/bot', async (c) => {
+  const origin = new URL(c.req.url).origin;
+  return c.json(await readBotStatus(c.env, origin));
+});
+
+adminApp.post('/bot/setup', async (c) => {
+  if (!c.env.BOT_TOKEN?.trim()) {
+    fail(400, 'bot_token_missing', 'Сначала добавьте секрет BOT_TOKEN и перезапустите воркер');
+  }
+  const body = await readJson(c);
+  const origin = new URL(c.req.url).origin;
+  const requestedAppUrl = typeof body.appUrl === 'string' ? body.appUrl.trim() : '';
+  const appUrl = requestedAppUrl ? normalizeAppUrl(requestedAppUrl) : normalizeAppUrl(origin);
+  if (!appUrl) fail(400, 'bad_app_url', 'Адрес приложения должен начинаться с https://');
+
+  const requestedWebhook = typeof body.webhookUrl === 'string' ? body.webhookUrl.trim() : '';
+  const webhookUrl = requestedWebhook ? normalizeWebhookUrl(requestedWebhook) : `${appUrl}${WEBHOOK_PATH}`;
+  if (!webhookUrl) fail(400, 'bad_webhook_url', 'Адрес вебхука должен начинаться с https://');
+
+  const secret = typeof body.secret === 'string' ? body.secret.trim() : '';
+  if (secret && !/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
+    fail(400, 'bad_secret', 'Секрет: буквы, цифры, дефис и подчёркивание, до 256 символов');
+  }
+
+  const steps: Array<{ name: string; ok: boolean; detail: string }> = [];
+
+  const webhookPayload: Record<string, unknown> = {
+    url: webhookUrl,
+    drop_pending_updates: body.dropPending === true,
+  };
+  if (secret) webhookPayload.secret_token = secret;
+  const webhook = await telegramCall(c.env, 'setWebhook', webhookPayload);
+  steps.push({
+    name: 'Вебхук',
+    ok: webhook.ok,
+    detail: webhook.ok ? webhookUrl : webhook.description ?? 'не удалось',
+  });
+
+  if (body.commands !== false) {
+    const commands = await telegramCall(c.env, 'setMyCommands', {
+      commands: [
+        { command: 'start', description: 'Открыть игру' },
+        { command: 'play', description: 'Продолжить партию' },
+        { command: 'help', description: 'Правила и поддержка' },
+      ],
+    });
+    steps.push({
+      name: 'Команды',
+      ok: commands.ok,
+      detail: commands.ok ? 'start, play, help' : commands.description ?? 'не удалось',
+    });
+  }
+
+  if (body.menuButton !== false) {
+    const menu = await telegramCall(c.env, 'setChatMenuButton', {
+      menu_button: { type: 'web_app', text: 'Играть', web_app: { url: appUrl } },
+    });
+    steps.push({
+      name: 'Кнопка меню',
+      ok: menu.ok,
+      detail: menu.ok ? appUrl : menu.description ?? 'не удалось',
+    });
+  }
+
+  return c.json({ steps, status: await readBotStatus(c.env, origin) });
+});
+
+adminApp.post('/bot/webhook/off', async (c) => {
+  const result = await telegramCall(c.env, 'deleteWebhook', { drop_pending_updates: false });
+  if (!result.ok) fail(400, 'telegram_error', result.description ?? 'Telegram не ответил');
+  const origin = new URL(c.req.url).origin;
+  return c.json({ status: await readBotStatus(c.env, origin) });
+});

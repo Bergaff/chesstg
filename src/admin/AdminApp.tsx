@@ -3,11 +3,12 @@ import { AdminError, fetchStatus, login, logout } from './api';
 import { OverviewView } from './views/OverviewView';
 import { LevelsView } from './views/LevelsView';
 import { LabView } from './views/LabView';
+import { BotView } from './views/BotView';
 import { UsersView } from './views/UsersView';
 import { PaymentsView } from './views/PaymentsView';
 import { formatDateTime } from './ui';
 
-type Tab = 'overview' | 'levels' | 'lab' | 'users' | 'payments';
+type Tab = 'overview' | 'levels' | 'lab' | 'users' | 'payments' | 'bot';
 
 const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'overview', title: 'Обзор' },
@@ -15,6 +16,7 @@ const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'lab', title: 'Лаборатория' },
   { id: 'users', title: 'Игроки' },
   { id: 'payments', title: 'Платежи' },
+  { id: 'bot', title: 'Бот' },
 ];
 
 type Phase = 'loading' | 'login' | 'panel' | 'disabled';
@@ -136,6 +138,7 @@ npx wrangler secret put ADMIN_SECRET</pre>
         {tab === 'lab' && <LabView onUnauthorized={onUnauthorized} />}
         {tab === 'users' && <UsersView onUnauthorized={onUnauthorized} />}
         {tab === 'payments' && <PaymentsView onUnauthorized={onUnauthorized} />}
+        {tab === 'bot' && <BotView onUnauthorized={onUnauthorized} />}
       </main>
 
       <footer className="adm-footer">

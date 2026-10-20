@@ -54,6 +54,20 @@ const overview = {
 
 const levels = { checks: [], reports: [] };
 
+const botStatus = {
+  configured: true,
+  expectedUrl: 'https://pawn.workers.dev/api/telegram/webhook',
+  appUrl: 'https://pawn.workers.dev',
+  webappUrl: 'https://pawn.workers.dev',
+  webappUrlOk: true,
+  secretSet: true,
+  devMode: false,
+  checkedAt: Date.now(),
+  username: 'pawn_vs_all_bot',
+  webhook: { url: 'https://pawn.workers.dev/api/telegram/webhook', pending: 0, lastError: '', lastErrorAt: null },
+  botError: '',
+};
+
 let statusResponse: unknown = { configured: true, authenticated: false, expiresAt: null };
 let loginResponse: () => Response = () => jsonResponse({ token: 'token-1', expiresAt: Date.now() + 3_600_000 });
 
@@ -69,6 +83,7 @@ beforeEach(() => {
       if (url.endsWith('/api/admin/login')) return loginResponse();
       if (url.includes('/api/admin/overview')) return jsonResponse(overview);
       if (url.includes('/api/admin/levels')) return jsonResponse(levels);
+      if (url.includes('/api/admin/bot')) return jsonResponse(botStatus);
       return jsonResponse({ ok: true });
     }),
   );
@@ -127,6 +142,16 @@ describe('админка', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Уровни' }));
     expect(await screen.findByText('Проверка генератора')).toBeTruthy();
     expect(screen.queryByText('Лаборатория расстановок')).toBeNull();
+  });
+
+  it('показывает состояние бота и предупреждает о выключенном токене', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Бот' }));
+    expect(await screen.findByText('@pawn_vs_all_bot')).toBeTruthy();
+    expect(screen.getByText('Подключить бота')).toBeTruthy();
   });
 
   it('держит лабораторию отдельной вкладкой', async () => {

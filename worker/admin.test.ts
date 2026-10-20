@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { adminConfigured, signAdminToken, verifyAdminToken } from './admin';
+import app from './app';
+import { adminConfigured, normalizeAppUrl, normalizeWebhookUrl, signAdminToken, verifyAdminToken } from './admin';
 import type { WorkerEnv } from './types';
 
 function env(partial: Partial<WorkerEnv> = {}): WorkerEnv {
@@ -49,5 +50,82 @@ describe('настройка админки', () => {
     expect(adminConfigured(env({ ADMIN_PASSWORD: 'pw', ADMIN_SECRET: 's' }))).toBe(true);
     expect(adminConfigured(env({ ADMIN_PASSWORD_HASH: 'a'.repeat(64), ADMIN_SECRET: 's' }))).toBe(true);
     expect(adminConfigured(env({ ADMIN_PASSWORD: '   ', ADMIN_SECRET: 's' }))).toBe(false);
+  });
+});
+
+describe('адрес бота', () => {
+  it('приводит адрес приложения к https без слэша', () => {
+    expect(normalizeAppUrl('https://pawn.workers.dev/')).toBe('https://pawn.workers.dev');
+    expect(normalizeAppUrl(' https://pawn.workers.dev/game/ ')).toBe('https://pawn.workers.dev/game');
+    expect(normalizeAppUrl('http://localhost:8787')).toBeNull();
+    expect(normalizeAppUrl('pawn.workers.dev')).toBeNull();
+    expect(normalizeAppUrl('')).toBeNull();
+  });
+
+  it('достраивает путь вебхука', () => {
+    expect(normalizeWebhookUrl('https://pawn.workers.dev')).toBe(
+      'https://pawn.workers.dev/api/telegram/webhook',
+    );
+    expect(normalizeWebhookUrl('https://pawn.workers.dev/')).toBe(
+      'https://pawn.workers.dev/api/telegram/webhook',
+    );
+    expect(normalizeWebhookUrl('https://pawn.workers.dev/api/telegram/webhook')).toBe(
+      'https://pawn.workers.dev/api/telegram/webhook',
+    );
+    expect(normalizeWebhookUrl('https://example.com/bot')).toBe('https://example.com/bot/api/telegram/webhook');
+    expect(normalizeWebhookUrl('http://pawn.workers.dev')).toBeNull();
+  });
+});
+
+async function call(path: string, init: RequestInit = {}, partial: Partial<WorkerEnv> = {}) {
+  const base = env({ ADMIN_PASSWORD: 'pw', ADMIN_SECRET: 'secret', ...partial });
+  const headers = new Headers(init.headers);
+  if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+  const { token } = await signAdminToken('secret');
+  headers.set('Authorization', `Bearer ${token}`);
+  return app.fetch(new Request(`https://pawn.test/api/admin${path}`, { ...init, headers }), base);
+}
+
+describe('роуты бота', () => {
+  it('не пускает без токена админки', async () => {
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/admin/bot'),
+      env({ ADMIN_PASSWORD: 'pw', ADMIN_SECRET: 'secret' }),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it('просит добавить BOT_TOKEN', async () => {
+    const response = await call('/bot/setup', { method: 'POST', body: '{}' });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe('bot_token_missing');
+  });
+
+  it('отклоняет незащищённый адрес', async () => {
+    const response = await call(
+      '/bot/setup',
+      { method: 'POST', body: JSON.stringify({ appUrl: 'http://pawn.test' }) },
+      { BOT_TOKEN: '123:abc' },
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe('bad_app_url');
+  });
+
+  it('отклоняет секрет с пробелами', async () => {
+    const response = await call(
+      '/bot/setup',
+      { method: 'POST', body: JSON.stringify({ secret: 'плохой секрет' }) },
+      { BOT_TOKEN: '123:abc' },
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toBe('bad_secret');
+  });
+
+  it('отдаёт состояние без токена бота', async () => {
+    const response = await call('/bot');
+    const data = (await response.json()) as { configured: boolean; expectedUrl: string };
+    expect(response.status).toBe(200);
+    expect(data.configured).toBe(false);
+    expect(data.expectedUrl).toBe('https://pawn.test/api/telegram/webhook');
   });
 });

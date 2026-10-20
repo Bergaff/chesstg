@@ -193,3 +193,35 @@ export interface LevelCheckReport {
     ms: number;
   }>;
 }
+
+export interface BotWebhookInfo {
+  url: string;
+  pending: number;
+  lastError: string;
+  lastErrorAt: number | null;
+}
+
+export interface BotStatusResponse {
+  configured: boolean;
+  expectedUrl: string;
+  appUrl: string;
+  webappUrl: string;
+  webappUrlOk: boolean;
+  secretSet: boolean;
+  devMode: boolean;
+  checkedAt: number;
+  username: string;
+  webhook: BotWebhookInfo | null;
+  botError: string;
+}
+
+export interface BotStep {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface BotSetupResponse {
+  steps: BotStep[];
+  status: BotStatusResponse;
+}
