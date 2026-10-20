@@ -2271,7 +2271,6 @@ a {
   font: inherit;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  appearance: none;
 }
 
 .lab-field input:focus-visible,
