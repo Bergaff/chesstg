@@ -14,9 +14,8 @@ import { GameScreen } from './screens/GameScreen';
 import { ShopScreen } from './screens/ShopScreen';
 import { RecordsScreen } from './screens/RecordsScreen';
 import { LegalScreen } from './screens/LegalScreen';
-import { LabScreen } from './screens/LabScreen';
 
-type Screen = 'menu' | 'game' | 'shop' | 'records' | 'lab' | 'terms' | 'privacy';
+type Screen = 'menu' | 'game' | 'shop' | 'records' | 'terms' | 'privacy';
 
 interface DemoRequest {
   label: string;
@@ -199,13 +198,6 @@ export default function App(): ReactNode {
     void refresh();
   }, [refresh]);
 
-  const goLab = useCallback(() => {
-    setNoLivesOpen(false);
-    setRulesOpen(false);
-    setScreen('lab');
-    window.scrollTo(0, 0);
-  }, []);
-
   const openLegal = useCallback((kind: 'terms' | 'privacy') => {
     setLegalReturn((current) => (current === 'terms' || current === 'privacy' ? current : screenRef.current));
     setRulesOpen(false);
@@ -309,7 +301,6 @@ export default function App(): ReactNode {
             onOpenRules={() => setRulesOpen(true)}
             onTerms={() => openLegal('terms')}
             onPrivacy={() => openLegal('privacy')}
-            onLab={goLab}
           />
         )}
         {screen === 'game' && (
@@ -331,7 +322,6 @@ export default function App(): ReactNode {
           />
         )}
         {screen === 'records' && <RecordsScreen onBack={goMenu} />}
-        {screen === 'lab' && <LabScreen onBack={goMenu} />}
         {(screen === 'terms' || screen === 'privacy') && (
           <LegalScreen
             kind={screen}

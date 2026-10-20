@@ -76,7 +76,18 @@ npx wrangler d1 execute pawn-vs-all --remote --command "SELECT name FROM sqlite_
 ```bash
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put WEBHOOK_SECRET
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put ADMIN_SECRET
 ```
+
+`ADMIN_PASSWORD` это пароль для входа в админку `/admin`, `ADMIN_SECRET` любая случайная строка для подписи сессий (`openssl rand -hex 32`). Вместо открытого пароля можно задать `ADMIN_PASSWORD_HASH` с sha256 в hex:
+
+```bash
+printf '%s' 'пароль' | sha256sum | cut -d' ' -f1
+npx wrangler secret put ADMIN_PASSWORD_HASH
+```
+
+Если `ADMIN_SECRET` не задан, админка отвечает 503 и не пускает никого.
 
 `WEBHOOK_SECRET` любая случайная строка (например, `openssl rand -hex 32`). Telegram будет присылать её в заголовке `X-Telegram-Bot-Api-Secret-Token`.
 
@@ -196,7 +207,29 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 - [ ] Рекорды: глобально и по друзьям, реферальная ссылка начисляет +25.
 - [ ] Нет ошибок в `wrangler tail` при типичных сценариях.
 
-## 8. Эксплуатация
+## 8. Админка и статистика
+
+Страница `https://<worker>.workers.dev/admin` живёт отдельно от Mini App: свой `admin.html`, свой бандл, `noindex` и `Cache-Control: no-store`. Вход только по паролю, регистрации нет. Сессия подписанным токеном на 12 часов лежит в `sessionStorage`, после восьми неудачных попыток с одного IP вход блокируется на 15 минут.
+
+После первого входа доступны вкладки:
+
+- `Обзор`: игроки, забеги, победность, новые и активные по дням, ретеншн D1/D7, экономика, воронка по максимальному уровню, попытки по уровням, бесконечный режим, топы.
+- `Уровни`: точечная проверка генератора (уровень и число сидов), прогон диапазона уровней с кэшем в `level_checks`, лаборатория расстановок с полным перебором до 12000 вариантов и сохранением отчётов в `audit_runs`.
+- `Игроки`: поиск и сортировка, карточка с забегами, покупками и событиями.
+- `Платежи`: сводка по товарам и последние счета в звёздах.
+
+Данные лежат в D1: миграция `0002_admin.sql` создаёт `events`, `admin_attempts`, `level_checks` и `audit_runs`. События (`coins_earned`, `coins_spent`, `life_lost`, `ad_reward`, `bonus_used`, `purchase`, `refund`) пишутся через `waitUntil` и не задерживают ответ. Если миграцию не применить, админка откроется, но статистика будет пустой, а проверки уровней не сохранятся.
+
+Локально:
+
+```bash
+# .dev.vars: ADMIN_PASSWORD и ADMIN_SECRET
+npm run db:local
+npm run dev:worker     # /admin на http://localhost:8787
+npm run dev            # /admin проксируется на API через vite
+```
+
+## 9. Эксплуатация
 
 Логи:
 
@@ -213,7 +246,7 @@ npx wrangler d1 export pawn-vs-all --remote --output=backup-$(date +%F).sql
 Новая миграция:
 
 ```bash
-# migrations/0002_....sql
+# migrations/0002_admin.sql
 npm run db:remote
 npm run deploy
 ```
@@ -227,7 +260,7 @@ npx wrangler rollback <deployment-id>
 
 Откат миграции делай отдельным SQL-скриптом: D1 не поддерживает `down`-миграции автоматически.
 
-## 9. Частые проблемы
+## 10. Частые проблемы
 
 | Симптом | Причина и решение |
 | --- | --- |
@@ -241,7 +274,7 @@ npx wrangler rollback <deployment-id>
 | `403` на webhook | Не совпадает `WEBHOOK_SECRET` или не задан, а `DEV_MODE=false`. |
 | Сбросился прогресс | Открыто в другом браузере/гостевом режиме; гостевой ID хранится в localStorage. |
 
-## 10. Стоимость и лимиты
+## 11. Стоимость и лимиты
 
 - Workers Free: 100k запросов/сутки; D1 Free: 5 ГБ и 5 млн чтений/сутки. Для старта хватает, при росте включи Workers Paid.
 - Статика отдаётся бесплатно через assets; API на каждый ход делает несколько чтений/записей D1.

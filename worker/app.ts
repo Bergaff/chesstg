@@ -22,6 +22,8 @@ import {
   type GameState,
 } from '../src/engine';
 import { authMiddleware, syncTelegramName } from './auth';
+import { adminApp } from './admin';
+import { logEventInBackground } from './events';
 import {
   activeRuns,
   getRun,
@@ -58,8 +60,12 @@ const publicPaths = new Set(['/api/health', '/api/config', '/api/telegram/webhoo
 
 app.use('/api/*', async (c, next) => {
   if (publicPaths.has(c.req.path)) return next();
+  // У админки своя проверка токена, игровая авторизация к ней не применяется.
+  if (c.req.path === '/api/admin' || c.req.path.startsWith('/api/admin/')) return next();
   return authMiddleware(c, next);
 });
+
+app.route('/api/admin', adminApp);
 
 app.onError((err, c) => {
   if (err instanceof HttpError) {
@@ -461,6 +467,20 @@ app.post('/api/run/:id/finish', async (c) => {
   const fresh = await getUserById(c.env, user.id);
   if (!fresh) fail(500, 'user_missing');
 
+  if (Number(batch[0]?.meta?.changes ?? 0) > 0) {
+    const ctx = c.executionCtx;
+    if (reward > 0) {
+      logEventInBackground(c.env, ctx, user.id, 'coins_earned', reward, {
+        mode: run.mode,
+        level: run.level,
+        outcome,
+      });
+    }
+    if (outcome === 'lost') {
+      logEventInBackground(c.env, ctx, user.id, 'life_lost', 1, { mode: run.mode, level: run.level });
+    }
+  }
+
   if (Number(batch[0]?.meta?.changes ?? 0) === 0) {
     const again = await getRun(c.env, run.id);
     const storedResult = again?.result ? JSON.parse(again.result) : result;
@@ -533,6 +553,12 @@ app.post('/api/bonus/use', async (c) => {
 
   const fresh = await getUserById(c.env, user.id);
   if (!fresh) fail(500, 'user_missing');
+
+  logEventInBackground(c.env, c.executionCtx, user.id, 'bonus_used', 1, { kind, source });
+  if (source === 'coins') {
+    logEventInBackground(c.env, c.executionCtx, user.id, 'coins_spent', price, { kind });
+  }
+
   return c.json({
     ok: true,
     kind,
@@ -566,6 +592,12 @@ app.post('/api/shop/bonus', async (c) => {
 
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
+
+  logEventInBackground(c.env, c.executionCtx, authCtx.user.id, 'coins_spent', price, {
+    kind,
+    source: 'shop',
+  });
+
   return c.json({
     ok: true,
     profile: toProfile(fresh),
@@ -675,6 +707,7 @@ app.post('/api/ads/reward', async (c) => {
   const fresh = await getUserById(c.env, user.id);
   if (!fresh) fail(500, 'user_missing');
   user = fresh;
+  logEventInBackground(c.env, c.executionCtx, user.id, 'ad_reward', 1, { kind });
   const profile = toProfile(user);
   return c.json({
     ok: true,

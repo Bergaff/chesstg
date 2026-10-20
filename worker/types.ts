@@ -10,6 +10,12 @@ export interface WorkerEnv {
   ALLOW_GUESTS?: string;
   DEV_MODE?: string;
   ENVIRONMENT?: string;
+  /** Пароль администратора в открытом виде. Только как секрет воркера. */
+  ADMIN_PASSWORD?: string;
+  /** SHA-256 пароля в hex, альтернатива ADMIN_PASSWORD. */
+  ADMIN_PASSWORD_HASH?: string;
+  /** Ключ подписи токенов админки. Обязателен для доступа. */
+  ADMIN_SECRET?: string;
 }
 
 export interface TelegramUser {
@@ -76,5 +82,6 @@ export type AppEnv = {
   Bindings: WorkerEnv;
   Variables: {
     auth: AuthContext;
+    adminExpiresAt: number;
   };
 };

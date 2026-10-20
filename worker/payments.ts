@@ -6,6 +6,7 @@ import {
   type ProductSku,
 } from '../src/engine';
 import { ownedSkins } from './db';
+import { logEvent } from './events';
 import { fail } from './http';
 import { callTelegram } from './telegram';
 import type { UserRow, WorkerEnv } from './types';
@@ -136,7 +137,11 @@ export async function fulfillPayment(
   ];
 
   const results = await env.DB.batch(statements);
-  return Number(results[0]?.meta?.changes ?? 0) > 0;
+  const applied = Number(results[0]?.meta?.changes ?? 0) > 0;
+  if (applied) {
+    await logEvent(env, payment.user_id, 'purchase', payment.stars, { sku: payment.sku });
+  }
+  return applied;
 }
 
 export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<boolean> {
@@ -163,5 +168,6 @@ export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<b
     );
   }
   await env.DB.batch(statements);
+  await logEvent(env, user.id, 'refund', payment.stars, { sku: payment.sku });
   return true;
 }

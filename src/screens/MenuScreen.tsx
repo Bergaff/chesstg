@@ -18,10 +18,9 @@ interface MenuScreenProps {
   onOpenRules: () => void;
   onTerms: () => void;
   onPrivacy: () => void;
-  onLab: () => void;
 }
 
-export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy, onLab }: MenuScreenProps): ReactNode {
+export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScreenProps): ReactNode {
   const { profile, config, active, challenge, setProfile, refresh, toast, showAd, goShop, goShopStars, goRecords } = useApp();
   const [challengeHidden, setChallengeHidden] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
@@ -168,13 +167,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy, onLab }: M
           <span className="menu-row-end">→</span>
         </button>
 
-        <button type="button" className="menu-row" onClick={onLab}>
-          <span className="menu-row-main">
-            <span className="menu-row-title">Лаборатория</span>
-            <span className="menu-row-desc">Перебор расстановок и проверка решений</span>
-          </span>
-          <span className="menu-row-end">→</span>
-        </button>
       </div>
 
       {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
@@ -213,6 +205,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy, onLab }: M
         <button type="button" onClick={onTerms}>Условия</button>
         <span className="sep">/</span>
         <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+        <span className="sep">/</span>
+        <a href="/admin">Лаборатория</a>
         <span className="sep">/</span>
         <span>2026</span>
         {profile.adFree && <span className="sep">/</span>}
