@@ -431,6 +431,11 @@ a {
   text-align: left;
 }
 
+.menu-row[href] {
+  color: inherit;
+  text-decoration: none;
+}
+
 .menu-row-main {
   flex: 1;
   min-width: 0;

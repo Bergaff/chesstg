@@ -182,6 +182,8 @@ describe('UI smoke', () => {
     expect(screen.getByText(/Мировая таблица и друзья/)).toBeTruthy();
     expect(screen.getByText(/Гостевой режим/)).toBeTruthy();
     expect(screen.getByText('Реклама за монеты')).toBeTruthy();
+    const lab = screen.getByText('Лаборатория').closest('a');
+    expect(lab?.getAttribute('href')).toBe('/admin');
   });
 
   it('открывает правила и закрывает их', async () => {

@@ -167,6 +167,14 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span className="menu-row-end">→</span>
         </button>
 
+        <a className="menu-row" href="/admin">
+          <span className="menu-row-main">
+            <span className="menu-row-title">Лаборатория</span>
+            <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
+          </span>
+          <span className="menu-row-end">→</span>
+        </a>
+
       </div>
 
       {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
@@ -205,8 +213,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         <button type="button" onClick={onTerms}>Условия</button>
         <span className="sep">/</span>
         <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
-        <span className="sep">/</span>
-        <a href="/admin">Лаборатория</a>
         <span className="sep">/</span>
         <span>2026</span>
         {profile.adFree && <span className="sep">/</span>}
