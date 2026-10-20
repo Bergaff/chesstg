@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "pawn-vs-all",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9fc9827a-6f88-49c0-9e9a-cd41418f621b",
       "migrations_dir": "migrations"
     }
   ],

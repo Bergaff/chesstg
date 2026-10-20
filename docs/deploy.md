@@ -36,6 +36,8 @@ npx wrangler d1 create pawn-vs-all
 ]
 ```
 
+Боевой ID базы для этого проекта: `9fc9827a-6f88-49c0-9e9a-cd41418f621b`, он уже вписан в `wrangler.jsonc`. Если создаёте новую базу, замените его на свой.
+
 Примени схему удалённо:
 
 ```bash
@@ -184,6 +186,7 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 - [ ] `BOT_TOKEN` и `WEBHOOK_SECRET` заданы как секреты.
 - [ ] `DEV_MODE: "false"`, `WEBAPP_URL` HTTPS, `BOT_USERNAME` заполнен.
 - [ ] `getWebhookInfo` без ошибок.
+- [ ] Почта поддержки в `src/legal/content.ts` актуальна и принимает письма.
 - [ ] Mini App открывается из кнопки бота и из меню.
 - [ ] В Telegram проходит первый уровень, сохранение переживает закрытие.
 - [ ] Победа начисляет монеты, поражение списывает жизнь.

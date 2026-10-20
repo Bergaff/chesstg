@@ -12,7 +12,7 @@ export interface LegalDocument {
   sections: LegalSection[];
 }
 
-const CONTACT = 'support@pawn-vs-all.example';
+const CONTACT = 'silviojurk70@gmail.com';
 const UPDATED = '19 октября 2026 года';
 
 export const TERMS: LegalDocument = {

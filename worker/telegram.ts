@@ -89,7 +89,8 @@ export async function sendHelp(env: WorkerEnv, chatId: number): Promise<void> {
       'Дойдите до верхнего ряда, и уровень пройден.\n\n' +
       'Жизни восстанавливаются по одной каждые 30 минут.\n' +
       'Монеты дают за победы, они тратятся на бонусы.\n\n' +
-      'Команды: /play открыть игру, /help эта справка.',
+      'Команды: /play открыть игру, /help эта справка.\n' +
+      'Поддержка: silviojurk70@gmail.com.',
     parse_mode: 'HTML',
   });
 }
