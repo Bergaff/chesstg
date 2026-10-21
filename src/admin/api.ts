@@ -1,7 +1,7 @@
 import type {
   AdminStatus,
   BotSetupResponse,
-  BotStatusResponse,
+  BotStatusResponse, DiagResponse,
   HealthResponse,
   LevelsResponse,
   LevelCheckReport,
@@ -179,6 +179,10 @@ export function setupBot(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function fetchDiag(): Promise<DiagResponse> {
+  return request<DiagResponse>('/diag');
 }
 
 export function disableBotWebhook(): Promise<{ status: BotStatusResponse }> {

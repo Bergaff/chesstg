@@ -256,11 +256,18 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
         `age=${result.ageSec ?? '?'}`,
         `fields=${result.fields.join(',')}`,
       );
-      const debug = c.env.AUTH_DEBUG === 'true' ? { raw: initData.slice(0, 900) } : {};
+      const debug = c.env.AUTH_DEBUG === 'true';
+      if (debug) {
+        // Записываем в events, чтобы владелец видел это в админке, а не в логах Cloudflare.
+        c.env.DB.prepare("INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)")
+          .bind('anonymous', 'init_data_rejected', 1, JSON.stringify({ raw: initData.slice(0, 900), reason, fields: result.fields }), Date.now())
+          .run()
+          .catch(() => undefined);
+      }
       fail(401, 'invalid_init_data', INIT_DATA_MESSAGES[reason], {
         reason,
         authDateAgeSec: result.ageSec,
-        ...debug,
+        ...(debug ? { raw: initData.slice(0, 900) } : {}),
       });
     }
     if (result.variant && result.variant !== 'canonical') {

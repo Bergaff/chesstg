@@ -778,6 +778,28 @@ adminApp.get('/bot', async (c) => {
   return c.json(await readBotStatus(c.env, origin));
 });
 
+adminApp.get('/diag', async (c) => {
+  const db = c.env.DB;
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  await db.prepare("DELETE FROM events WHERE kind = 'init_data_rejected' AND created_at < ?").bind(since).run().catch(() => undefined);
+  const rows = await db
+    .prepare("SELECT created_at, meta FROM events WHERE kind = 'init_data_rejected' ORDER BY id DESC LIMIT 20")
+    .all<{ created_at: number; meta: string }>();
+  const entries = (rows.results ?? []).map((row) => {
+    let raw = '';
+    let reason = '';
+    try {
+      const meta = JSON.parse(row.meta) as { raw?: string; reason?: string };
+      raw = meta.raw ?? '';
+      reason = meta.reason ?? '';
+    } catch {
+      /* повреждённая запись */
+    }
+    return { at: row.created_at, reason, raw };
+  });
+  return c.json({ enabled: c.env.AUTH_DEBUG === 'true', entries });
+});
+
 adminApp.post('/bot/setup', async (c) => {
   if (!hasBotToken(c.env)) {
     fail(400, 'bot_token_missing', 'Сначала добавьте секрет BOT_TOKEN и перезапустите воркер');

@@ -3,6 +3,7 @@ import {
   AdminError,
   disableBotWebhook,
   fetchBotStatus,
+  fetchDiag,
   setupBot,
 } from '../api';
 import type { BotStatusResponse, BotStep } from '../types';
@@ -24,6 +25,10 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
   const [commands, setCommands] = useState(true);
   const [menuButton, setMenuButton] = useState(true);
   const [dropPending, setDropPending] = useState(false);
+  const [diag, setDiag] = useState<{ enabled: boolean; entries: Array<{ at: number; reason: string; raw: string }> }>({
+    enabled: false,
+    entries: [],
+  });
 
   const handleAuth = useCallback(
     (err: unknown): boolean => {
@@ -48,9 +53,18 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
     }
   }, [handleAuth]);
 
+  const loadDiag = useCallback(async () => {
+    try {
+      setDiag(await fetchDiag());
+    } catch {
+      /* диагностика не должна ломать вкладку */
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadDiag();
+  }, [load, loadDiag]);
 
   const pending = status?.webhook?.pending ?? 0;
 
@@ -285,6 +299,37 @@ npm run deploy</pre>
               поменяли один, поменяйте и второй, иначе Telegram получит 403 и будет повторять доставку.
               Значение видно только при вводе, прочитать его потом нельзя.
             </p>
+
+            <div className="adm-panel">
+              <div className="adm-panel-head">
+                <h3 className="adm-panel-title">Диагностика входа</h3>
+                <button type="button" className="adm-btn adm-btn-quiet" onClick={() => void loadDiag()}>
+                  Обновить
+                </button>
+              </div>
+              {!diag.enabled && (
+                <p className="adm-note">
+                  Записи не собираются. Чтобы включить, добавьте в панели Cloudflare переменную AUTH_DEBUG
+                  со значением true для этого воркера, без пересборки.
+                </p>
+              )}
+              {diag.enabled && diag.entries.length === 0 && (
+                <p className="adm-note">Пока пусто: откройте игру из бота, и отказ проверки появится здесь.</p>
+              )}
+              {diag.entries.length > 0 && (
+                <>
+                  <p className="adm-note">
+                    Последние отказы проверки initData, {diag.entries.length} шт за сутки. Выделите блок и
+                    скопируйте, чтобы отправить разработчику.
+                  </p>
+                  <pre className="adm-code">
+                    {diag.entries
+                      .map((entry) => `${formatDateTime(entry.at)} ${entry.reason}\n${entry.raw}`)
+                      .join('\n\n')}
+                  </pre>
+                </>
+              )}
+            </div>
           </>
         )}
       </Panel>

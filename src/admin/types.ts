@@ -219,6 +219,17 @@ export interface BotStatusResponse {
   botError: string;
 }
 
+export interface DiagEntry {
+  at: number;
+  reason: string;
+  raw: string;
+}
+
+export interface DiagResponse {
+  enabled: boolean;
+  entries: DiagEntry[];
+}
+
 export interface BotStep {
   name: string;
   ok: boolean;
