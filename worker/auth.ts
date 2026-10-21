@@ -257,7 +257,9 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
       const debug = c.env.AUTH_DEBUG === 'true';
       if (debug) {
         // Записываем в events, чтобы владелец видел это в админке, а не в логах Cloudflare.
-        c.env.DB.prepare("INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)")
+        // Дожидаться нужно обязательно: после fail() изолятор имеет право
+        // не дослать незавершённый запрос, и запись теряется.
+        await c.env.DB.prepare('INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)')
           .bind('anonymous', 'init_data_rejected', 1, JSON.stringify({ raw: initData.slice(0, 900), reason, fields: result.fields }), Date.now())
           .run()
           .catch(() => undefined);

@@ -103,7 +103,9 @@ async function request<T>(path: string, init: RequestInit = {}, withAuth = true)
 }
 
 export async function fetchStatus(): Promise<AdminStatus> {
-  return request<AdminStatus>('/status', { method: 'GET' }, false);
+  // С токоном в заголовке: иначе /status всегда отвечает «не авторизован»,
+  // и перезагрузка страницы выкидывает на форму входа, даже когда токен жив.
+  return request<AdminStatus>('/status', { method: 'GET' });
 }
 
 export async function login(password: string): Promise<number> {
