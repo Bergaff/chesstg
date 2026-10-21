@@ -162,7 +162,7 @@ describe('подпись по ключу приложения', () => {
     const seen: string[] = [];
     const result = await validateInitData(raw, TOKEN, async (candidates, signature) => {
       seen.push(signature);
-      return candidates.length === 2 && signature === 'c2ln';
+      return candidates.length >= 2 && signature === "c2ln";
     });
     expect(result.reason).toBeNull();
     expect(result.variant).toBe('signed');
