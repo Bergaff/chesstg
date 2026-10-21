@@ -72,12 +72,42 @@ type InitDataVariant =
   | 'no_signature'
   | 'keep_empty'
   | 'no_signature_keep_empty'
+  | 'raw'
+  | 'raw_no_signature'
   | 'signed';
 
 interface VariantRule {
   name: InitDataVariant;
   dropSignature: boolean;
   dropEmpty: boolean;
+  raw: boolean;
+}
+
+/** Значения из query string: `+` это плюс, а не пробел, URLSearchParams портит base64. */
+function decodeValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, '%2B'));
+  } catch {
+    return value;
+  }
+}
+
+interface Pair {
+  key: string;
+  value: string;
+  decoded: string;
+}
+
+function parsePairs(initData: string): Pair[] {
+  return initData
+    .split('&')
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => {
+      const index = chunk.indexOf('=');
+      const key = index < 0 ? chunk : chunk.slice(0, index);
+      const value = index < 0 ? '' : chunk.slice(index + 1);
+      return { key, value, decoded: decodeValue(value) };
+    });
 }
 
 /**
@@ -88,22 +118,23 @@ interface VariantRule {
  * ровно «игра не открывается».
  */
 const VARIANTS: VariantRule[] = [
-  { name: 'canonical', dropSignature: false, dropEmpty: true },
-  { name: 'no_signature', dropSignature: true, dropEmpty: true },
-  { name: 'keep_empty', dropSignature: false, dropEmpty: false },
-  { name: 'no_signature_keep_empty', dropSignature: true, dropEmpty: false },
+  { name: 'canonical', dropSignature: false, dropEmpty: true, raw: false },
+  { name: 'no_signature', dropSignature: true, dropEmpty: true, raw: false },
+  { name: 'keep_empty', dropSignature: false, dropEmpty: false, raw: false },
+  { name: 'no_signature_keep_empty', dropSignature: true, dropEmpty: false, raw: false },
+  { name: 'raw', dropSignature: false, dropEmpty: true, raw: true },
+  { name: 'raw_no_signature', dropSignature: true, dropEmpty: true, raw: true },
 ];
 
-function checkString(params: URLSearchParams, rule: VariantRule): string {
-  const entries: Array<[string, string]> = [];
-  for (const [key, value] of params.entries()) {
-    if (key === 'hash') continue;
-    if (rule.dropSignature && key === 'signature') continue;
-    if (rule.dropEmpty && value === '') continue;
-    entries.push([key, value]);
-  }
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  return entries.map(([key, value]) => `${key}=${value}`).join('\n');
+function checkString(pairs: Pair[], rule: VariantRule): string {
+  return pairs
+    .filter((pair) => pair.key !== 'hash')
+    .filter((pair) => !(rule.dropSignature && pair.key === 'signature'))
+    .filter((pair) => !(rule.dropEmpty && (rule.raw ? pair.value : pair.decoded) === ''))
+    .map((pair) => [pair.key, rule.raw ? pair.value : pair.decoded] as [string, string])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
 }
 
 /** Проверка подписи Telegram WebApp initData. */
@@ -115,11 +146,12 @@ export async function validateInitData(
   const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [], variant: null };
   if (!token || !initData) return { ...empty, reason: 'no_params' };
 
-  const params = new URLSearchParams(initData);
-  const fields = [...new Set([...params.keys()])].sort();
+  const params = parsePairs(initData);
+  const get = (key: string) => params.find((pair) => pair.key === key)?.decoded ?? '';
+  const fields = [...new Set(params.map((pair) => pair.key))].sort();
   if (fields.length === 0) return { ...empty, reason: 'no_params' };
 
-  const hash = params.get('hash');
+  const hash = get('hash');
   if (!hash) return { ...empty, fields, reason: 'no_hash' };
   const expected = hash.toLowerCase();
 
@@ -145,15 +177,15 @@ export async function validateInitData(
       }
     }
     if (thirdParty && verifySigned) {
-      const signature = params.get('signature') ?? '';
+      const signature = get('signature');
       if (signature && (await verifySigned(candidates, signature))) {
-        matched = { name: 'signed', dropSignature: true, dropEmpty: true };
+        matched = { name: 'signed', dropSignature: true, dropEmpty: true, raw: false };
       }
     }
     if (!matched) return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
   }
 
-  const authDateRaw = params.get('auth_date');
+  const authDateRaw = get('auth_date');
   const authDate = authDateRaw ? Number(authDateRaw) : 0;
   if (!Number.isFinite(authDate) || authDate <= 0) {
     return { ...empty, fields, variant: matched.name, reason: 'no_auth_date' };
@@ -166,7 +198,7 @@ export async function validateInitData(
     return { ...empty, fields, ageSec, variant: matched.name, reason: 'clock_skew' };
   }
 
-  const rawUser = params.get('user');
+  const rawUser = get('user');
   if (!rawUser) return { ...empty, fields, ageSec, variant: matched.name, reason: 'no_user' };
   try {
     const parsed = JSON.parse(rawUser) as Record<string, unknown>;

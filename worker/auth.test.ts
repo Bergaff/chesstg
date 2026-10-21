@@ -177,6 +177,27 @@ describe('подпись по ключу приложения', () => {
   });
 });
 
+describe('значения с плюсиками', () => {
+  const signOver = async (check: string, token: string) => {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(token), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const secretKey = await crypto.subtle.sign('HMAC', base, new TextEncoder().encode('WebAppData'));
+    const key = await crypto.subtle.importKey('raw', new Uint8Array(secretKey), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    return [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(check)))]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  };
+
+  it('не ломает base64 со знаком плюс', async () => {
+    const instance = 'Q+Zk/abc==';
+    const user = encodeURIComponent(USER);
+    const check = `auth_date=${'1792560000'}\nchat_instance=${instance}\nuser=${user}`;
+    const hash = await signOver(check, TOKEN);
+    const result = await validateInitData(`auth_date=1792560000&chat_instance=${instance}&user=${user}&hash=${hash}`, TOKEN);
+    expect(result.reason).toBeNull();
+    expect(result.check?.user.id).toBe(777);
+  });
+});
+
 describe('токен бота', () => {
   it('срезает пробелы и невидимые символы', () => {
     expect(botToken({ BOT_TOKEN: `\n ${TOKEN}\u200b \r` })).toBe(TOKEN);
