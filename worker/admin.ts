@@ -12,6 +12,7 @@ import {
 import { fail, readJson } from './http';
 import { botToken, hasBotToken } from './token';
 import type { AppEnv, WorkerEnv } from './types';
+import { webAppKeyStatus } from './webAppKey';
 
 /**
  * Админка.
@@ -788,16 +789,25 @@ adminApp.get('/diag', async (c) => {
   const entries = (rows.results ?? []).map((row) => {
     let raw = '';
     let reason = '';
+    let signed = '';
     try {
-      const meta = JSON.parse(row.meta) as { raw?: string; reason?: string };
+      const meta = JSON.parse(row.meta) as { raw?: string; reason?: string; signed?: { note?: string } };
       raw = meta.raw ?? '';
       reason = meta.reason ?? '';
+      signed = meta.signed?.note ?? '';
     } catch {
       /* повреждённая запись */
     }
-    return { at: row.created_at, reason, raw };
+    return { at: row.created_at, reason, raw, signed };
   });
-  return c.json({ enabled: c.env.AUTH_DEBUG === 'true', entries });
+  // Отдельная живая проверка: был ли ключ подписи у приложения на момент просмотра.
+  const webApp = await webAppKeyStatus(c.env);
+  return c.json({
+    enabled: true,
+    authDebug: c.env.AUTH_DEBUG === 'true',
+    webApp: { present: webApp.present, note: webApp.note, checkedAt: webApp.checkedAt },
+    entries,
+  });
 });
 
 adminApp.post('/bot/setup', async (c) => {

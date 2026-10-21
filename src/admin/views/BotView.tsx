@@ -6,8 +6,11 @@ import {
   fetchDiag,
   setupBot,
 } from '../api';
-import type { BotStatusResponse, BotStep } from '../types';
+import type { BotStatusResponse, BotStep, DiagResponse } from '../types';
 import { Metric, Panel, StatusLine, Table, formatDateTime } from '../ui';
+
+// Сбор отказов initData включён всегда, поэтому включено по умолчанию.
+const EMPTY_DIAG: DiagResponse = { enabled: true, entries: [] };
 
 function randomSecret(): string {
   const bytes = new Uint8Array(24);
@@ -25,10 +28,7 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
   const [commands, setCommands] = useState(true);
   const [menuButton, setMenuButton] = useState(true);
   const [dropPending, setDropPending] = useState(false);
-  const [diag, setDiag] = useState<{ enabled: boolean; entries: Array<{ at: number; reason: string; raw: string }> }>({
-    enabled: false,
-    entries: [],
-  });
+  const [diag, setDiag] = useState<DiagResponse>(EMPTY_DIAG);
 
   const handleAuth = useCallback(
     (err: unknown): boolean => {
@@ -56,7 +56,12 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
   const loadDiag = useCallback(async () => {
     try {
       const next = await fetchDiag();
-      setDiag({ enabled: next.enabled === true, entries: Array.isArray(next.entries) ? next.entries : [] });
+      setDiag({
+        enabled: true,
+        authDebug: next.authDebug === true,
+        webApp: next.webApp && typeof next.webApp === 'object' ? next.webApp : undefined,
+        entries: Array.isArray(next.entries) ? next.entries : [],
+      });
     } catch {
       /* диагностика не должна ломать вкладку */
     }
@@ -308,12 +313,13 @@ npm run deploy</pre>
                   Обновить
                 </button>
               </div>
-              {!diag.enabled && (
-                <p className="adm-note">
-                  Записи не собираются. Чтобы включить, добавьте в панели Cloudflare переменную AUTH_DEBUG
-                  со значением true для этого воркера, без пересборки.
-                </p>
-              )}
+              <p className="adm-note">
+                {diag.webApp?.present
+                  ? `Ключ подписи приложения: ${diag.webApp.note}.`
+                  : `Ключа подписи приложения нет: ${diag.webApp?.note ?? 'не проверено'}. Без него воркер
+                     проверяет initData только по BOT_TOKEN, а подпись Ed25519 проверить нечем.`}
+                {!diag.authDebug && ' Переменная AUTH_DEBUG в запущенной версии не активна, на сборку это не влияет.'}
+              </p>
               {diag.enabled && diag.entries.length === 0 && (
                 <p className="adm-note">Пока пусто: откройте игру из бота, и отказ проверки появится здесь.</p>
               )}
@@ -325,7 +331,10 @@ npm run deploy</pre>
                   </p>
                   <pre className="adm-code">
                     {diag.entries
-                      .map((entry) => `${formatDateTime(entry.at)} ${entry.reason}\n${entry.raw}`)
+                      .map(
+                        (entry) =>
+                          `${formatDateTime(entry.at)} ${entry.reason}${entry.signed ? ` · ${entry.signed}` : ''}\n${entry.raw}`,
+                      )
                       .join('\n\n')}
                   </pre>
                 </>

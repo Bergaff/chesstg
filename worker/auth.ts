@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import type { AppEnv, TelegramUser, WorkerEnv } from './types';
 import { fail } from './http';
 import { botToken } from './token';
-import { verifySignedInitData } from './webAppKey';
+import { verifySignedInitData, webAppKeyStatus } from './webAppKey';
 import { getOrCreateUser } from './db';
 
 const encoder = new TextEncoder();
@@ -236,11 +236,9 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     if (!token) {
       fail(503, 'auth_not_configured', 'Бот ещё не настроен: добавь BOT_TOKEN или открой демо');
     }
-    if (c.env.AUTH_DEBUG === 'true') {
-      // Временная диагностика, включается переменной AUTH_DEBUG=true в панели.
-      // В строке только данные одной сессии игрока, токена там нет.
-      console.info('init_data_raw', initData.slice(0, 1200));
-    }
+    // Строка нужна всегда: переменные панели до сборки не доходят, а по логам
+    // Cloudflare разбирать неудобно. В строке данные одной сессии, токена там нет.
+    console.info('init_data_raw', initData.slice(0, 1200));
     const result = await validateInitData(initData, token, (candidates, signature) =>
       verifySignedInitData(c.env, candidates, signature),
     );
@@ -254,20 +252,32 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
         `age=${result.ageSec ?? '?'}`,
         `fields=${result.fields.join(',')}`,
       );
-      const debug = c.env.AUTH_DEBUG === 'true';
-      if (debug) {
+      {
+        // Записываем без переключателя: переменные панели до боевой сборки не доходят,
+        // а блок в админке должен работать сам по себе.
         // Записываем в events, чтобы владелец видел это в админке, а не в логах Cloudflare.
         // Дожидаться нужно обязательно: после fail() изолятор имеет право
         // не дослать незавершённый запрос, и запись теряется.
         await c.env.DB.prepare('INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)')
-          .bind('anonymous', 'init_data_rejected', 1, JSON.stringify({ raw: initData.slice(0, 900), reason, fields: result.fields }), Date.now())
+          .bind(
+            'anonymous',
+            'init_data_rejected',
+            1,
+            JSON.stringify({
+              raw: initData.slice(0, 900),
+              reason,
+              fields: result.fields,
+              signed: await webAppKeyStatus(c.env),
+            }),
+            Date.now(),
+          )
           .run()
           .catch(() => undefined);
       }
       fail(401, 'invalid_init_data', INIT_DATA_MESSAGES[reason], {
         reason,
         authDateAgeSec: result.ageSec,
-        ...(debug ? { raw: initData.slice(0, 900) } : {}),
+        raw: initData.slice(0, 900),
       });
     }
     if (result.variant && result.variant !== 'canonical') {

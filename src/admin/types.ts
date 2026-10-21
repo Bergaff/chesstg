@@ -223,10 +223,15 @@ export interface DiagEntry {
   at: number;
   reason: string;
   raw: string;
+  signed?: string;
 }
 
 export interface DiagResponse {
   enabled: boolean;
+  /** Активна ли отладочная переменная AUTH_DEBUG в запущенной версии. */
+  authDebug?: boolean;
+  /** Ключ подписи initData, который Telegram отдаёт по getWebAppAttachInfo. */
+  webApp?: { present: boolean; note: string; checkedAt: number };
   entries: DiagEntry[];
 }
 
