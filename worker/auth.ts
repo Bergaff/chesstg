@@ -42,7 +42,8 @@ export type InitDataReason =
   | 'too_old'
   | 'clock_skew'
   | 'no_user'
-  | 'bad_user';
+  | 'bad_user'
+  | 'third_party';
 
 export const INIT_DATA_MESSAGES: Record<InitDataReason, string> = {
   no_params: 'Не пришли подписанные данные Telegram: приложение открыто не из бота',
@@ -53,6 +54,7 @@ export const INIT_DATA_MESSAGES: Record<InitDataReason, string> = {
   clock_skew: 'Часы устройства сильно расходятся с сервером',
   no_user: 'В данных Telegram нет профиля игрока',
   bad_user: 'Профиль в данных Telegram повреждён',
+  third_party: 'Данные подписаны не этим ботом: приложение открыто через чужого бота',
 };
 
 export interface InitDataResult {
@@ -120,7 +122,14 @@ export async function validateInitData(initData: string, token: string): Promise
       break;
     }
   }
-  if (!matched) return { ...empty, fields, reason: 'bad_signature' };
+  if (!matched) {
+    // У сторонних приложений `hash` это не HMAC по токену, а обычный SHA-256,
+    // а подпись несёт поле `signature`. Так отличаем чужое приложение от опечатки в токене.
+    const canonical = checkString(params, VARIANTS[0]);
+    const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(canonical)));
+    const reason: InitDataReason = plain === expected ? 'third_party' : 'bad_signature';
+    return { ...empty, fields, reason };
+  }
 
   const authDateRaw = params.get('auth_date');
   const authDate = authDateRaw ? Number(authDateRaw) : 0;

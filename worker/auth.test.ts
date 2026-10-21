@@ -126,6 +126,25 @@ function values2(authDate: number): Record<string, string> {
   return { auth_date: String(authDate), user: USER, chat_instance: 'abc', chat_type: 'sender' };
 }
 
+describe('стороннее приложение', () => {
+  it('отличает подпись чужого приложения от опечатки в токене', async () => {
+    const values = { auth_date: String(Math.floor(Date.now() / 1000)), user: USER, chat_type: 'sender' };
+    const params = new URLSearchParams(values);
+    const dataCheckString = Object.entries(values)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(dataCheckString));
+    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    params.set('hash', hash);
+    params.set('signature', 'base64sig');
+
+    const result = await validateInitData(params.toString(), TOKEN);
+    expect(result.reason).toBe('third_party');
+    expect(INIT_DATA_MESSAGES.third_party).toContain('чужого бота');
+  });
+});
+
 describe('токен бота', () => {
   it('срезает пробелы и невидимые символы', () => {
     expect(botToken({ BOT_TOKEN: `\n ${TOKEN}\u200b \r` })).toBe(TOKEN);
