@@ -51,5 +51,3 @@ export async function verifySignedInitData(
   }
   return false;
 }
-
-export const __cache = () => cache;
