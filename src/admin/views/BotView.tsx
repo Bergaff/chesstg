@@ -115,7 +115,7 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
 npx wrangler secret put WEBHOOK_SECRET
 npm run deploy</pre>
             <p className="adm-note">
-              Токен выдаёт BotFather. Секреты добавляются в панели: Workers &amp; Pages
+              Токен выдаёт BotFather. Секреты добавляются в панели: Workers и Pages
               → ваш воркер → Settings → Variables and Secrets → Add → Secret, либо командой{' '}
               <code>npx wrangler secret put</code>. После добавления перезагрузите эту страницу.
             </p>
@@ -212,7 +212,7 @@ npm run deploy</pre>
                 В воркере уже задан WEBHOOK_SECRET, а поле пустое, поэтому кнопка «Подключить бота»
                 заблокирована: Telegram должен присылать то же значение в заголовке
                 X-Telegram-Bot-Api-Secret-Token, иначе воркер ответит 403. Панель секрет не показывает,
-                так что вставьте значение, которое задавали раньше, или задайте новое: Workers &amp; Pages
+                так что вставьте значение, которое задавали раньше, или задайте новое: Workers и Pages
                 → ваш воркер → Settings → Variables and Secrets → Add → Secret, имя WEBHOOK_SECRET. Значение
                 из панели применяется сразу, пересборка не нужна, а затем скопируйте его в поле выше.
               </StatusLine>
