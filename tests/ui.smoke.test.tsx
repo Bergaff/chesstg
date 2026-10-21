@@ -227,7 +227,8 @@ describe('UI smoke', () => {
 
     fireEvent.click(screen.getByText('Начать'));
     const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
-    expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(9);
+    // Поле первого уровня 3×4: ряд запаса нужен, чтобы забег не кончался за два хода.
+    expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(12);
     expect(screen.getByText('Ход 1')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));

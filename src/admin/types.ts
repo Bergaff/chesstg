@@ -171,6 +171,7 @@ export interface LevelsResponse {
 export interface LevelCheckReport {
   level: number;
   size: number;
+  height?: number;
   band: { target: number; min: number; max: number };
   types: string[];
   targetPieces: number;

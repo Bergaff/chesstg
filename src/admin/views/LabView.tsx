@@ -6,6 +6,7 @@ import {
   describeSolution,
   difficultyBand,
   pieceCountForLevel,
+  heightForLevel,
   sizeForLevel,
   type AuditResult,
   type BatchReport,
@@ -131,8 +132,9 @@ function PlacementLab({
   const [saved, setSaved] = useState('');
 
   const size = sizeForLevel(level);
+  const height = heightForLevel(level);
   const types = useMemo(() => availablePieceTypes(level), [level]);
-  const maxPieces = Math.max(1, Math.min(pieceCountForLevel(level), (size - 2) * size - 1));
+  const maxPieces = Math.max(1, Math.min(pieceCountForLevel(level), (height - 2) * size - 1));
   const [pieces, setPieces] = useState(maxPieces);
 
   useEffect(() => {
@@ -150,8 +152,8 @@ function PlacementLab({
     setProgress({ checked: 0, total: 0 });
     try {
       const result = await runPlacementAudit(
-        { width: size, height: size, count: Math.min(pieces, maxPieces), types },
-        { limit, seed: level * 7919, band, maxDepth: size + 3 },
+        { width: size, height, count: Math.min(pieces, maxPieces), types },
+        { limit, seed: level * 7919, band, maxDepth: height + 3 },
         (next) => setProgress(next),
       );
       setReport(result);
@@ -161,7 +163,7 @@ function PlacementLab({
       setRunning(false);
       setProgress(null);
     }
-  }, [band, level, limit, maxPieces, pieces, running, size, types]);
+  }, [band, height, level, limit, maxPieces, pieces, running, size, types]);
 
   const save = useCallback(async () => {
     if (!report || saving) return;
@@ -170,7 +172,7 @@ function PlacementLab({
     try {
       await saveReport(
         'placements',
-        { level, size, pieces: Math.min(pieces, maxPieces), types, limit, band },
+        { level, size, height, pieces: Math.min(pieces, maxPieces), types, limit, band },
         {
           checked: report.checked,
           exhaustive: report.exhaustive,
@@ -195,7 +197,7 @@ function PlacementLab({
     } finally {
       setSaving(false);
     }
-  }, [band, level, limit, maxPieces, onSaved, onUnauthorized, pieces, report, saving, size, types]);
+  }, [band, height, level, limit, maxPieces, onSaved, onUnauthorized, pieces, report, saving, size, types]);
 
   return (
     <Panel
@@ -244,7 +246,7 @@ function PlacementLab({
       </div>
 
       <p className="adm-note">
-        Поле {size}×{size}, фигуры: {types.map((type) => PIECE_GLYPH[type]).join(' ')}. Полоса уровня{' '}
+        Поле {size}×{height}, фигуры: {types.map((type) => PIECE_GLYPH[type]).join(' ')}. Полоса уровня{' '}
         {band.min}–{band.max}, цель {band.target}.
       </p>
 

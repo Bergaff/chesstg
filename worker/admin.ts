@@ -6,6 +6,7 @@ import {
   difficultyBand,
   pieceCountForLevel,
   sizeForLevel,
+  heightForLevel,
   type AuditResult,
   type PieceType,
 } from '../src/engine';
@@ -605,6 +606,7 @@ adminApp.post('/levels/check', async (c) => {
   const report = {
     level,
     size: sizeForLevel(level),
+    height: heightForLevel(level),
     band,
     types: availablePieceTypes(level) as PieceType[],
     targetPieces: pieceCountForLevel(level),

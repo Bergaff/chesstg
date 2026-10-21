@@ -7,6 +7,7 @@ import {
   difficultyTarget,
   enumeratePlacements,
   placementSpace,
+  heightForLevel,
   sizeForLevel,
   availablePieceTypes,
   pieceCountForLevel,
@@ -156,7 +157,7 @@ describe('отбор уровней кампании', () => {
     for (let level = 1; level <= 60; level++) {
       const target = difficultyTarget(level);
       expect(target).toBeGreaterThanOrEqual(previous);
-      expect(target).toBeLessThanOrEqual(88);
+      expect(target).toBeLessThanOrEqual(84);
       previous = target;
     }
     expect(difficultyBand(30).min).toBeLessThan(difficultyBand(30).max);
@@ -167,6 +168,8 @@ describe('отбор уровней кампании', () => {
       for (const seed of [300 + level, 9100 + level]) {
         const state = createCampaignLevel(level, seed);
         expect(state.width).toBe(sizeForLevel(level));
+        expect(state.height).toBe(heightForLevel(level));
+        expect(state.height).toBeGreaterThan(state.width);
         const audit = auditState(state);
         expect(audit.solvable, `level ${level} seed ${seed}`).toBe(true);
         expect(audit.firstMoves).toBeGreaterThan(0);
@@ -178,7 +181,9 @@ describe('отбор уровней кампании', () => {
   it('держит планку сложности на поздних уровнях', () => {
     const scores = [31, 33, 35, 37, 39, 41].map((level) => auditState(createCampaignLevel(level, 500 + level)).score);
     const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-    expect(average).toBeGreaterThanOrEqual(70);
+    // Планка 64, не 70: доля безальтернативных шагов весит меньше, чем раньше,
+    // потому что выбор на ходу теперь добавляет к оценке, а не отнимается.
+    expect(average).toBeGreaterThanOrEqual(64);
     expect(Math.max(...scores)).toBeLessThanOrEqual(100);
   });
 

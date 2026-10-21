@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { sizeForLevel } from '../../engine';
+import { heightForLevel, sizeForLevel } from '../../engine';
 import { AdminError, checkLevel, fetchLevels } from '../api';
 import type { LevelCheckReport, LevelCheckRow, LevelsResponse } from '../types';
 import { Metric, Panel, StatusLine, Table, formatDateTime } from '../ui';
@@ -174,7 +174,7 @@ export function LevelsView({ onUnauthorized }: { onUnauthorized: (message: strin
         {report && (
           <div className="adm-report">
             <div className="adm-metrics is-compact">
-              <Metric label="Уровень" value={report.level} hint={`поле ${report.size}×${report.size}`} />
+              <Metric label="Уровень" value={report.level} hint={`поле ${report.size}×${report.height ?? report.size}`} />
               <Metric label="Средняя оценка" value={report.avgScore} hint={`полоса ${report.band.min}–${report.band.max}`} />
               <Metric label="Разброс" value={`${report.minScore}–${report.maxScore}`} />
               <Metric
@@ -232,7 +232,9 @@ function CheckRow({ row, onPick }: { row: LevelCheckRow; onPick: () => void }): 
   return (
     <tr className="is-clickable" onClick={onPick}>
       <td>{row.level}</td>
-      <td>{sizeForLevel(Number(row.level))}×{sizeForLevel(Number(row.level))}</td>
+      <td>
+        {sizeForLevel(Number(row.level))}×{heightForLevel(Number(row.level))}
+      </td>
       <td>{row.avg_score}</td>
       <td className="is-mono">
         {row.min_score}–{row.max_score}

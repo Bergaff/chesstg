@@ -25,6 +25,8 @@ export interface AuditResult {
   firstMoves: number;
   /** Сколько ходов на кратчайшем пути были единственным спасением. */
   forced: number;
+  /** Сколько шагов кратчайшего пути оставляют не менее двух победных продолжений. */
+  choiceSteps: number;
   /** Доля шагов решения, на которых пешка стояла под боем. */
   pressure: number;
   /** Среднее расстояние до ближайшей фигуры на пути. */
@@ -85,6 +87,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
       steps: 0,
       firstMoves: 0,
       forced: 0,
+      choiceSteps: 0,
       paths: 1,
       pathsCapped: false,
       pressure: 0,
@@ -103,6 +106,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
       steps: 0,
       firstMoves: 0,
       forced: 0,
+      choiceSteps: 0,
       paths: 0,
       pathsCapped: false,
       pressure: 0,
@@ -176,18 +180,19 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
   const solution: GameAction[] = [];
   let cursor = start;
   let remaining = steps;
+  let choiceSteps = 0;
   while (remaining > 0 && cursor.status === 'playing') {
-    let chosen: GameAction | null = null;
+    // Все продолжения считаем от одного и того же состояния: двигать cursor внутри
+    // перебора нельзя, иначе следующие ходы проверялись бы уже из новой позиции.
+    const winning: Array<{ action: GameAction; next: GameState }> = [];
     for (const action of actionsFrom(cursor)) {
       const next = applyAction(cursor, action);
-      if (canWin(next, remaining - 1)) {
-        chosen = action;
-        cursor = next;
-        break;
-      }
+      if (canWin(next, remaining - 1)) winning.push({ action, next });
     }
-    if (!chosen) break;
-    solution.push(chosen);
+    if (winning.length === 0) break;
+    if (winning.length >= 2) choiceSteps += 1;
+    solution.push(winning[0].action);
+    cursor = winning[0].next;
     remaining -= 1;
   }
 
@@ -247,6 +252,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
     steps,
     firstMoves,
     forced,
+    choiceSteps,
     paths,
     pathsCapped,
     pressure,
@@ -265,6 +271,7 @@ interface ScoreInput {
   steps: number;
   firstMoves: number;
   forced: number;
+  choiceSteps?: number;
   paths: number;
   pressure: number;
   nearest: number;
@@ -274,26 +281,32 @@ interface ScoreInput {
 /**
  * Оценка требовательности 0..100.
  *
- * Слагаемые: размер поля, плотность фигур, узость первого хода,
- * редкость победных линий и доля безальтернативных шагов.
+ * Слагаемые: размер поля, плотность фигур, узость первого хода, редкость
+ * победных линий, доля безальтернативных шагов и обходной путь. Последний член
+ * появился вместе с полем выше ширины: забег из `height - 1` ходов это гонка по
+ * прямой, а настоящая задача начинается там, где кратчайшее решение длиннее
+ * прямой и пешке приходится уходить в сторону или ждать.
  */
 export function difficultyScore(state: GameState, input: ScoreInput): number {
   if (!input.solvable) return 0;
 
-  const board = Math.min(9, state.width * 1.5);
+  const board = Math.min(11, state.width * 1.2 + state.height * 0.6);
   const density = Math.min(12, state.enemies.length * 2);
   const fire = input.pressure * 30;
   const cover = input.coverage * 15;
-  const narrow = input.firstMoves <= 1 ? 12 : input.firstMoves === 2 ? 6 : 0;
-  const rarity =
-    input.paths <= 1 ? 10 : input.paths <= 3 ? 6 : input.paths <= 8 ? 3 : 0;
+  const narrow = input.firstMoves <= 1 ? 10 : input.firstMoves === 2 ? 5 : 0;
+  const rarity = input.paths <= 1 ? 10 : input.paths <= 3 ? 6 : input.paths <= 8 ? 3 : 0;
   const forcedShare = input.steps > 0 ? input.forced / input.steps : 0;
-  const forced = forcedShare * 12;
+  const forced = forcedShare * 8;
+  // Шаг с двумя и более победными продолжениями это и есть выбор: такой уровень
+  // решает игрок, а не угадывает. Поэтому выбор добавляет оценку, а не отнимает.
+  const choice = Math.min(10, (input.choiceSteps ?? 0) * 2.5);
   const close = Math.max(0, 6 - input.nearest) * 1.5;
+  const detour = Math.min(10, Math.max(0, input.steps - (state.height - 1)) * 3);
 
   return Math.max(
     0,
-    Math.min(100, Math.round(board + density + fire + cover + narrow + rarity + forced + close)),
+    Math.min(100, Math.round(board + density + fire + cover + narrow + rarity + forced + close + detour + choice)),
   );
 }
 
@@ -311,8 +324,9 @@ export interface DifficultyBand {
  */
 export function difficultyTarget(level: number): number {
   if (level <= 5) return 26 + level * 2;
-  if (level <= 15) return Math.round(36 + (level - 5) * 2.6);
-  return Math.round(Math.min(88, 62 + (level - 15) * 1.6));
+  if (level <= 15) return Math.round(36 + (level - 5) * 2.4);
+  if (level <= 30) return Math.round(60 + (level - 15) * 0.9);
+  return Math.round(Math.min(80, 74 + (level - 30) * 0.35));
 }
 
 /**
@@ -323,8 +337,8 @@ export function difficultyBand(level: number): DifficultyBand {
   const target = difficultyTarget(level);
   return {
     target,
-    min: Math.max(6, target - 8),
-    max: Math.min(96, target + 12),
+    min: Math.max(6, target - 10),
+    max: Math.min(96, target + 14),
   };
 }
 
