@@ -12,8 +12,8 @@ import type {
 } from './types';
 
 /**
- * Токен админки живёт в sessionStorage: закрыл вкладку, снова вводишь пароль.
- * В localStorage не кладём, чтобы доступ не переживал сессию браузера.
+ * Токен админки живёт в localStorage и сам истекает через 12 часов, поэтому
+ * перезагрузка страницы не требует пароля. Выход чистит хранилище.
  */
 
 const TOKEN_KEY = 'pawn.admin.token';
@@ -35,7 +35,7 @@ export class AdminError extends Error {
 
 export function getToken(): string {
   try {
-    return sessionStorage.getItem(TOKEN_KEY) ?? '';
+    return localStorage.getItem(TOKEN_KEY) ?? '';
   } catch {
     return '';
   }
@@ -43,7 +43,7 @@ export function getToken(): string {
 
 export function getExpiresAt(): number {
   try {
-    return Number(sessionStorage.getItem(EXPIRES_KEY) ?? 0);
+    return Number(localStorage.getItem(EXPIRES_KEY) ?? 0);
   } catch {
     return 0;
   }
@@ -51,8 +51,8 @@ export function getExpiresAt(): number {
 
 export function saveSession(token: string, expiresAt: number): void {
   try {
-    sessionStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.setItem(EXPIRES_KEY, String(expiresAt));
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(EXPIRES_KEY, String(expiresAt));
   } catch {
     // приватный режим: токен останется только в памяти страницы
   }
@@ -60,8 +60,8 @@ export function saveSession(token: string, expiresAt: number): void {
 
 export function clearSession(): void {
   try {
-    sessionStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(EXPIRES_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(EXPIRES_KEY);
   } catch {
     // ignore
   }

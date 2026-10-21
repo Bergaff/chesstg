@@ -42,9 +42,12 @@ export async function verifySignedInitData(
   try {
     const key = await crypto.subtle.importKey('raw', fromB64(keyB64), { name: 'Ed25519' }, false, ['verify']);
     const bytes = fromB64(signature);
+    // Клиенты подписывают либо саму строку склейки, либо её SHA-256, поэтому пробуем и то, и другое.
     for (const message of candidates) {
-      const ok = await crypto.subtle.verify('Ed25519', key, bytes, new TextEncoder().encode(message));
-      if (ok) return true;
+      const enc = new TextEncoder().encode(message);
+      const digest = await crypto.subtle.digest('SHA-256', enc);
+      if (await crypto.subtle.verify('Ed25519', key, bytes, enc)) return true;
+      if (await crypto.subtle.verify('Ed25519', key, bytes, digest)) return true;
     }
   } catch (error) {
     console.warn('webapp_key_verify_failed', String(error).slice(0, 160));

@@ -176,11 +176,9 @@ export async function validateInitData(
         break;
       }
     }
-    if (thirdParty && verifySigned) {
-      const signature = get('signature');
-      if (signature && (await verifySigned(candidates, signature))) {
-        matched = { name: 'signed', dropSignature: true, dropEmpty: true, raw: false };
-      }
+    const signature = get('signature');
+    if (signature && verifySigned && (await verifySigned([...candidates, ...VARIANTS.map((rule) => checkString(params, rule))], signature))) {
+      matched = { name: 'signed', dropSignature: true, dropEmpty: true, raw: false };
     }
     if (!matched) return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
   }
