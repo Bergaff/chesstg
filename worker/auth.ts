@@ -137,6 +137,20 @@ function checkString(pairs: Pair[], rule: VariantRule): string {
     .join('\n');
 }
 
+/**
+ * Ключ для HMAC по initData. Документы требуют HMAC-SHA256, где криптографический
+ * ключ это константа `WebAppData`, а сообщением выступает токен бота. Порядок именно
+ * такой: переставленные местами вариант и старый SHA-256 от токена держим рядом только
+ * ради совместимости с ранними сборками, подделать подпись без токена нельзя ни там, ни тут.
+ */
+async function secretKeys(token: string): Promise<Uint8Array[]> {
+  return [
+    new Uint8Array(await hmac(encoder.encode('WebAppData'), token)),
+    new Uint8Array(await hmac(encoder.encode(token), 'WebAppData')),
+    new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token))),
+  ];
+}
+
 /** Проверка подписи Telegram WebApp initData. */
 export async function validateInitData(
   initData: string,
@@ -155,14 +169,17 @@ export async function validateInitData(
   if (!hash) return { ...empty, fields, reason: 'no_hash' };
   const expected = hash.toLowerCase();
 
-  const secretKey = await hmac(encoder.encode(token), 'WebAppData');
   let matched: VariantRule | null = null;
+  const secrets = await secretKeys(token);
   for (const rule of VARIANTS) {
-    const signature = toHex(await hmac(secretKey, checkString(params, rule)));
-    if (safeEqual(signature, expected)) {
-      matched = rule;
-      break;
+    for (const secretKey of secrets) {
+      const signature = toHex(await hmac(secretKey, checkString(params, rule)));
+      if (safeEqual(signature, expected)) {
+        matched = rule;
+        break;
+      }
     }
+    if (matched) break;
   }
   if (!matched) {
     // У сторонних приложений `hash` это не HMAC по токену, а обычный SHA-256,
@@ -176,8 +193,12 @@ export async function validateInitData(
         break;
       }
     }
+    // Подпись Ed25519 ставится над строкой, перед которой стоит префикс `botId:WebAppData`.
+    const botId = token.split(':')[0]?.trim() ?? '';
+    const joined = VARIANTS.map((rule) => checkString(params, rule));
+    const signedCandidates = [...candidates, ...joined, ...(botId ? joined.map((text) => `${botId}:WebAppData\n${text}`) : [])];
     const signature = get('signature');
-    if (signature && verifySigned && (await verifySigned([...candidates, ...VARIANTS.map((rule) => checkString(params, rule))], signature))) {
+    if (signature && verifySigned && (await verifySigned(signedCandidates, signature))) {
       matched = { name: 'signed', dropSignature: true, dropEmpty: true, raw: false };
     }
     if (!matched) return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };

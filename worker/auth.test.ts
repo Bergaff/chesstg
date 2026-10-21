@@ -204,3 +204,43 @@ describe('токен бота', () => {
     expect(botToken({})).toBe('');
   });
 });
+
+describe('ключ подписи по документам Telegram', () => {
+  /** secret_key = HMAC-SHA256(key="WebAppData", msg=bot_token). Порядок зафиксирован в документах. */
+  async function signDocs(values: Record<string, string>, token: string): Promise<string> {
+    const base = await crypto.subtle.importKey('raw', encoder.encode('WebAppData'), { name: 'HMAC', hash: 'SHA-256' }, false, [
+      'sign',
+    ]);
+    const secretKey = await crypto.subtle.sign('HMAC', base, encoder.encode(token));
+    const dataCheckString = Object.entries(values)
+      .filter(([key]) => key !== 'hash')
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    const key = await crypto.subtle.importKey('raw', new Uint8Array(secretKey), { name: 'HMAC', hash: 'SHA-256' }, false, [
+      'sign',
+    ]);
+    return hex(await crypto.subtle.sign('HMAC', key, encoder.encode(dataCheckString)));
+  }
+
+  it('принимает подпись, посчитанную как в документах', async () => {
+    const payload = { ...values(Math.floor(Date.now() / 1000)), chat_type: 'private' };
+    const hash = await signDocs(payload, TOKEN);
+    const raw = new URLSearchParams({ ...payload, hash }).toString();
+    const result = await validateInitData(raw, TOKEN);
+    expect(result.check?.user.id).toBe(777);
+    expect(result.reason).toBeNull();
+  });
+
+  it('золотой вектор из документов Telegram', async () => {
+    const raw =
+      'query_id=AAHdF6IQAAAAAN0XohDhrOrc&user=%7B%22id%22%3A279058397%2C%22first_name%22%3A%22Vladislav%22%2C%22last_name%22%3A%22Kibenko%22%2C%22username%22%3A%22vdkfrost%22%2C%22language_code%22%3A%22ru%22%2C%22is_premium%22%3Atrue%7D&auth_date=1662771648&hash=c501b71e775f74ce10e377dea85a7ea24ecd640b223ea86dfe453e0eaed2e2b2';
+    const result = await validateInitData(
+      raw,
+      '5768337691:AAH5YkoiEuPk8-FZa32hStHTqXiLPtAEhx8',
+    );
+    // Подпись совпадает, а данные двухлетней давности: отказ по возрасту, не по подписи.
+    expect(result.variant).toBe('canonical');
+    expect(result.reason).toBe('too_old');
+  });
+});
