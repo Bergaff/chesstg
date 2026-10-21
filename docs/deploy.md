@@ -117,6 +117,12 @@ npx wrangler secret put ADMIN_PASSWORD_HASH
 
 Для локальной разработки секреты можно положить в `.dev.vars` (шаблон `.dev.vars.example`). Этот файл уже в `.gitignore`.
 
+### http и https
+
+Cloudflare обслуживает `workers.dev` и по обычному http, и сама на https не редиректит. Это заметно, когда в адресную строку вбивают домен без схемы: браузер пробует http. Воркер отвечает `308` на https для всех не локальных хостов, метод и запросная строка сохраняются, поэтому `POST /api/session` не превращается в GET. Локальный запуск под исключение: там сертификата нет, а `wrangler dev` всегда отдаёт http.
+
+Надёжнее держать привязанный домен: `Workers & Pages` -> ваш воркер -> `Settings` -> `Domains & Routes` -> `Add` -> `Custom domain`. На своём домене включается `SSL/TLS` -> `Edge Certificates` -> `Always Use HTTPS` и HSTS, а `workers.dev` считается бесплатным тестовым адресом и в отдельных регионах доступен хуже. После привязки домена обновите `WEBAPP_URL` в `wrangler.jsonc`, иначе health начнёт ругаться `webapp_url_origin_mismatch`.
+
 ## 3. Сборка и деплой
 
 ```bash

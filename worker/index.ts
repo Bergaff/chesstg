@@ -1,9 +1,43 @@
 import app from './app';
 import type { WorkerEnv } from './types';
 
+/** Хост без сертификата: локальный запуск и dev-сервер. */
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '::1' ||
+    host.startsWith('127.')
+  );
+}
+
+function clientAddress(request: Request): string {
+  const cf = (request as { cf?: { clientIp?: string } }).cf;
+  return (cf?.clientIp ?? request.headers.get('CF-Connecting-IP') ?? '').trim();
+}
+
+/**
+ * На workers.dev обычный http обслуживается воркером, Cloudflare его не редиректит.
+ * Telegram такое приложение не откроет, а ссылки initData уйдут по http,
+ * поэтому сами отвечаем 308 на https. Локальный запуск не трогаем: там сертификата нет.
+ * Если адрес клиента не виден, тоже не редиректим, это всегда локальная проверка.
+ */
+function enforceHttps(url: URL, request: Request): Response | null {
+  if (url.protocol !== 'http:') return null;
+  if (isLoopbackHost(url.hostname)) return null;
+  const ip = clientAddress(request);
+  if (!ip || ip === '::1' || ip.startsWith('127.')) return null;
+  url.protocol = 'https:';
+  return Response.redirect(url.toString(), 308);
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const redirect = enforceHttps(url, request);
+    if (redirect) return redirect;
+
     if (url.pathname.startsWith('/api/')) {
       return app.fetch(request, env, ctx);
     }
@@ -18,3 +52,5 @@ export default {
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<WorkerEnv>;
+
+export { enforceHttps };
