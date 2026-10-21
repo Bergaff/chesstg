@@ -2,6 +2,7 @@ import type {
   AdminStatus,
   BotSetupResponse,
   BotStatusResponse,
+  HealthResponse,
   LevelsResponse,
   LevelCheckReport,
   OverviewResponse,
@@ -181,4 +182,19 @@ export function setupBot(payload: {
 
 export function disableBotWebhook(): Promise<{ status: BotStatusResponse }> {
   return request<{ status: BotStatusResponse }>('/bot/webhook/off', { method: 'POST' });
+}
+
+/** Публичная проверка сервера: база, конфиг, предупреждения. Без токена. */
+export async function fetchHealth(): Promise<HealthResponse> {
+  let response: Response;
+  try {
+    response = await fetch('/api/health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+  } catch {
+    throw new AdminError(0, 'network', 'Нет связи с сервером');
+  }
+  try {
+    return (await response.json()) as HealthResponse;
+  } catch {
+    throw new AdminError(response.status, 'bad_response', 'Сервер вернул не JSON');
+  }
 }

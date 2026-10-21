@@ -69,16 +69,19 @@ const botStatus = {
 };
 
 let statusResponse: unknown = { configured: true, authenticated: false, expiresAt: null };
+let healthResponse: unknown = { ok: true, schemaVersion: 2, warnings: [], tables: { users: true } };
 let loginResponse: () => Response = () => jsonResponse({ token: 'token-1', expiresAt: Date.now() + 3_600_000 });
 
 beforeEach(() => {
   statusResponse = { configured: true, authenticated: false, expiresAt: null };
+  healthResponse = { ok: true, schemaVersion: 2, warnings: [], tables: { users: true } };
   loginResponse = () => jsonResponse({ token: 'token-1', expiresAt: Date.now() + 3_600_000 });
   sessionStorage.clear();
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith('/api/health')) return jsonResponse(healthResponse);
       if (url.endsWith('/api/admin/status')) return jsonResponse(statusResponse);
       if (url.endsWith('/api/admin/login')) return loginResponse();
       if (url.includes('/api/admin/overview')) return jsonResponse(overview);
@@ -105,6 +108,20 @@ describe('админка', () => {
     await mount();
     expect(await screen.findByText('Доступ не настроен')).toBeTruthy();
     expect(screen.getAllByText(/ADMIN_PASSWORD/).length).toBeGreaterThan(0);
+  });
+
+  it('не пускает в админку, пока в базе нет таблиц', async () => {
+    healthResponse = {
+      ok: false,
+      error: 'db_not_ready',
+      missing: ['users', 'runs'],
+      schemaVersion: 2,
+      warnings: [],
+    };
+    await mount();
+    expect(await screen.findByText('База не готова')).toBeTruthy();
+    expect(screen.getAllByText(/npm run db:remote/).length).toBeGreaterThan(0);
+    expect(screen.queryByPlaceholderText('Введите пароль')).toBeNull();
   });
 
   it('пускает только по паролю и показывает статистику', async () => {

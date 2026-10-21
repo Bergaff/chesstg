@@ -37,6 +37,10 @@ body {
   background: var(--panel);
 }
 
+.adm-gate.is-wide {
+  max-width: 640px;
+}
+
 .adm-gate-title {
   margin-top: 10px;
   font-family: var(--serif);

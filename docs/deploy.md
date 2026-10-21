@@ -52,6 +52,17 @@ npx wrangler d1 execute pawn-vs-all --remote --command "SELECT name FROM sqlite_
 
 Должны быть `users`, `runs`, `grants`, `ad_events`, `payments`.
 
+### Проверка боевой базы
+
+Миграции применяются отдельно к локальной и к боевой базе. `npm run db:local` боевую не трогает.
+
+```bash
+npm run db:status        # какие миграции уже есть в боевой базе
+npm run db:remote        # применить недостающие
+```
+
+Если таблиц нет, `/api/session` отвечает 503 `db_not_ready`, а `/api/health` перечисляет отсутствующие таблицы в поле `missing`.
+
 ## 2. Переменные
 
 Публичные значения в `wrangler.jsonc`:
@@ -300,7 +311,10 @@ npx wrangler rollback <deployment-id>
 | `401 invalid_init_data` | Открыто не из Telegram, либо `BOT_TOKEN` не тот, либо initData старше 48 часов. Открой через кнопку бота. |
 | `503 auth_not_configured` | Не задан `BOT_TOKEN`. |
 | `401 guests_disabled` | `ALLOW_GUESTS=false`, а запрос без `tma`-заголовка. |
-| `health` 503 | Нет миграций / неверный `database_id`. |
+| `health` 503, `error: db_not_ready` | Боевая база пустая или не та. `npm run db:status`, затем `npm run db:remote`. Поле `missing` показывает, каких таблиц не хватает. |
+| `/api/session` 500 | До этой правки означало отсутствующие таблицы. Сейчас такой запрос возвращает 503 `db_not_ready`. Если всё ещё 500, смотрите `wrangler tail`: ошибка внутри кода, а не в схеме. |
+| `health` 503, `error: db_unavailable` | Воркер не может открыть D1: проверьте `database_id` и привязку `DB`. |
+| `health` без поля `schemaVersion` | Задеплоен старый коммит. Проверьте, какая ветка стоит веткой продакшена в Workers Builds. |
 | `assets.directory ... does not exist: .../dist` при сборке в панели | В Workers Builds не указана команда сборки. Поставьте `npm run build` либо деплой-команду `npm run deploy`. |
 | `health` отдаёт `dev_mode` в `warnings` | В `wrangler.jsonc` остался `DEV_MODE: "true"`. Для продакшена нужно `false` и повторный деплой. |
 | `webapp_url_origin_mismatch` | `WEBAPP_URL` не совпадает с доменом воркера. Ссылки в сообщениях бота будут вести не туда. |

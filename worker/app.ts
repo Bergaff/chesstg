@@ -24,6 +24,7 @@ import {
 import { authMiddleware, syncTelegramName } from './auth';
 import { adminApp } from './admin';
 import { logEventInBackground } from './events';
+import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import {
   activeRuns,
   getRun,
@@ -72,6 +73,19 @@ app.onError((err, c) => {
     return c.json(
       { error: err.code, message: err.message, ...(err.details ?? {}) },
       err.status as ContentfulStatusCode,
+    );
+  }
+  // Ошибки D1 чаще всего означают неприменённые миграции. Без этой ветки
+  // клиент получал невнятное «внутренняя ошибка», а причина была в базе.
+  if (isDatabaseError(err)) {
+    console.error('Database error', err instanceof Error ? err.stack ?? err.message : String(err));
+    return c.json(
+      {
+        error: 'db_not_ready',
+        message: 'База данных не готова. Примените миграции и обновите страницу.',
+        hint: 'npm run db:remote',
+      },
+      503,
     );
   }
   console.error('Unhandled error', err instanceof Error ? err.stack ?? err.message : String(err));
@@ -136,17 +150,12 @@ async function sessionBody(env: WorkerEnv, authCtx: AppEnv['Variables']['auth'],
 }
 
 app.get('/api/health', async (c) => {
-  try {
-    await c.env.DB.prepare('SELECT 1').first();
-  } catch {
-    return c.json({ ok: false, error: 'db_unavailable' }, 503);
-  }
+  const origin = new URL(c.req.url).origin;
 
   // Публичный список того, что забыли настроить при деплое. Секретов тут нет,
   // только отметки «задано или нет».
   const warnings: string[] = [];
   const webappUrl = c.env.WEBAPP_URL?.trim() ?? '';
-  const origin = new URL(c.req.url).origin;
   if (!webappUrl) {
     warnings.push('webapp_url_missing');
   } else if (!webappUrl.startsWith('https://')) {
@@ -168,12 +177,53 @@ app.get('/api/health', async (c) => {
   if (!c.env.ADSGRAM_BLOCK_ID?.trim()) warnings.push('adsgram_block_missing');
   if (c.env.DEV_MODE === 'true') warnings.push('dev_mode');
 
-  return c.json({
-    ok: true,
+  const base = {
     now: nowMs(),
     service: 'pawn-vs-all',
     origin,
+    schemaVersion: SCHEMA_VERSION,
     config: publicConfig(c.env),
+    warnings,
+  };
+
+  let schema;
+  try {
+    schema = await readSchema(c.env);
+  } catch (error) {
+    console.error('Health: database is not reachable', error instanceof Error ? error.message : String(error));
+    return c.json(
+      {
+        ...base,
+        ok: false,
+        error: 'db_unavailable',
+        message: 'База данных не отвечает. Проверьте привязку D1 и database_id.',
+      },
+      503,
+    );
+  }
+
+  if (schema.missingGame.length > 0) {
+    return c.json(
+      {
+        ...base,
+        ok: false,
+        error: 'db_not_ready',
+        message: `В базе нет таблиц: ${schema.missingGame.join(', ')}. Игра не сможет создать игрока.`,
+        hint: 'Примените миграции к боевой базе: npm run db:remote',
+        missing: schema.missingGame,
+        tables: schema.tables,
+      },
+      503,
+    );
+  }
+
+  if (schema.missingAdmin.length > 0) warnings.push('admin_tables_missing');
+
+  return c.json({
+    ...base,
+    ok: true,
+    tables: schema.tables,
+    missing: schema.missingAdmin,
     warnings,
   });
 });

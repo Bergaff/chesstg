@@ -225,3 +225,16 @@ export interface BotSetupResponse {
   steps: BotStep[];
   status: BotStatusResponse;
 }
+
+export interface HealthResponse {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  hint?: string;
+  missing?: string[];
+  warnings?: string[];
+  tables?: Record<string, boolean>;
+  schemaVersion?: number;
+  origin?: string;
+  service?: string;
+}

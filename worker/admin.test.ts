@@ -129,3 +129,26 @@ describe('роуты бота', () => {
     expect(data.expectedUrl).toBe('https://pawn.test/api/telegram/webhook');
   });
 });
+
+describe('вход при неготовой базе', () => {
+  it('пускает по паролю, даже если таблицы попыток ещё нет', async () => {
+    const brokenDb = {
+      prepare: () => {
+        throw new Error('D1_ERROR: no such table: admin_attempts: SQLITE_ERROR');
+      },
+    } as unknown as WorkerEnv['DB'];
+
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/admin/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'pw' }),
+      }),
+      env({ ADMIN_PASSWORD: 'pw', ADMIN_SECRET: 'secret', DB: brokenDb }),
+    );
+
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as { token?: string };
+    expect(typeof data.token).toBe('string');
+  });
+});

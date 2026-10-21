@@ -137,6 +137,11 @@ export default function App(): ReactNode {
             });
           } else if (error.code === 'network') {
             setBootError({ message: 'Нет связи с сервером', hint: 'Проверьте интернет и попробуйте ещё раз.' });
+          } else if (error.code === 'db_not_ready' || error.code === 'db_unavailable') {
+            setBootError({
+              message: 'Сервер не видит базу игры',
+              hint: 'База не инициализирована. Владельцу: примените миграции командой npm run db:remote.',
+            });
           } else {
             setBootError({ message: error.message, hint: 'Попробуй обновить экран.' });
           }

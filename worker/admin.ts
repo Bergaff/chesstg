@@ -167,28 +167,49 @@ adminApp.post('/login', async (c) => {
   const body = await readJson(c);
   const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
 
-  const fails = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS n, MIN(created_at) AS first FROM admin_attempts WHERE ip = ? AND ok = 0 AND created_at > ?',
-  )
-    .bind(ip, now - LOGIN_WINDOW_MS)
-    .first<{ n: number; first: number | null }>();
+  // Счётчик попыток живёт в D1. Если таблицы ещё нет, вход не блокируем:
+  // администратор должен попасть внутрь и увидеть, что база не готова.
+  let fails: { n: number; first: number | null } | null = null;
+  let limiterWorks = true;
+  try {
+    fails = await c.env.DB.prepare(
+      'SELECT COUNT(*) AS n, MIN(created_at) AS first FROM admin_attempts WHERE ip = ? AND ok = 0 AND created_at > ?',
+    )
+      .bind(ip, now - LOGIN_WINDOW_MS)
+      .first<{ n: number; first: number | null }>();
+  } catch (error) {
+    limiterWorks = false;
+    console.error('admin login: attempts table unavailable', String(error).slice(0, 200));
+  }
 
-  if (Number(fails?.n ?? 0) >= LOGIN_MAX_FAILS) {
+  if (limiterWorks && Number(fails?.n ?? 0) >= LOGIN_MAX_FAILS) {
     const retryInMs = Math.max(0, Number(fails?.first ?? now) + LOGIN_WINDOW_MS - now);
     fail(429, 'too_many_attempts', 'Слишком много попыток. Попробуйте позже.', { retryInMs });
   }
 
   const ok = password.length > 0 && (await passwordMatches(c.env, password));
-  await c.env.DB.prepare('INSERT INTO admin_attempts (ip, ok, created_at) VALUES (?, ?, ?)')
-    .bind(ip, ok ? 1 : 0, now)
-    .run();
+
+  if (limiterWorks) {
+    try {
+      await c.env.DB.prepare('INSERT INTO admin_attempts (ip, ok, created_at) VALUES (?, ?, ?)')
+        .bind(ip, ok ? 1 : 0, now)
+        .run();
+    } catch (error) {
+      console.error('admin login: attempts insert failed', String(error).slice(0, 200));
+    }
+  }
 
   if (!ok) {
     const left = Math.max(0, LOGIN_MAX_FAILS - Number(fails?.n ?? 0) - 1);
     fail(401, 'bad_password', 'Неверный пароль', { attemptsLeft: left });
   }
 
-  await c.env.DB.prepare('DELETE FROM admin_attempts WHERE created_at < ?').bind(now - 7 * DAY).run();
+  // Чистка старых попыток не должна мешать входу.
+  try {
+    await c.env.DB.prepare('DELETE FROM admin_attempts WHERE created_at < ?').bind(now - 7 * DAY).run();
+  } catch (error) {
+    console.error('admin login: cleanup failed', String(error).slice(0, 200));
+  }
 
   const { token, expiresAt } = await signAdminToken(c.env.ADMIN_SECRET!.trim());
   return c.json({ token, expiresAt });

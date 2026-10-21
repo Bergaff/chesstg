@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { AdminError, fetchStatus, login, logout } from './api';
+import { AdminError, fetchHealth, fetchStatus, login, logout } from './api';
+import type { HealthResponse } from './types';
 import { OverviewView } from './views/OverviewView';
 import { LevelsView } from './views/LevelsView';
 import { LabView } from './views/LabView';
 import { BotView } from './views/BotView';
 import { UsersView } from './views/UsersView';
 import { PaymentsView } from './views/PaymentsView';
-import { formatDateTime } from './ui';
+import { StatusLine, formatDateTime } from './ui';
 
 type Tab = 'overview' | 'levels' | 'lab' | 'users' | 'payments' | 'bot';
 
@@ -19,15 +20,29 @@ const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'bot', title: 'Бот' },
 ];
 
-type Phase = 'loading' | 'login' | 'panel' | 'disabled';
+type Phase = 'loading' | 'login' | 'panel' | 'disabled' | 'broken';
 
 export default function AdminApp(): ReactNode {
   const [phase, setPhase] = useState<Phase>('loading');
   const [tab, setTab] = useState<Tab>('overview');
   const [expiresAt, setExpiresAt] = useState(0);
   const [reason, setReason] = useState('');
+  const [health, setHealth] = useState<HealthResponse | null>(null);
 
   const boot = useCallback(async () => {
+    // Сначала смотрим на базу. Если миграции не применены, входить бессмысленно:
+    // логин и все разделы всё равно упрутся в отсутствующие таблицы.
+    try {
+      const next = await fetchHealth();
+      setHealth(next);
+      if (next.error === 'db_not_ready' || next.error === 'db_unavailable') {
+        setPhase('broken');
+        return;
+      }
+    } catch {
+      setHealth(null);
+    }
+
     try {
       const status = await fetchStatus();
       if (!status.configured) {
@@ -77,6 +92,10 @@ export default function AdminApp(): ReactNode {
         <p className="adm-boot">Проверяем доступ</p>
       </div>
     );
+  }
+
+  if (phase === 'broken') {
+    return <DatabaseGate health={health} onRetry={() => void boot()} />;
   }
 
   if (phase === 'disabled') {
@@ -133,6 +152,12 @@ npx wrangler secret put ADMIN_SECRET</pre>
       </nav>
 
       <main className="adm-main">
+        {health?.warnings?.includes('admin_tables_missing') && (
+          <StatusLine kind="error">
+            В базе нет таблиц админки, поэтому статистика, события и защита входа работают вхолостую.
+            Примените миграции: npm run db:remote.
+          </StatusLine>
+        )}
         {tab === 'overview' && <OverviewView onUnauthorized={onUnauthorized} />}
         {tab === 'levels' && <LevelsView onUnauthorized={onUnauthorized} />}
         {tab === 'lab' && <LabView onUnauthorized={onUnauthorized} />}
@@ -145,6 +170,71 @@ npx wrangler secret put ADMIN_SECRET</pre>
         <span>Закрытый раздел. Данные живут в Cloudflare D1.</span>
         <a href="/">Открыть игру</a>
       </footer>
+    </div>
+  );
+}
+
+function DatabaseGate({
+  health,
+  onRetry,
+}: {
+  health: HealthResponse | null;
+  onRetry: () => void;
+}): ReactNode {
+  const missing = health?.missing ?? [];
+  const unavailable = health?.error === 'db_unavailable';
+  return (
+    <div className="adm-shell">
+      <div className="adm-gate is-wide">
+        <span className="adm-label">Админка</span>
+        <h1 className="adm-gate-title">{unavailable ? 'База не отвечает' : 'База не готова'}</h1>
+        <p className="adm-gate-text">
+          {unavailable
+            ? 'Воркер не может достучаться до D1. Проверьте привязку DB и database_id в wrangler.jsonc.'
+            : 'В боевой базе нет нужных таблиц, поэтому игра отвечает ошибкой на первом же запросе сессии.'}
+        </p>
+
+        {missing.length > 0 && (
+          <>
+            <p className="adm-gate-text">Не хватает таблиц:</p>
+            <pre className="adm-code">{missing.join('\n')}</pre>
+          </>
+        )}
+
+        <p className="adm-gate-text">Примените миграции к боевой базе и обновите страницу:</p>
+        <pre className="adm-code">npx wrangler d1 migrations apply pawn-vs-all --remote
+# или
+npm run db:remote</pre>
+        <p className="adm-gate-foot">
+          Если база только что создана в панели Cloudflare с другим именем, проверьте, что в wrangler.jsonc
+          указан её database_id. Локальные миграции на боевую базу не влияют.
+        </p>
+
+        {health && (
+          <pre className="adm-code">
+            {JSON.stringify(
+              {
+                error: health.error,
+                schemaVersion: health.schemaVersion,
+                origin: health.origin,
+                warnings: health.warnings,
+                tables: health.tables,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        )}
+
+        <div className="adm-toolbar is-tight" style={{ marginTop: 14 }}>
+          <button type="button" className="adm-btn adm-btn-primary" onClick={onRetry}>
+            Проверить снова
+          </button>
+          <a className="adm-btn adm-btn-quiet" href="/">
+            Открыть игру
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
