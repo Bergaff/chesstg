@@ -147,6 +147,24 @@ npm run deploy</pre>
               />
             </div>
 
+            {!status.mainWebApp && (
+              <StatusLine kind="info">
+                У бота нет главного веб-приложения. Кнопка «Играть» работает и без него, но ссылка
+                t.me/{status.username || '<bot>'}/play и подпись initData будут от того приложения, через
+                которое игру открыли. Заведите её в BotFather командой /newapp: адрес приложения{' '}
+                {status.appUrl || status.expectedUrl.replace(/\/api\/.*$/, '')}, короткое имя play.
+              </StatusLine>
+            )}
+
+            {status.webhook?.ipAddress ? (
+              <StatusLine kind="info">
+                Вебхук привязан к адресу {status.webhook.ipAddress}, Telegram не резолвит домен. Так обычно
+                обходят блокировку, но anycast-адрес Cloudflare может перестать отвечать, и доставка встанет
+                с ретраями. Чтобы снять привязку, нажмите «Подключить бота» ещё раз: setWebhook перезаписывает
+                конфигурацию целиком.
+              </StatusLine>
+            ) : null}
+
             {status.webhook?.url && status.webhook.url !== status.expectedUrl && (
               <StatusLine kind="error">
                 Вебхук смотрит на {status.webhook.url}, а страница открыта на {status.expectedUrl}. Обновите

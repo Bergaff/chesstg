@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import app from './app';
 import { adminConfigured, normalizeAppUrl, normalizeWebhookUrl, signAdminToken, verifyAdminToken } from './admin';
 import type { WorkerEnv } from './types';
@@ -127,6 +127,33 @@ describe('роуты бота', () => {
     expect(response.status).toBe(200);
     expect(data.configured).toBe(false);
     expect(data.expectedUrl).toBe('https://pawn.test/api/telegram/webhook');
+  });
+});
+
+describe('состояние бота из Telegram', () => {
+  it('показывает привязку вебхука к IP и отсутствие главного приложения', async () => {
+    const replies: Record<string, unknown> = {
+      getMe: { ok: true, result: { username: 'pawn_vs_all_bot', has_main_web_app: false } },
+      getWebhookInfo: {
+        ok: true,
+        result: { url: 'https://old.test/api/telegram/webhook', pending_update_count: 3, ip_address: '188.114.97.1' },
+      },
+    };
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const method = String(input).split('/').pop() ?? '';
+      return Response.json(replies[method] ?? { ok: false, description: 'не ожидалось' });
+    }) as unknown as { mockRestore: () => void };
+
+    const response = await call('/bot', {}, { BOT_TOKEN: '1:abc' });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      mainWebApp: boolean;
+      webhook: { url: string; pending: number; ipAddress: string };
+    };
+    expect(body.mainWebApp).toBe(false);
+    expect(body.webhook.pending).toBe(3);
+    expect(body.webhook.ipAddress).toBe('188.114.97.1');
+    spy.mockRestore();
   });
 });
 

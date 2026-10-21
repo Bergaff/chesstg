@@ -199,6 +199,8 @@ export interface BotWebhookInfo {
   pending: number;
   lastError: string;
   lastErrorAt: number | null;
+  /** Пусто, если Telegram резолвит домен сам. Непустое значение значит привязку к IP. */
+  ipAddress: string;
 }
 
 export interface BotStatusResponse {
@@ -211,6 +213,8 @@ export interface BotStatusResponse {
   devMode: boolean;
   checkedAt: number;
   username: string;
+  /** Есть ли у бота главное веб-приложение, его заводит BotFather командой /newapp. */
+  mainWebApp: boolean;
   webhook: BotWebhookInfo | null;
   botError: string;
 }

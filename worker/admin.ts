@@ -745,11 +745,15 @@ async function readBotStatus(env: WorkerEnv, origin: string) {
     return {
       ...base,
       username: '',
+      mainWebApp: false,
       webhook: null,
       botError: 'Не задан BOT_TOKEN',
     };
   }
-  const me = await telegramCall<{ username?: string; first_name?: string }>(env, 'getMe');
+  const me = await telegramCall<{ username?: string; first_name?: string; has_main_web_app?: boolean }>(
+    env,
+    'getMe',
+  );
   const info = await telegramCall<WebhookInfo>(env, 'getWebhookInfo');
   const webhook = info.ok && info.result
     ? {
@@ -757,11 +761,13 @@ async function readBotStatus(env: WorkerEnv, origin: string) {
         pending: Number(info.result.pending_update_count ?? 0),
         lastError: info.result.last_error_message ?? '',
         lastErrorAt: Number(info.result.last_error_date ?? 0) * 1000 || null,
+        ipAddress: info.result.ip_address ?? '',
       }
     : null;
   return {
     ...base,
     username: me.result?.username ?? '',
+    mainWebApp: me.result?.has_main_web_app === true,
     webhook,
     botError: me.ok ? '' : me.description ?? 'Telegram не ответил',
   };
