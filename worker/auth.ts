@@ -206,6 +206,11 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     if (!token) {
       fail(503, 'auth_not_configured', 'Бот ещё не настроен: добавь BOT_TOKEN или открой демо');
     }
+    if (c.env.AUTH_DEBUG === 'true') {
+      // Временная диагностика для владельца бота: без значений поля `hash`
+      // ничего лишнего в логи не уходит, а по строке видно, что прислал клиент.
+      console.info('init_data_raw', initData.replace(/hash=[0-9a-f]{6}/gi, 'hash=XXXXXX').slice(0, 900));
+    }
     const result = await validateInitData(initData, token, (candidates, signature) =>
       verifySignedInitData(c.env, candidates, signature),
     );

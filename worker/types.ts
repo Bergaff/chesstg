@@ -10,6 +10,8 @@ export interface WorkerEnv {
   ALLOW_GUESTS?: string;
   DEV_MODE?: string;
   ENVIRONMENT?: string;
+  /** true, и при отказе проверки initData в логи пишется исходная строка клиента. */
+  AUTH_DEBUG?: string;
   /** Пароль администратора в открытом виде. Только как секрет воркера. */
   ADMIN_PASSWORD?: string;
   /** SHA-256 пароля в hex, альтернатива ADMIN_PASSWORD. */

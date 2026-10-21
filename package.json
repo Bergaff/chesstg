@@ -19,7 +19,8 @@
     "cf-typegen": "wrangler types",
     "db:status": "wrangler d1 migrations list pawn-vs-all --remote",
     "db:local:status": "wrangler d1 migrations list pawn-vs-all --local",
-    "db:sql": "node scripts/build-db-sql.mjs"
+    "db:sql": "node scripts/build-db-sql.mjs",
+    "check:initdata": "node scripts/check-initdata.mjs"
   },
   "dependencies": {
     "hono": "^4.13.13",
