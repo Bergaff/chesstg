@@ -332,7 +332,7 @@ npx wrangler rollback <deployment-id>
 
 | Симптом | Причина и решение |
 | --- | --- |
-| `401 invalid_init_data` | Открыто не из Telegram, либо `BOT_TOKEN` не тот, либо initData старше 48 часов. Открой через кнопку бота. |
+| `401 invalid_init_data` | Воркер получил initData, но проверка подписи не прошла. Воркер отвечает русской причиной, а в `Logs` пишет `init_data_rejected <причина> <возраст> <поля>`. Причины: `no_params` и `no_hash`, приложение открыли не из бота; `bad_signature`, подписало другое приложение или значение `BOT_TOKEN` отличается от текущего токена бота; `too_old`, `auth_date` старше 48 часов, это кэш недавних приложений в Telegram Desktop, помогает полный перезапуск через кнопку в чате; `clock_skew`, часы впереди более чем на 5 минут; `no_user` и `bad_user`, в initData нет профиля. Проверить токен можно без раскрытия секрета: открой в браузере `https://api.telegram.org/bot<TOKEN>/getMe` и сравни `id` с числом до двоеточия в секрете `BOT_TOKEN`. |
 | `503 auth_not_configured` | Не задан `BOT_TOKEN`. |
 | `401 guests_disabled` | `ALLOW_GUESTS=false`, а запрос без `tma`-заголовка. |
 | `health` 503, `error: db_not_ready` | Боевая база пустая или не та. `npm run db:status` и `npm run db:remote`, либо `docs/db-setup.sql` в консоли D1 (раздел 1). Поле `missing` показывает, каких таблиц не хватает. |

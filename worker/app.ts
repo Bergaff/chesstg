@@ -24,6 +24,7 @@ import {
 import { authMiddleware, syncTelegramName } from './auth';
 import { adminApp } from './admin';
 import { logEventInBackground } from './events';
+import { hasBotToken } from './token';
 import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import {
   activeRuns,
@@ -180,7 +181,7 @@ app.get('/api/health', async (c) => {
       warnings.push('webapp_url_invalid');
     }
   }
-  if (!c.env.BOT_TOKEN?.trim()) warnings.push('bot_token_missing');
+  if (!hasBotToken(c.env)) warnings.push('bot_token_missing');
   if (!c.env.WEBHOOK_SECRET?.trim()) warnings.push('webhook_secret_missing');
   if (!c.env.ADMIN_SECRET?.trim()) {
     warnings.push('admin_secret_missing');

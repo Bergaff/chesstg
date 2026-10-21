@@ -126,3 +126,35 @@ describe('ошибки базы', () => {
     expect(body.hint).toBe('npm run db:remote');
   });
 });
+
+describe('данные Telegram', () => {
+  it('401 содержит причину отказа', async () => {
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/session', {
+        method: 'POST',
+        headers: { Authorization: 'tma auth_date=1792560000&user=%7B%22id%22%3A1%2C%22first_name%22%3A%22A%22%7D&hash=deadbeef' },
+        body: JSON.stringify({ startParam: '' }),
+      }),
+      env({}, { BOT_TOKEN: '1:abc' }),
+    );
+
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string; message: string; reason?: string };
+    expect(body.error).toBe('invalid_init_data');
+    expect(body.reason).toBe('bad_signature');
+    expect(body.message).toContain('BOT_TOKEN');
+  });
+
+  it('без токена отвечает 503, а не 401', async () => {
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/session', {
+        method: 'POST',
+        headers: { Authorization: 'tma hash=deadbeef' },
+        body: JSON.stringify({}),
+      }),
+      env({}),
+    );
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { error: string }).error).toBe('auth_not_configured');
+  });
+});

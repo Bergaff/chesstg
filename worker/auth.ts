@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import type { AppEnv, TelegramUser, WorkerEnv } from './types';
 import { fail } from './http';
+import { botToken } from './token';
 import { getOrCreateUser } from './db';
 
 const encoder = new TextEncoder();
@@ -32,12 +33,47 @@ export interface InitDataCheck {
   authDate: number;
 }
 
+/** Почему Telegram-данные не подошли. В ответе клиенту это русским текстом. */
+export type InitDataReason =
+  | 'no_params'
+  | 'no_hash'
+  | 'bad_signature'
+  | 'no_auth_date'
+  | 'too_old'
+  | 'clock_skew'
+  | 'no_user'
+  | 'bad_user';
+
+export const INIT_DATA_MESSAGES: Record<InitDataReason, string> = {
+  no_params: 'Не пришли подписанные данные Telegram: приложение открыто не из бота',
+  no_hash: 'В данных Telegram нет подписи',
+  bad_signature: 'Подпись данных Telegram не совпадает с BOT_TOKEN воркера',
+  no_auth_date: 'В данных Telegram нет отметки времени',
+  too_old: 'Данные Telegram устарели, это кэш недавних приложений',
+  clock_skew: 'Часы устройства сильно расходятся с сервером',
+  no_user: 'В данных Telegram нет профиля игрока',
+  bad_user: 'Профиль в данных Telegram повреждён',
+};
+
+export interface InitDataResult {
+  check: InitDataCheck | null;
+  reason: InitDataReason | null;
+  ageSec: number | null;
+  fields: string[];
+}
+
 /** Проверка подписи Telegram WebApp initData. */
-export async function validateInitData(initData: string, botToken: string): Promise<InitDataCheck | null> {
-  if (!initData || !botToken) return null;
+export async function validateInitData(initData: string, token: string): Promise<InitDataResult> {
+  const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [] };
+  if (!token) return { ...empty, reason: 'no_params' };
+  if (!initData) return { ...empty, reason: 'no_params' };
+
   const params = new URLSearchParams(initData);
+  const fields = [...new Set([...params.keys()])].sort();
+  if (fields.length === 0) return { ...empty, reason: 'no_params' };
+
   const hash = params.get('hash');
-  if (!hash) return null;
+  if (!hash) return { ...empty, fields, reason: 'no_hash' };
 
   const entries: Array<[string, string]> = [];
   for (const [key, value] of params.entries()) {
@@ -47,35 +83,49 @@ export async function validateInitData(initData: string, botToken: string): Prom
   entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   const dataCheckString = entries.map(([key, value]) => `${key}=${value}`).join('\n');
 
-  const secret = await hmac(encoder.encode(botToken), 'WebAppData');
+  const secret = await hmac(encoder.encode(token), 'WebAppData');
   const signature = toHex(await hmac(secret, dataCheckString));
-  if (!safeEqual(signature, hash.toLowerCase())) return null;
+  if (!safeEqual(signature, hash.toLowerCase())) {
+    return { ...empty, fields, reason: 'bad_signature' };
+  }
 
   const authDateRaw = params.get('auth_date');
   const authDate = authDateRaw ? Number(authDateRaw) : 0;
-  if (!Number.isFinite(authDate) || authDate <= 0) return null;
-  const age = Date.now() / 1000 - authDate;
-  if (age > 60 * 60 * 48 || age < -300) return null;
+  if (!Number.isFinite(authDate) || authDate <= 0) {
+    return { ...empty, fields, reason: 'no_auth_date' };
+  }
+  const ageSec = Math.round(Date.now() / 1000 - authDate);
+  if (ageSec > 60 * 60 * 48) return { ...empty, fields, ageSec, reason: 'too_old' };
+  if (ageSec < -300) return { ...empty, fields, ageSec, reason: 'clock_skew' };
 
   const rawUser = params.get('user');
-  if (!rawUser) return null;
+  if (!rawUser) return { ...empty, fields, ageSec, reason: 'no_user' };
   try {
     const parsed = JSON.parse(rawUser) as Record<string, unknown>;
-    if (typeof parsed.id !== 'number' || !Number.isFinite(parsed.id)) return null;
-    if (typeof parsed.first_name !== 'string') return null;
+    if (typeof parsed.id !== 'number' || !Number.isFinite(parsed.id)) {
+      return { ...empty, fields, ageSec, reason: 'bad_user' };
+    }
+    if (typeof parsed.first_name !== 'string') {
+      return { ...empty, fields, ageSec, reason: 'bad_user' };
+    }
     return {
-      user: {
-        id: parsed.id,
-        first_name: parsed.first_name.slice(0, 100),
-        last_name: typeof parsed.last_name === 'string' ? parsed.last_name.slice(0, 100) : undefined,
-        username: typeof parsed.username === 'string' ? parsed.username.slice(0, 64) : undefined,
-        language_code: typeof parsed.language_code === 'string' ? parsed.language_code : undefined,
-        is_premium: parsed.is_premium === true,
+      check: {
+        user: {
+          id: parsed.id,
+          first_name: parsed.first_name.slice(0, 100),
+          last_name: typeof parsed.last_name === 'string' ? parsed.last_name.slice(0, 100) : undefined,
+          username: typeof parsed.username === 'string' ? parsed.username.slice(0, 64) : undefined,
+          language_code: typeof parsed.language_code === 'string' ? parsed.language_code : undefined,
+          is_premium: parsed.is_premium === true,
+        },
+        authDate,
       },
-      authDate,
+      reason: null,
+      ageSec,
+      fields,
     };
   } catch {
-    return null;
+    return { ...empty, fields, ageSec, reason: 'bad_user' };
   }
 }
 
@@ -86,14 +136,27 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
 
   if (authorization.startsWith('tma ')) {
     const initData = authorization.slice(4).trim();
-    const botToken = c.env.BOT_TOKEN?.trim();
-    if (!botToken) {
+    const token = botToken(c.env);
+    if (!token) {
       fail(503, 'auth_not_configured', 'Бот ещё не настроен: добавь BOT_TOKEN или открой демо');
     }
-    const check = await validateInitData(initData, botToken);
-    if (!check) {
-      fail(401, 'invalid_init_data', 'Не удалось проверить данные Telegram');
+    const result = await validateInitData(initData, token);
+    if (!result.check) {
+      const reason = result.reason ?? 'bad_signature';
+      // Без этого в логах видно только факт отказа, а причина бывает в кэше Telegram
+      // или в чужом токене, и это разные проблемы.
+      console.warn(
+        'init_data_rejected',
+        reason,
+        `age=${result.ageSec ?? '?'}`,
+        `fields=${result.fields.join(',')}`,
+      );
+      fail(401, 'invalid_init_data', INIT_DATA_MESSAGES[reason], {
+        reason,
+        authDateAgeSec: result.ageSec,
+      });
     }
+    const check = result.check;
     const { user, created } = await getOrCreateUser(c.env, {
       id: `tg:${check.user.id}`,
       tgUser: check.user,

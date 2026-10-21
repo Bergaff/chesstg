@@ -10,6 +10,7 @@ import {
   type PieceType,
 } from '../src/engine';
 import { fail, readJson } from './http';
+import { botToken, hasBotToken } from './token';
 import type { AppEnv, WorkerEnv } from './types';
 
 /**
@@ -681,7 +682,7 @@ async function telegramCall<T>(
   method: string,
   payload: Record<string, unknown> = {},
 ): Promise<TelegramReply<T>> {
-  const token = env.BOT_TOKEN?.trim();
+  const token = botToken(env);
   if (!token) return { ok: false, description: 'Не задан BOT_TOKEN' };
   try {
     const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -729,7 +730,7 @@ interface WebhookInfo {
 async function readBotStatus(env: WorkerEnv, origin: string) {
   const appUrl = normalizeAppUrl(env.WEBAPP_URL ?? '') ?? '';
   const expectedUrl = `${origin}${WEBHOOK_PATH}`;
-  const configured = Boolean(env.BOT_TOKEN?.trim());
+  const configured = hasBotToken(env);
   const base = {
     configured,
     expectedUrl,
@@ -772,7 +773,7 @@ adminApp.get('/bot', async (c) => {
 });
 
 adminApp.post('/bot/setup', async (c) => {
-  if (!c.env.BOT_TOKEN?.trim()) {
+  if (!hasBotToken(c.env)) {
     fail(400, 'bot_token_missing', 'Сначала добавьте секрет BOT_TOKEN и перезапустите воркер');
   }
   const body = await readJson(c);

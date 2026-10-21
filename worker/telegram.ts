@@ -1,4 +1,5 @@
 import type { WorkerEnv } from './types';
+import { botToken } from './token';
 
 const API_BASE = 'https://api.telegram.org';
 
@@ -13,7 +14,7 @@ export async function callTelegram<T = unknown>(
   method: string,
   payload: Record<string, unknown>,
 ): Promise<T | null> {
-  const token = env.BOT_TOKEN?.trim();
+  const token = botToken(env);
   if (!token) return null;
   try {
     const response = await fetch(`${API_BASE}/bot${token}/${method}`, {

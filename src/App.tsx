@@ -130,7 +130,14 @@ export default function App(): ReactNode {
       } catch (error) {
         if (cancelled) return;
         if (error instanceof ApiError) {
-          if (error.status === 401) {
+          if (error.code === 'invalid_init_data') {
+            // Телеграм прислал initData, но проверка не прошла. Причины разные:
+            // кэш недавних приложений, чужой BOT_TOKEN, расхождение часов.
+            setBootError({
+              message: error.message,
+              hint: 'Закрой игру и открой заново кнопкой в чате бота. Если не поможет, причина в настройке BOT_TOKEN: владельцу видно код в логах воркера.',
+            });
+          } else if (error.status === 401) {
             setBootError({
               message: error.message,
               hint: 'Открой игру через кнопку в Telegram-боте. В браузере прогресс доступен только в гостевом режиме.',
