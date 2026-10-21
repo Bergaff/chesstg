@@ -43,7 +43,10 @@ export function parseActions(value: unknown): GameAction[] {
     if (action.type === 'move') {
       const dx = action.dx;
       if (dx !== -1 && dx !== 0 && dx !== 1) fail(400, 'bad_request', 'Некорректный dx');
-      actions.push({ type: 'move', dx });
+      // dy принимаем только 1 или 2: двойной ход возможен с начальной позиции,
+      // остальное сервер всё равно отвергнет правилами, но лучше отказать сразу.
+      const dy = action.dy === undefined || action.dy === 1 ? 1 : action.dy === 2 ? 2 : fail(400, 'bad_request', 'Некорректный dy');
+      actions.push(dy === 2 ? { type: 'move', dx, dy: 2 } : { type: 'move', dx });
     } else if (action.type === 'skip') {
       actions.push({ type: 'skip' });
     } else if (action.type === 'buff') {
@@ -59,7 +62,13 @@ export function parseActions(value: unknown): GameAction[] {
 }
 
 export function jsonAction(action: GameAction): string {
-  if (action.type === 'move') return `{"type":"move","dx":${action.dx}}`;
+  if (action.type === 'move') {
+    // Канонический вид: отсутствие dy и dy=1 это одно и то же действие, иначе
+    // сверка клиентской последовательности с серверной падала бы на двойном ходе.
+    return action.dy === 2
+      ? `{"type":"move","dx":${action.dx},"dy":2}`
+      : `{"type":"move","dx":${action.dx}}`;
+  }
   if (action.type === 'skip') return '{"type":"skip"}';
   return `{"type":"buff","buff":"${action.buff}"}`;
 }

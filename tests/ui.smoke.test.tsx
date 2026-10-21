@@ -283,7 +283,7 @@ describe('UI smoke', () => {
     fireEvent.click(screen.getByText(/^(Продолжить|Играть)$/).closest('button')!);
     fireEvent.click(await screen.findByText('Начать'));
     await screen.findByRole('grid', { name: 'Игровое поле' });
-    fireEvent.click(screen.getByRole('button', { name: 'Вправо-вперёд' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Вправо' }));
 
     expect(await screen.findByText('Пешка поймана', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText(/Минус одна жизнь/)).toBeTruthy();

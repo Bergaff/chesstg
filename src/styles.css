@@ -1282,6 +1282,72 @@ a {
   background: var(--danger-wash);
 }
 
+/* Взятие выглядит иначе, чем обычный ход: иначе игрок не понимает, почему
+   клетка с фигурой стала доступной. */
+.cell-take {
+  background: var(--danger-wash);
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+.cell-flash {
+  animation: cell-flash 520ms ease-out 1;
+}
+
+@keyframes cell-flash {
+  0% {
+    background: #efe2c4;
+  }
+  100% {
+    background: var(--danger-wash);
+  }
+}
+
+/* Клетка, откуда фигура ушла: след нужен, чтобы ход читался. */
+.cell-left {
+  outline: 1px dashed var(--line);
+  outline-offset: -1px;
+}
+
+/* Фигура приезжает из прежней клетки, а не появляется рядом с пешкой. */
+.enemy-moved {
+  animation: enemy-slide 620ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
+}
+
+@keyframes enemy-slide {
+  from {
+    transform: translate(var(--from-x), var(--from-y));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+
+.board-measure {
+  position: relative;
+}
+
+.board-turn-flag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -18px;
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.side-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
 .piece {
   position: relative;
   width: 100%;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   PIECE_GLYPH,
   SKINS,
@@ -11,20 +11,30 @@ import {
 } from '../engine';
 import { cn } from '../lib/format';
 
+export interface MovedPiece {
+  id: string;
+  from: Cell;
+  to: Cell;
+}
+
 interface BoardProps {
   state: GameState;
   moves: MoveOption[];
   hint: Cell[];
   skin: SkinId;
   interactive: boolean;
-  onMove: (dx: MoveDx) => void;
+  onMove: (dx: MoveDx, dy?: 1 | 2) => void;
   turn: number;
+  /** Куда переставились фигуры последним ходом: нужно для показа хода врага. */
+  moved?: MovedPiece[];
+  /** Идёт ход фигур, ввод заблокирован. */
+  settling?: boolean;
 }
 
 const FRAME_PAD = 8;
 const MOVE_GLYPH: Record<MoveDx, string> = { [-1]: '↖', [0]: '↑', [1]: '↗' };
 
-export function Board({ state, moves, hint, skin, interactive, onMove, turn }: BoardProps): ReactNode {
+export function Board({ state, moves, hint, skin, interactive, onMove, turn, moved = [], settling = false }: BoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
 
@@ -93,6 +103,9 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn }: B
               const enemy = state.enemies.find((e) => e.x === x && e.y === y);
               const isPlayer = state.player.x === x && state.player.y === y;
               const move = moves.find((m) => m.x === x && m.y === y);
+              const arrived = moved.find((m) => m.to.x === x && m.to.y === y);
+              const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
+              const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
               const isFinish = state.mode === 'campaign' && y === state.height - 1;
               const captured = state.status === 'lost' && isPlayer;
@@ -107,18 +120,23 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn }: B
                     dark ? 'cell-dark' : 'cell-light',
                     isFinish && 'cell-finish',
                     move && interactive && 'cell-move',
+                    move?.takes && 'cell-take',
+                    flash && 'cell-flash',
+                    leftCell && 'cell-left',
                     hintIndex >= 0 && 'cell-hint',
                     hintIndex === 1 && 'cell-hint-2',
                     captured && 'cell-captured',
                   )}
                   style={{ width: cell || undefined, height: cell || undefined }}
                   onClick={() => {
-                    if (move && interactive) onMove(move.dx);
+                    if (move && interactive) onMove(move.dx, move.dy ?? 1);
                   }}
                   disabled={!move || !interactive}
                   aria-label={
                     enemy
-                      ? `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
+                      ? move?.takes
+                        ? `Клетка ${x + 1}, ${y + 1}: взять вражескую фигуру`
+                        : `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
                       : isPlayer
                         ? `Клетка ${x + 1}, ${y + 1}: ваша пешка`
                         : `Клетка ${x + 1}, ${y + 1}`
@@ -133,7 +151,20 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn }: B
                   {enemy && (
                     <span
                       key={`${enemy.id}-${turn}`}
-                      className={cn('piece enemy-piece', `enemy-${enemy.type}`, state.freeze > 0 && 'enemy-iced')}
+                      className={cn(
+                        'piece enemy-piece',
+                        `enemy-${enemy.type}`,
+                        state.freeze > 0 && 'enemy-iced',
+                        arrived && 'enemy-moved',
+                      )}
+                      style={
+                        arrived
+                          ? ({
+                              '--from-x': `${(arrived.from.x - arrived.to.x) * (cell + gap)}px`,
+                              '--from-y': `${(arrived.from.y - arrived.to.y) * (cell + gap)}px`,
+                            } as CSSProperties)
+                          : undefined
+                      }
                     >
                       <span className="piece-glyph">{PIECE_GLYPH[enemy.type]}</span>
                       {state.freeze > 0 && (
@@ -161,6 +192,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn }: B
           )}
         </div>
       </div>
+      {settling && <div className="board-turn-flag">ход фигур</div>}
       {cell === 0 && <div className="board-placeholder" />}
     </div>
   );

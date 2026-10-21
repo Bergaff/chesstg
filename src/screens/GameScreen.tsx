@@ -15,6 +15,7 @@ import {
   applyActions,
   legalMoves,
   newPiecesAtLevel,
+  skipsLeft,
   projectHint,
   type BonusId,
   type Cell,
@@ -23,6 +24,9 @@ import {
   type GameState,
   type MoveDx,
 } from '../engine';
+/** Темп хода фигур: столько игрок видит, куда встала каждая фигура. */
+const ENEMY_BEAT_MS = 700;
+
 import { useApp } from '../context/AppContext';
 import { api, ApiError, saveOnExit } from '../lib/api';
 import { appBaseUrl, cn, formatDuration, formatNumber } from '../lib/format';
@@ -290,6 +294,43 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   }, [run]);
 
   const moves = useMemo(() => (state ? legalMoves(state) : []), [state]);
+  const skipsLeftNow = state ? skipsLeft(state) : 0;
+  const doubleStep = moves.find((move) => move.dy === 2);
+
+  // Куда переставились фигуры после последнего хода: без этого ход врага
+  // выглядит телепортом, и игрок не понимает, что его поймали.
+  const enemiesBefore = useRef<GameState['enemies']>([]);
+  const moved = useMemo(() => {
+    if (!state) return [];
+    const before = new Map(enemiesBefore.current.map((e) => [e.id, e]));
+    const result: Array<{ id: string; from: Cell; to: Cell }> = [];
+    for (const enemy of state.enemies) {
+      const old = before.get(enemy.id);
+      if (old && (old.x !== enemy.x || old.y !== enemy.y)) {
+        result.push({ id: enemy.id, from: { x: old.x, y: old.y }, to: { x: enemy.x, y: enemy.y } });
+      }
+    }
+    enemiesBefore.current = state.enemies.map((e) => ({ ...e }));
+    return result;
+  }, [state]);
+
+  // Пауза на ход фигур: 700 мс анимации, в это время кнопки не отвечают.
+  // Реагируем только на настоящий ход: при первой отрисовке (продолжение партии,
+  // возврат из админки) блокировать ввод нечего, фигуры никуда не ехали.
+  const [settling, setSettling] = useState(false);
+  const movesShown = useRef<number | null>(null);
+  useEffect(() => {
+    if (!state) {
+      movesShown.current = null;
+      return;
+    }
+    const previous = movesShown.current;
+    movesShown.current = state.moves;
+    if (previous === null || state.moves === previous) return;
+    setSettling(true);
+    const timer = window.setTimeout(() => setSettling(false), ENEMY_BEAT_MS);
+    return () => window.clearTimeout(timer);
+  }, [state]);
 
   const lastMoveIndex = useMemo(() => {
     for (let index = actions.length - 1; index >= 0; index--) {
@@ -298,7 +339,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     return -1;
   }, [actions]);
 
-  const canPlay = phase === 'playing' && state?.status === 'playing';
+  const canPlay = phase === 'playing' && state?.status === 'playing' && !settling;
 
   function performAction(action: GameAction) {
     const current = stateRef.current;
@@ -337,13 +378,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     }, next.status === 'lost' ? 700 : 450);
   }
 
-  function handleMove(dx: MoveDx) {
-    if (!moves.some((move) => move.dx === dx)) return;
-    performAction({ type: 'move', dx });
+  function handleMove(dx: MoveDx, dy: 1 | 2 = 1) {
+    const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === dy);
+    if (!option) return;
+    performAction(dy === 2 ? { type: 'move', dx, dy: 2 } : { type: 'move', dx });
   }
 
   function handleSkip() {
-    if (moves.length > 0) return;
+    // Пропуск бывает вынужденным (ходов нет) и добровольным: квота режима.
+    if (moves.length > 0 && skipsLeftNow <= 0) return;
     performAction({ type: 'skip' });
   }
 
@@ -650,6 +693,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           interactive={canPlay}
           onMove={handleMove}
           turn={state.moves}
+          moved={moved}
+          settling={settling}
         />
       </div>
 
@@ -698,34 +743,52 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           </button>
         </div>
 
-        {moves.length === 0 && canPlay ? (
-          <button type="button" className="skip-btn" onClick={handleSkip}>
-            Все ходы закрыты. Пропустить
-          </button>
-        ) : (
+        {moves.length === 0 && !canPlay ? null : (
           <div className="move-row">
             {([-1, 0, 1] as MoveDx[]).map((dx) => {
-              const available = canPlay && moves.some((move) => move.dx === dx);
+              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
+              const available = canPlay && option !== undefined;
+              const label = dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо';
               return (
                 <button
                   key={dx}
                   type="button"
-                  className={cn('move-btn', dx === 0 && 'primary', !available && 'off')}
+                  className={cn('move-btn', dx === 0 && 'primary', !available && 'off', option?.takes && 'move-take')}
                   disabled={!available}
                   onClick={() => handleMove(dx)}
-                  aria-label={dx === -1 ? 'Влево-вперёд' : dx === 0 ? 'Вперёд' : 'Вправо-вперёд'}
+                  aria-label={
+                    option?.takes
+                      ? `${label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
+                      : `${label[0].toUpperCase()}${label.slice(1)}`
+                  }
                 >
                   <span className="move-glyph-lg" aria-hidden="true">
                     {dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
                   </span>
-                  <span className="move-label">{dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо'}</span>
+                  <span className="move-label">{option?.takes ? 'взять' : label}</span>
                 </button>
               );
             })}
           </div>
         )}
+        <div className="side-row">
+          {doubleStep && canPlay ? (
+            <button type="button" className="skip-btn" onClick={() => handleMove(0, 2)}>
+              Вперёд на две клетки
+            </button>
+          ) : null}
+          {canPlay && (moves.length === 0 || skipsLeftNow > 0) ? (
+            <button type="button" className="skip-btn" onClick={handleSkip}>
+              {moves.length === 0 ? 'Ходов нет. Пропустить' : `Пропустить ход, в запасе ${skipsLeftNow}`}
+            </button>
+          ) : null}
+        </div>
         <p className="control-hint">
-          {playerAlive ? 'Пешка ходит только вперёд и не бьёт фигуры.' : 'Пешка поймана.'}
+          {!playerAlive
+            ? 'Пешка поймана.'
+            : settling
+              ? 'Ход фигур.'
+              : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
 
