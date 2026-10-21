@@ -2,6 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import type { AppEnv, TelegramUser, WorkerEnv } from './types';
 import { fail } from './http';
 import { botToken } from './token';
+import { verifySignedInitData } from './webAppKey';
 import { getOrCreateUser } from './db';
 
 const encoder = new TextEncoder();
@@ -66,7 +67,12 @@ export interface InitDataResult {
   variant: InitDataVariant | null;
 }
 
-type InitDataVariant = 'canonical' | 'no_signature' | 'keep_empty' | 'no_signature_keep_empty';
+type InitDataVariant =
+  | 'canonical'
+  | 'no_signature'
+  | 'keep_empty'
+  | 'no_signature_keep_empty'
+  | 'signed';
 
 interface VariantRule {
   name: InitDataVariant;
@@ -101,7 +107,11 @@ function checkString(params: URLSearchParams, rule: VariantRule): string {
 }
 
 /** Проверка подписи Telegram WebApp initData. */
-export async function validateInitData(initData: string, token: string): Promise<InitDataResult> {
+export async function validateInitData(
+  initData: string,
+  token: string,
+  verifySigned?: (candidates: string[], signature: string) => Promise<boolean>,
+): Promise<InitDataResult> {
   const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [], variant: null };
   if (!token || !initData) return { ...empty, reason: 'no_params' };
 
@@ -125,15 +135,22 @@ export async function validateInitData(initData: string, token: string): Promise
   if (!matched) {
     // У сторонних приложений `hash` это не HMAC по токену, а обычный SHA-256,
     // а подпись несёт поле `signature`. Так отличаем чужое приложение от опечатки в токене.
+    const candidates = VARIANTS.slice(0, 2).map((rule) => checkString(params, rule));
     let thirdParty = false;
-    for (const rule of VARIANTS.slice(0, 2)) {
-      const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(checkString(params, rule))));
+    for (const text of candidates) {
+      const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
       if (plain === expected) {
         thirdParty = true;
         break;
       }
     }
-    return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
+    if (thirdParty && verifySigned) {
+      const signature = params.get('signature') ?? '';
+      if (signature && (await verifySigned(candidates, signature))) {
+        matched = { name: 'signed', dropSignature: true, dropEmpty: true };
+      }
+    }
+    if (!matched) return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
   }
 
   const authDateRaw = params.get('auth_date');
@@ -189,7 +206,9 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     if (!token) {
       fail(503, 'auth_not_configured', 'Бот ещё не настроен: добавь BOT_TOKEN или открой демо');
     }
-    const result = await validateInitData(initData, token);
+    const result = await validateInitData(initData, token, (candidates, signature) =>
+      verifySignedInitData(c.env, candidates, signature),
+    );
     if (!result.check) {
       const reason = result.reason ?? 'bad_signature';
       // Без этого в логах видно только факт отказа, а причины разные: кэш недавних

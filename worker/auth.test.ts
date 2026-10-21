@@ -145,6 +145,38 @@ describe('стороннее приложение', () => {
   });
 });
 
+describe('подпись по ключу приложения', () => {
+  const signedData = async () => {
+    const values = { auth_date: String(Math.floor(Date.now() / 1000)), user: USER, chat_type: 'sender' };
+    const dataCheckString = Object.entries(values)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(dataCheckString));
+    const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return new URLSearchParams({ ...values, hash, signature: 'c2ln' }).toString();
+  };
+
+  it('принимает initData, когда подпись ключа сошлась', async () => {
+    const raw = await signedData();
+    const seen: string[] = [];
+    const result = await validateInitData(raw, TOKEN, async (candidates, signature) => {
+      seen.push(signature);
+      return candidates.length === 2 && signature === 'c2ln';
+    });
+    expect(result.reason).toBeNull();
+    expect(result.variant).toBe('signed');
+    expect(result.check?.user.id).toBe(777);
+    expect(seen).toEqual(['c2ln']);
+  });
+
+  it('отказывается, если подпись ключа не прошла', async () => {
+    const raw = await signedData();
+    const result = await validateInitData(raw, TOKEN, async () => false);
+    expect(result.reason).toBe('third_party');
+  });
+});
+
 describe('токен бота', () => {
   it('срезает пробелы и невидимые символы', () => {
     expect(botToken({ BOT_TOKEN: `\n ${TOKEN}\u200b \r` })).toBe(TOKEN);
