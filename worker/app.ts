@@ -26,6 +26,7 @@ import { adminApp } from './admin';
 import { logEventInBackground } from './events';
 import { hasBotToken } from './token';
 import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
+import { build as BUILD } from '../version.json';
 import {
   activeRuns,
   getRun,
@@ -194,6 +195,8 @@ app.get('/api/health', async (c) => {
   const base = {
     now: nowMs(),
     service: 'pawn-vs-all',
+    // Версия кода воркера: по ней видно, какая сборка реально в бою.
+    build: BUILD,
     origin,
     schemaVersion: SCHEMA_VERSION,
     config: publicConfig(c.env),

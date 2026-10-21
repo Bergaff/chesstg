@@ -242,6 +242,8 @@ export interface BotSetupResponse {
 }
 
 export interface HealthResponse {
+  /** Номер сборки воркера, см. version.json. */
+  build?: number;
   ok: boolean;
   error?: string;
   message?: string;

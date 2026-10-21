@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { build as BUILD } from '../../version.json';
 import { AdminError, fetchHealth, fetchStatus, login, logout } from './api';
 import type { HealthResponse } from './types';
 import { OverviewView } from './views/OverviewView';
@@ -28,6 +29,7 @@ export default function AdminApp(): ReactNode {
   const [expiresAt, setExpiresAt] = useState(0);
   const [reason, setReason] = useState('');
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const serverBuild = typeof health?.build === 'number' ? health.build : null;
 
   const boot = useCallback(async () => {
     // Сначала смотрим на базу. Если миграции не применены, входить бессмысленно:
@@ -130,6 +132,11 @@ npx wrangler secret put ADMIN_SECRET</pre>
           <h1 className="adm-title">Админка</h1>
         </div>
         <div className="adm-header-side">
+          <span className={`adm-build${serverBuild !== null && serverBuild !== BUILD ? ' is-mismatch' : ''}`}>
+            сборка {BUILD}
+            {serverBuild === null ? '' : ` · воркер ${serverBuild}`}
+            {serverBuild !== null && serverBuild !== BUILD ? ' · соберите заново' : ''}
+          </span>
           <span className="adm-expiry">Доступ до {formatDateTime(expiresAt)}</span>
           <button type="button" className="adm-btn adm-btn-quiet" onClick={() => void signOut()}>
             Выйти

@@ -216,6 +216,15 @@ body {
   gap: 14px;
 }
 
+.adm-build {
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--adm-muted, #8d8674);
+}
+
+.adm-build.is-mismatch {
+  color: #c98a3c;
+}
+
 .adm-expiry {
   font-size: 10.5px;
   color: var(--dim);
