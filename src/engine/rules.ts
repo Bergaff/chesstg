@@ -1,9 +1,10 @@
 import {
-  chooseEnemyMove,
   cloneState,
   enemyAt,
+  enemyTarget,
   legalMoves,
 } from './board';
+import { rulesFor } from './modes';
 import { ensureEndlessSpace } from './endless';
 import type { BuffKind, GameAction, GameState, MoveDx } from './types';
 import { RuleError } from './types';
@@ -13,6 +14,7 @@ function validateDx(dx: unknown): asserts dx is MoveDx {
 }
 
 function enemyPhase(state: GameState): void {
+  const rules = rulesFor(state.mode);
   if (state.freeze > 0) {
     state.freeze -= 1;
     if (state.shield > 0) state.shield -= 1;
@@ -20,8 +22,14 @@ function enemyPhase(state: GameState): void {
     return;
   }
 
+  const escaped: string[] = [];
   for (const enemy of state.enemies) {
-    const target = chooseEnemyMove(state, enemy);
+    const target = rules.motion === 'greedy' ? enemyTarget(state, enemy) : enemyTarget(state, enemy);
+    if (target === 'escape') {
+      // В «Гонках» фигура, ушедшая за нижний край, покидает поле.
+      escaped.push(enemy.id);
+      continue;
+    }
     if (target) {
       enemy.x = target.x;
       enemy.y = target.y;
@@ -32,6 +40,11 @@ function enemyPhase(state: GameState): void {
       state.lastEvent = 'captured';
       return;
     }
+  }
+
+  if (escaped.length > 0) {
+    state.enemies = state.enemies.filter((e) => !escaped.includes(e.id));
+    state.lastEvent = 'escaped';
   }
 
   if (state.shield > 0) state.shield -= 1;
@@ -61,19 +74,39 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   const state = cloneState(previous);
 
   if (action.type === 'skip') {
-    if (legalMoves(state).length > 0) throw new RuleError('Пропуск возможен, только если все ходы закрыты');
+    const forced = legalMoves(state).length === 0;
+    if (!forced) {
+      // Добровольный пропуск тратит квоту режима: иначе забег превращается
+      // в ожидание, пока фигуры разойдутся сами.
+      if ((state.skips ?? 0) >= rulesFor(state.mode).skipQuota) {
+        throw new RuleError('Добровольные пропуски закончились');
+      }
+      state.skips = (state.skips ?? 0) + 1;
+    }
     state.lastEvent = 'skip';
   } else if (action.type === 'move') {
     validateDx(action.dx);
+    const dy = action.dy ?? 1;
+    if (dy !== 1 && dy !== 2) throw new RuleError('Некорректная длина хода');
     const x = state.player.x + action.dx;
-    const y = state.player.y + 1;
-    if (y >= state.height) {
-      throw new RuleError('Верхняя граница поля');
+    const y = state.player.y + dy;
+    const option = legalMoves(state).find((m) => m.dx === action.dx && (m.dy ?? 1) === dy);
+    if (!option) {
+      // Сообщения те же, что и раньше, по ним сверяет отказ клиент.
+      if (y >= state.height) throw new RuleError('Верхняя граница поля');
+      if (x < 0 || x >= state.width) throw new RuleError('За границей поля');
+      if (dy === 2) throw new RuleError('Двойной ход доступен только с начальной позиции');
+      throw new RuleError('Клетка занята');
     }
-    if (x < 0 || x >= state.width) throw new RuleError('За границей поля');
-    if (enemyAt(state, x, y)) throw new RuleError('Клетка занята');
-    state.player = { x, y };
-    state.lastEvent = 'move';
+    if (option.takes) {
+      state.enemies = state.enemies.filter((e) => !(e.x === option.x && e.y === option.y));
+      state.captures = (state.captures ?? 0) + 1;
+      state.lastCapture = { x: option.x, y: option.y };
+      state.lastEvent = 'capture';
+    } else {
+      state.lastEvent = 'move';
+    }
+    state.player = { x: option.x, y: option.y };
   } else {
     throw new RuleError('Неизвестное действие');
   }

@@ -1,4 +1,5 @@
 import type { Cell, Enemy, GameState, MoveDx, MoveOption, PieceType } from './types';
+import { rulesFor } from './modes';
 
 export const PIECE_GLYPH: Record<PieceType, string> = {
   pawn: '♟',
@@ -28,28 +29,54 @@ export function isPlayerAt(state: GameState, x: number, y: number): boolean {
   return state.player.x === x && state.player.y === y;
 }
 
-/** Все пустые клетки, куда пешка может шагнуть вперёд. */
+/**
+ * Ходы пешки: один ряд вперёд (прямо или по диагонали) плюс, по правилам режима,
+ * взятие по диагонали и двойной шаг с начальной позиции.
+ */
 export function legalMoves(state: GameState): MoveOption[] {
   if (state.status !== 'playing') return [];
+  const rules = rulesFor(state.mode);
   const result: MoveOption[] = [];
   const directions: MoveDx[] = [-1, 0, 1];
   for (const dx of directions) {
     const x = state.player.x + dx;
     const y = state.player.y + 1;
     if (!inside(state, x, y)) continue;
-    if (enemyAt(state, x, y)) continue;
-    result.push({ x, y, dx });
+    const occupant = enemyAt(state, x, y);
+    if (!occupant) {
+      result.push({ x, y, dx, dy: 1 });
+      continue;
+    }
+    // Пешка бьёт только по диагонали вперёд, прямо фигуру ставить нельзя.
+    if (rules.captures && dx !== 0) {
+      result.push({ x, y, dx, dy: 1, takes: occupant.type });
+    }
   }
+
+  if (rules.doubleStep && state.player.y === 0 && (state.moves ?? 0) === 0) {
+    const x = state.player.x;
+    const y = state.player.y + 2;
+    if (inside(state, x, y) && !enemyAt(state, x, y) && !enemyAt(state, x, y - 1)) {
+      result.push({ x, y, dx: 0, dy: 2 });
+    }
+  }
+
   return result;
 }
 
-export function isMoveLegal(state: GameState, dx: MoveDx): boolean {
-  return legalMoves(state).some((m) => m.dx === dx);
+export function isMoveLegal(state: GameState, dx: MoveDx, dy: 1 | 2 = 1): boolean {
+  return legalMoves(state).some((m) => m.dx === dx && (m.dy ?? 1) === dy);
 }
 
-/** Может ли игрок хотя бы пропустить ход. */
+/** Сколько добровольных пропусков ещё доступно в режиме. */
+export function skipsLeft(state: GameState): number {
+  return Math.max(0, rulesFor(state.mode).skipQuota - (state.skips ?? 0));
+}
+
+/** Может ли игрок пропустить ход: если ходов нет, пропуск обязателен, иначе нужна квота. */
 export function canSkip(state: GameState): boolean {
-  return state.status === 'playing' && legalMoves(state).length === 0;
+  if (state.status !== 'playing') return false;
+  return legalMoves(state).length === 0 || skipsLeft(state) > 0;
 }
 
 /**
@@ -186,6 +213,27 @@ interface ScoredCell extends Cell {
   distance: number;
   chebyshev: number;
   alignment: number;
+}
+
+/**
+ * Ход фигуры по конвейеру режима «Гонки»: ряд вниз; если клетка занята, обход по
+ * диагонали, за нижним краем фигура уходит с поля (отдаём null со снятием).
+ */
+export function downStep(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const y = enemy.y - 1;
+  if (y < 0) return 'escape';
+  const blocked = (x: number) => enemyAt(state, x, y, enemy.id) !== undefined;
+  if (!blocked(enemy.x)) return { x: enemy.x, y };
+  const sides = [-1, 1].map((dx) => ({ x: enemy.x + dx, y })).filter((c) => inside(state, c.x, c.y) && !blocked(c.x));
+  return sides.length ? sides[0] : null;
+}
+
+/** Цель хода фигуры с учётом способа движения режима. */
+export function enemyTarget(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const motion = rulesFor(state.mode).motion;
+  if (motion === 'static') return null;
+  if (motion === 'down') return downStep(state, enemy);
+  return chooseEnemyMove(state, enemy);
 }
 
 /**

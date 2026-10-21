@@ -60,7 +60,7 @@ describe('разбор одной расстановки', () => {
     expect(audit.solution).toEqual([]);
   });
 
-  it('засчитывает пропуск как часть решения', () => {
+  it('стену из пешек в первом ряду берут взятиями', () => {
     const state = board({
       enemies: [
         { id: 'e0', type: 'pawn', x: 0, y: 1 },
@@ -69,12 +69,10 @@ describe('разбор одной расстановки', () => {
       ],
     });
     const audit = auditState(state);
-    if (audit.solvable) {
-      expect(audit.solution.some((action) => action.type === 'skip')).toBe(true);
-      expect(audit.steps).toBeGreaterThan(state.height - 1);
-    } else {
-      expect(audit.score).toBe(0);
-    }
+    // Раньше единственный способ пережить такой ряд, пропустить ход. Теперь
+    // пешка бьёт по диагонали, поэтому решение существует и включает взятие.
+    expect(audit.solvable).toBe(true);
+    expect(audit.captures).toBeGreaterThan(0);
   });
 
   it('поздний уровень оценивается выше первого', () => {

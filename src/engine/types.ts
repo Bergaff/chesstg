@@ -4,6 +4,11 @@ export type PieceType = 'pawn' | 'rook' | 'bishop' | 'knight' | 'queen';
 
 export type GameMode = 'campaign' | 'endless';
 
+/** Режимы лаборатории: «Парковка» и «Гонки» описаны в `modes.ts`. */
+export type LabMode = 'jam' | 'race';
+
+export type AnyMode = GameMode | LabMode;
+
 export type GameStatus = 'playing' | 'won' | 'lost';
 
 /** -1, влево-вперёд, 0, вперёд, 1, вправо-вперёд. */
@@ -25,7 +30,8 @@ export interface PlayerCell {
 
 export interface GameState {
   version: 1;
-  mode: GameMode;
+  /** Режим лаборатории может быть `jam` или `race`, боевой API принимает только два первых. */
+  mode: AnyMode;
   width: number;
   height: number;
   player: PlayerCell;
@@ -43,17 +49,23 @@ export interface GameState {
   freeze: number;
   /** Сколько ходов действует щит. */
   shield: number;
+  /** Сколько добровольных пропусков израсходовано (квота задаёт режим). */
+  skips?: number;
+  /** Сколько фигур взято пешкой. */
+  captures?: number;
   /** Мutable-состояние ГПСЧ (нужно для достройки бесконечного поля). */
   rng: number;
   seed: number;
   /** Кем была съедена пешка (для экрана проигрыша). */
   capturedBy?: PieceType;
+  /** Клетка фигуры, взятой последним ходом, для подсветки на доске. */
+  lastCapture?: Cell;
   /** Служебная метка последнего события для анимаций. */
   lastEvent?: string;
 }
 
 export type GameAction =
-  | { type: 'move'; dx: MoveDx }
+  | { type: 'move'; dx: MoveDx; dy?: 1 | 2 }
   | { type: 'skip' }
   | { type: 'buff'; buff: BuffKind };
 
@@ -64,6 +76,10 @@ export interface Cell {
 
 export interface MoveOption extends Cell {
   dx: MoveDx;
+  /** Число рядов, пройденных за ход: 1, либо 2 при ходе с начальной позиции. */
+  dy?: 1 | 2;
+  /** Тип фигуры, которую пешка бьёт на этой клетке. */
+  takes?: PieceType;
 }
 
 export class RuleError extends Error {

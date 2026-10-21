@@ -69,7 +69,7 @@ export function analyzeState(start: GameState, options: AnalysisOptions = {}): A
 
     const moves = legalMoves(state);
     const actions: GameAction[] = moves.length
-      ? moves.map((move) => ({ type: 'move' as const, dx: move.dx }))
+      ? moves.map((move) => ({ type: 'move' as const, dx: move.dx, dy: move.dy ?? 1 }))
       : [{ type: 'skip' as const }];
 
     for (const action of actions) {

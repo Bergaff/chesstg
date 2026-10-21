@@ -27,6 +27,8 @@ export interface AuditResult {
   forced: number;
   /** Сколько шагов кратчайшего пути оставляют не менее двух победных продолжений. */
   choiceSteps: number;
+  /** Сколько фигур пешка берёт на кратчайшем победном пути. */
+  captures: number;
   /** Доля шагов решения, на которых пешка стояла под боем. */
   pressure: number;
   /** Среднее расстояние до ближайшей фигуры на пути. */
@@ -51,10 +53,15 @@ export interface AuditOptions {
 
 const DEFAULT_PATH_CAP = 512;
 
+/**
+ * Ходы, которые перебирает разбор. Добровольный пропуск в дерево не добавляем:
+ * он тратит квоту и ведёт к позиции, которую пешка могла бы занять обычным ходом,
+ * а вот вынужденный пропуск обязателен, иначе тупик будет выглядеть нерешаемым.
+ */
 function actionsFrom(state: GameState): GameAction[] {
   const moves = legalMoves(state);
   if (moves.length === 0) return [{ type: 'skip' }];
-  return moves.map((move) => ({ type: 'move' as const, dx: move.dx }));
+  return moves.map((move) => ({ type: 'move' as const, dx: move.dx, dy: move.dy ?? 1 }));
 }
 
 function positionKey(state: GameState): string {
@@ -88,6 +95,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
       firstMoves: 0,
       forced: 0,
       choiceSteps: 0,
+      captures: 0,
       paths: 1,
       pathsCapped: false,
       pressure: 0,
@@ -107,6 +115,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
       firstMoves: 0,
       forced: 0,
       choiceSteps: 0,
+      captures: 0,
       paths: 0,
       pathsCapped: false,
       pressure: 0,
@@ -181,16 +190,25 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
   let cursor = start;
   let remaining = steps;
   let choiceSteps = 0;
+  let captures = 0;
   while (remaining > 0 && cursor.status === 'playing') {
     // Все продолжения считаем от одного и того же состояния: двигать cursor внутри
     // перебора нельзя, иначе следующие ходы проверялись бы уже из новой позиции.
-    const winning: Array<{ action: GameAction; next: GameState }> = [];
+    const winning: Array<{ action: GameAction; next: GameState; takes: boolean }> = [];
     for (const action of actionsFrom(cursor)) {
       const next = applyAction(cursor, action);
-      if (canWin(next, remaining - 1)) winning.push({ action, next });
+      if (canWin(next, remaining - 1)) {
+        const takes =
+          action.type === 'move' &&
+          legalMoves(cursor).some(
+            (m) => m.takes && m.dx === action.dx && (m.dy ?? 1) === (action.dy ?? 1),
+          );
+        winning.push({ action, next, takes });
+      }
     }
     if (winning.length === 0) break;
     if (winning.length >= 2) choiceSteps += 1;
+    if (winning[0].takes) captures += 1;
     solution.push(winning[0].action);
     cursor = winning[0].next;
     remaining -= 1;
@@ -253,13 +271,14 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
     firstMoves,
     forced,
     choiceSteps,
+    captures,
     paths,
     pathsCapped,
     pressure,
     nearest,
     coverage,
     score: solvable
-      ? difficultyScore(start, { solvable, steps, firstMoves, forced, paths, pressure, nearest, coverage })
+      ? difficultyScore(start, { solvable, steps, firstMoves, forced, choiceSteps, captures, paths, pressure, nearest, coverage })
       : 0,
     nodes,
     truncated,
@@ -272,6 +291,7 @@ interface ScoreInput {
   firstMoves: number;
   forced: number;
   choiceSteps?: number;
+  captures?: number;
   paths: number;
   pressure: number;
   nearest: number;
@@ -301,12 +321,14 @@ export function difficultyScore(state: GameState, input: ScoreInput): number {
   // Шаг с двумя и более победными продолжениями это и есть выбор: такой уровень
   // решает игрок, а не угадывает. Поэтому выбор добавляет оценку, а не отнимает.
   const choice = Math.min(10, (input.choiceSteps ?? 0) * 2.5);
+  // Взятие на пути это отдельный вкус: уровень, где нужно бить, читают иначе.
+  const eat = Math.min(6, (input.captures ?? 0) * 3);
   const close = Math.max(0, 6 - input.nearest) * 1.5;
   const detour = Math.min(10, Math.max(0, input.steps - (state.height - 1)) * 3);
 
   return Math.max(
     0,
-    Math.min(100, Math.round(board + density + fire + cover + narrow + rarity + forced + close + detour + choice)),
+    Math.min(100, Math.round(board + density + fire + cover + narrow + rarity + forced + close + detour + choice + eat)),
   );
 }
 

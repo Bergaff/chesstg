@@ -67,18 +67,49 @@ describe('правила хода', () => {
     expect(next.player.y).toBe(2);
   });
 
-  it('блокировка: пропуск возможен только без ходов', () => {
-    const s = state({
-      player: { x: 1, y: 0 },
-      enemies: [enemy('knight', 0, 1, 'a'), enemy('knight', 1, 1, 'b'), enemy('knight', 2, 1, 'c')],
-    });
+  it('блокировка: когда ходить некуда, пропуск бесплатен', () => {
+    // Поле шириной в одну колонку: впереди фигура, косить нечего, остаётся ждать.
+    const s = state({ width: 1, player: { x: 0, y: 0 }, enemies: [enemy('rook', 0, 1, 'a')] });
     expect(legalMoves(s)).toHaveLength(0);
     const next = applyAction(s, { type: 'skip' });
     expect(next.moves).toBe(1);
+    expect(next.skips ?? 0).toBe(0);
   });
 
-  it('нельзя пропустить ход, если есть куда идти', () => {
-    expect(() => applyAction(state(), { type: 'skip' })).toThrow();
+  it('взятие по диагонали снимает фигуру', () => {
+    const s = state({ enemies: [enemy('pawn', 2, 1, 'a')] });
+    const moves = legalMoves(s);
+    expect(moves.some((m) => m.dx === 1 && m.takes === 'pawn')).toBe(true);
+    const next = applyAction(s, { type: 'move', dx: 1 });
+    expect(next.player).toEqual({ x: 2, y: 1 });
+    expect(next.enemies).toHaveLength(0);
+    expect(next.captures).toBe(1);
+    expect(next.lastEvent).toBe('capture');
+  });
+
+  it('прямо на фигуру ходить нельзя', () => {
+    const s = state({ enemies: [enemy('pawn', 1, 1, 'a')] });
+    expect(legalMoves(s).some((m) => m.dx === 0)).toBe(false);
+    expect(() => applyAction(s, { type: 'move', dx: 0 })).toThrow('Клетка занята');
+  });
+
+  it('двойной ход доступен только первым ходом', () => {
+    const s = state();
+    expect(legalMoves(s).some((m) => m.dy === 2)).toBe(true);
+    const after = applyAction(s, { type: 'move', dx: 0, dy: 2 });
+    expect(after.player).toEqual({ x: 1, y: 2 });
+    expect(legalMoves(after).some((m) => m.dy === 2)).toBe(false);
+    // Перекрытая промежуточная клетка двойной ход отменяет.
+    const blocked = state({ enemies: [enemy('pawn', 1, 1, 'a')] });
+    expect(legalMoves(blocked).some((m) => m.dy === 2)).toBe(false);
+  });
+
+  it('добровольный пропуск тратит квоту режима', () => {
+    let s = state();
+    s = applyAction(s, { type: 'skip' });
+    s = applyAction(s, { type: 'skip' });
+    expect(s.skips).toBe(2);
+    expect(() => applyAction(s, { type: 'skip' })).toThrow('Добровольные пропуски закончились');
   });
 });
 

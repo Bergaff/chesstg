@@ -1,6 +1,7 @@
 import { anyEnemyAttacksPlayer, legalMoves } from './board';
 import { Rng, mix32 } from './rng';
 import { auditState, difficultyBand } from './audit';
+import { boardForMode, piecesFor } from './modes';
 import type { GameState, PieceType } from './types';
 
 export const MAX_BOARD = 6;
@@ -32,15 +33,14 @@ export interface BoardSize {
  * победных линий, то есть то, что игрок вообще может решать.
  */
 export function boardForLevel(level: number): BoardSize {
-  if (level <= 5) return { width: 3, height: 4 };
-  if (level <= 15) return { width: 4, height: 6 };
-  if (level <= 30) return { width: 5, height: 8 };
-  return { width: MAX_BOARD, height: 9 };
+  return boardForMode('campaign', level);
 }
 
 export function sizeForLevel(level: number): number {
   return boardForLevel(level).width;
 }
+
+/** Рядов в кампании задаёт `MODE_RULES.campaign.rows`, здесь только чтение. */
 
 export function heightForLevel(level: number): number {
   return boardForLevel(level).height;
@@ -48,13 +48,7 @@ export function heightForLevel(level: number): number {
 
 /** Число фигур. Рядов теперь больше, поэтому и фигуры добавляются чуть раньше. */
 export function pieceCountForLevel(level: number): number {
-  if (level <= 1) return 1;
-  if (level <= 4) return 2;
-  if (level <= 7) return 3;
-  if (level <= 12) return 4;
-  if (level <= 18) return 5;
-  if (level <= 25) return 6;
-  return 7;
+  return piecesFor('campaign', level);
 }
 
 export function availablePieceTypes(level: number): PieceType[] {
