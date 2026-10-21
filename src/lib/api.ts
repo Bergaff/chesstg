@@ -89,6 +89,42 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return data as T;
 }
 
+/**
+ * Повторять можно только сетевые сбои и 5xx от платформы.
+ * 401, конфликты хода и неготовая база от повторных попыток не меняются.
+ */
+function retryable(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.code === 'network') return true;
+  if (error.code === 'db_not_ready' || error.code === 'db_unavailable') return false;
+  return error.status >= 500 && error.status < 600;
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Запрос с короткими повторами. Холодный воркер и мобильная сеть дают
+ * таймауты чаще, чем настоящую ошибку, поэтому молча пробуем ещё пару раз.
+ */
+export async function apiWithRetry<T>(
+  path: string,
+  options: ApiOptions = {},
+  attempts = 3,
+  baseDelayMs = 400,
+): Promise<T> {
+  let lastError: unknown = new Error('unreachable');
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await api<T>(path, options);
+    } catch (error) {
+      lastError = error;
+      if (options.signal?.aborted || !retryable(error) || attempt === attempts - 1) throw error;
+      await wait(baseDelayMs * 2 ** attempt);
+    }
+  }
+  throw lastError;
+}
+
 /** Сохранение при закрытии страницы: запрос не должен отменяться. */
 export function saveOnExit(path: string, body: unknown): void {
   try {

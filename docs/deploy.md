@@ -342,6 +342,7 @@ npx wrangler rollback <deployment-id>
 | `assets.directory ... does not exist: .../dist` при сборке в панели | В Workers Builds не указана команда сборки. Поставьте `npm run build` либо деплой-команду `npm run deploy`. |
 | `health` отдаёт `dev_mode` в `warnings` | В `wrangler.jsonc` остался `DEV_MODE: "true"`. Для продакшена нужно `false` и повторный деплой. |
 | `webapp_url_origin_mismatch` | `WEBAPP_URL` не совпадает с доменом воркера. Ссылки в сообщениях бота будут вести не туда. |
+| Таймаут соединения с доменом (`ERR_CONNECTION_TIMED_OUT`) по http и по https | До воркера запрос не доходит: проверьте другой сетью (мобильный интернет), затем `Test-NetConnection <домен> -Port 443` и `curl.exe -4` против `curl.exe -6`. Если `-4` отвечает, а `-6` висит, у провайдера сломан IPv6, отключите его в свойствах адаптера. В Яндексе дополнительно выключите защитную сеть и безопасный DNS в `browser://protect`. На `workers.dev` такое случается чаще, чем на привязанном домене. |
 | Пустая страница на `/` | Не собран `dist/`; запусти `npm run build` и задеплой. |
 | Реклама не показывается | Не задан `ADSGRAM_BLOCK_ID`, блок отклонён модерацией или открыт браузер вместо Telegram. |
 | Платёж «обрабатывается» | Webhook не доставлен: проверь `getWebhookInfo`, секрет и `allowed_updates`. |

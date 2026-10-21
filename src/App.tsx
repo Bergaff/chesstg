@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { GameMode } from './engine';
 import { AppContext, type AppContextValue, type ShopTab } from './context/AppContext';
-import { api, ApiError } from './lib/api';
+import { api, apiWithRetry, ApiError } from './lib/api';
 import { initTelegram, getStartParam, hapticNotify } from './lib/telegram';
 import { showAdsgram } from './lib/ads';
 import type { SessionResponse } from './lib/types';
@@ -117,7 +117,7 @@ export default function App(): ReactNode {
     const startParam = getStartParam();
     (async () => {
       try {
-        const response = await api<SessionResponse>('/api/session', {
+        const response = await apiWithRetry<SessionResponse>('/api/session', {
           method: 'POST',
           body: { startParam },
         });
@@ -136,7 +136,10 @@ export default function App(): ReactNode {
               hint: 'Открой игру через кнопку в Telegram-боте. В браузере прогресс доступен только в гостевом режиме.',
             });
           } else if (error.code === 'network') {
-            setBootError({ message: 'Нет связи с сервером', hint: 'Проверьте интернет и попробуйте ещё раз.' });
+            setBootError({
+              message: 'Сервер не отвечает',
+              hint: 'Попробовали несколько раз подряд. Обычно это сеть: проверьте интернет и обновите экран.',
+            });
           } else if (error.code === 'db_not_ready' || error.code === 'db_unavailable') {
             setBootError({
               message: 'Сервер не видит базу игры',
