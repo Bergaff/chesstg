@@ -60,13 +60,48 @@ export interface InitDataResult {
   reason: InitDataReason | null;
   ageSec: number | null;
   fields: string[];
+  /** Схема склейки, по которой сошлась подпись. Нужна, чтобы видеть, что присылают клиенты. */
+  variant: InitDataVariant | null;
+}
+
+type InitDataVariant = 'canonical' | 'no_signature' | 'keep_empty' | 'no_signature_keep_empty';
+
+interface VariantRule {
+  name: InitDataVariant;
+  dropSignature: boolean;
+  dropEmpty: boolean;
+}
+
+/**
+ * Документы Telegram говорят: в `data_check_string` идут все поля кроме `hash` и пустых значений.
+ * На практике приложения, открытые по ссылке из канала, дополнительно приносят `signature`,
+ * и разные клиенты Telegram считают подпись то с ним, то без него. Поэтому перебираем четыре
+ * варианта и принимаем любой совпавший: подделать их без токена нельзя, а отказ игроку стоит
+ * ровно «игра не открывается».
+ */
+const VARIANTS: VariantRule[] = [
+  { name: 'canonical', dropSignature: false, dropEmpty: true },
+  { name: 'no_signature', dropSignature: true, dropEmpty: true },
+  { name: 'keep_empty', dropSignature: false, dropEmpty: false },
+  { name: 'no_signature_keep_empty', dropSignature: true, dropEmpty: false },
+];
+
+function checkString(params: URLSearchParams, rule: VariantRule): string {
+  const entries: Array<[string, string]> = [];
+  for (const [key, value] of params.entries()) {
+    if (key === 'hash') continue;
+    if (rule.dropSignature && key === 'signature') continue;
+    if (rule.dropEmpty && value === '') continue;
+    entries.push([key, value]);
+  }
+  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return entries.map(([key, value]) => `${key}=${value}`).join('\n');
 }
 
 /** Проверка подписи Telegram WebApp initData. */
 export async function validateInitData(initData: string, token: string): Promise<InitDataResult> {
-  const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [] };
-  if (!token) return { ...empty, reason: 'no_params' };
-  if (!initData) return { ...empty, reason: 'no_params' };
+  const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [], variant: null };
+  if (!token || !initData) return { ...empty, reason: 'no_params' };
 
   const params = new URLSearchParams(initData);
   const fields = [...new Set([...params.keys()])].sort();
@@ -74,40 +109,39 @@ export async function validateInitData(initData: string, token: string): Promise
 
   const hash = params.get('hash');
   if (!hash) return { ...empty, fields, reason: 'no_hash' };
+  const expected = hash.toLowerCase();
 
-  const entries: Array<[string, string]> = [];
-  for (const [key, value] of params.entries()) {
-    if (key === 'hash' || key === 'signature') continue;
-    entries.push([key, value]);
+  const secretKey = await hmac(encoder.encode(token), 'WebAppData');
+  let matched: VariantRule | null = null;
+  for (const rule of VARIANTS) {
+    const signature = toHex(await hmac(secretKey, checkString(params, rule)));
+    if (safeEqual(signature, expected)) {
+      matched = rule;
+      break;
+    }
   }
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-  const dataCheckString = entries.map(([key, value]) => `${key}=${value}`).join('\n');
-
-  const secret = await hmac(encoder.encode(token), 'WebAppData');
-  const signature = toHex(await hmac(secret, dataCheckString));
-  if (!safeEqual(signature, hash.toLowerCase())) {
-    return { ...empty, fields, reason: 'bad_signature' };
-  }
+  if (!matched) return { ...empty, fields, reason: 'bad_signature' };
 
   const authDateRaw = params.get('auth_date');
   const authDate = authDateRaw ? Number(authDateRaw) : 0;
   if (!Number.isFinite(authDate) || authDate <= 0) {
-    return { ...empty, fields, reason: 'no_auth_date' };
+    return { ...empty, fields, variant: matched.name, reason: 'no_auth_date' };
   }
   const ageSec = Math.round(Date.now() / 1000 - authDate);
-  if (ageSec > 60 * 60 * 48) return { ...empty, fields, ageSec, reason: 'too_old' };
-  if (ageSec < -300) return { ...empty, fields, ageSec, reason: 'clock_skew' };
+  if (ageSec > 60 * 60 * 48) {
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'too_old' };
+  }
+  if (ageSec < -300) {
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'clock_skew' };
+  }
 
   const rawUser = params.get('user');
-  if (!rawUser) return { ...empty, fields, ageSec, reason: 'no_user' };
+  if (!rawUser) return { ...empty, fields, ageSec, variant: matched.name, reason: 'no_user' };
   try {
     const parsed = JSON.parse(rawUser) as Record<string, unknown>;
-    if (typeof parsed.id !== 'number' || !Number.isFinite(parsed.id)) {
-      return { ...empty, fields, ageSec, reason: 'bad_user' };
-    }
-    if (typeof parsed.first_name !== 'string') {
-      return { ...empty, fields, ageSec, reason: 'bad_user' };
-    }
+    const bad = (reason: InitDataReason) => ({ ...empty, fields, ageSec, variant: matched?.name ?? null, reason });
+    if (typeof parsed.id !== 'number' || !Number.isFinite(parsed.id)) return bad('bad_user');
+    if (typeof parsed.first_name !== 'string') return bad('bad_user');
     return {
       check: {
         user: {
@@ -123,9 +157,10 @@ export async function validateInitData(initData: string, token: string): Promise
       reason: null,
       ageSec,
       fields,
+      variant: matched.name,
     };
   } catch {
-    return { ...empty, fields, ageSec, reason: 'bad_user' };
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'bad_user' };
   }
 }
 
@@ -143,8 +178,8 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     const result = await validateInitData(initData, token);
     if (!result.check) {
       const reason = result.reason ?? 'bad_signature';
-      // Без этого в логах видно только факт отказа, а причина бывает в кэше Telegram
-      // или в чужом токене, и это разные проблемы.
+      // Без этого в логах видно только факт отказа, а причины разные: кэш недавних
+      // приложений, чужой токен, другой способ открыть приложение.
       console.warn(
         'init_data_rejected',
         reason,
@@ -155,6 +190,10 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
         reason,
         authDateAgeSec: result.ageSec,
       });
+    }
+    if (result.variant && result.variant !== 'canonical') {
+      // Клиент подписал не то, что описано в документах. Работаем, но смотрим, кто так делает.
+      console.info('init_data_variant', result.variant, `fields=${result.fields.join(',')}`);
     }
     const check = result.check;
     const { user, created } = await getOrCreateUser(c.env, {

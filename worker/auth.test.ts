@@ -87,6 +87,45 @@ describe('проверка initData', () => {
   });
 });
 
+describe('поле signature от ссылок в канале', () => {
+  const fresh = () => Math.floor(Date.now() / 1000);
+
+  it('принимает подпись, где signature участвует в склейке', async () => {
+    const values = { ...values2(fresh()), signature: 'ChannelName' };
+    const result = await validateInitData(await initData(values), TOKEN);
+    expect(result.reason).toBeNull();
+    expect(result.variant).toBe('canonical');
+  });
+
+  it('принимает подпись, где signature добавлена уже после склейки', async () => {
+    const base = values2(fresh());
+    const signed = await initData(base);
+    const result = await validateInitData(`${signed}&signature=ChannelName`, TOKEN);
+    expect(result.reason).toBeNull();
+    expect(result.variant).toBe('no_signature');
+  });
+
+  it('принимает подпись с пустым полем внутри', async () => {
+    const values = { ...values2(fresh()), start_param: '' };
+    const result = await validateInitData(await initData(values), TOKEN);
+    expect(result.reason).toBeNull();
+    expect(result.variant).toBe('keep_empty');
+  });
+
+  it('не принимает подменённого пользователя рядом с signature', async () => {
+    const values = { ...values2(fresh()), signature: 'ChannelName' };
+    const raw = await initData(values);
+    const params = new URLSearchParams(raw);
+    params.set('user', JSON.stringify({ id: 1, first_name: 'Чужой' }));
+    const result = await validateInitData(params.toString(), TOKEN);
+    expect(result.reason).toBe('bad_signature');
+  });
+});
+
+function values2(authDate: number): Record<string, string> {
+  return { auth_date: String(authDate), user: USER, chat_instance: 'abc', chat_type: 'sender' };
+}
+
 describe('токен бота', () => {
   it('срезает пробелы и невидимые символы', () => {
     expect(botToken({ BOT_TOKEN: `\n ${TOKEN}\u200b \r` })).toBe(TOKEN);
