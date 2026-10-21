@@ -125,10 +125,15 @@ export async function validateInitData(initData: string, token: string): Promise
   if (!matched) {
     // У сторонних приложений `hash` это не HMAC по токену, а обычный SHA-256,
     // а подпись несёт поле `signature`. Так отличаем чужое приложение от опечатки в токене.
-    const canonical = checkString(params, VARIANTS[0]);
-    const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(canonical)));
-    const reason: InitDataReason = plain === expected ? 'third_party' : 'bad_signature';
-    return { ...empty, fields, reason };
+    let thirdParty = false;
+    for (const rule of VARIANTS.slice(0, 2)) {
+      const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(checkString(params, rule))));
+      if (plain === expected) {
+        thirdParty = true;
+        break;
+      }
+    }
+    return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
   }
 
   const authDateRaw = params.get('auth_date');
