@@ -55,7 +55,8 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
 
   const loadDiag = useCallback(async () => {
     try {
-      setDiag(await fetchDiag());
+      const next = await fetchDiag();
+      setDiag({ enabled: next.enabled === true, entries: Array.isArray(next.entries) ? next.entries : [] });
     } catch {
       /* диагностика не должна ломать вкладку */
     }
