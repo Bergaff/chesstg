@@ -12,7 +12,15 @@ import {
   type BatchReport,
   type GameState,
   type PlacementReport,
+  MODE_ORDER,
+  boardForMode,
+  modeDef,
+  piecesFor,
+  placementSpace,
+  type ModeId,
+  type PieceType,
 } from '../../engine';
+import { PIECE_UNLOCKS } from '../../engine';
 import { AdminError, deleteReport, fetchLevels, saveReport } from '../api';
 import type { AuditReportRow, LevelsResponse } from '../types';
 import { runPlacementAudit } from '../auditClient';
@@ -130,11 +138,16 @@ function PlacementLab({
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState('');
+  const [elapsedMs, setElapsedMs] = useState(0);
 
-  const size = sizeForLevel(level);
-  const height = heightForLevel(level);
-  const types = useMemo(() => availablePieceTypes(level), [level]);
-  const maxPieces = Math.max(1, Math.min(pieceCountForLevel(level), (height - 2) * size - 1));
+  const [mode, setMode] = useState<ModeId>('campaign');
+  const { width: size, height } = boardForMode(mode, level);
+  const labTypes: PieceType[] = PIECE_UNLOCKS.map((entry) => entry.type);
+  const types = useMemo(
+    () => (mode === 'campaign' || mode === 'endless' ? availablePieceTypes(level) : labTypes),
+    [labTypes, level, mode],
+  );
+  const maxPieces = Math.max(1, Math.min(piecesFor(mode, level), (height - 2) * size - 1));
   const [pieces, setPieces] = useState(maxPieces);
 
   useEffect(() => {
@@ -143,8 +156,36 @@ function PlacementLab({
 
   const band = useMemo(() => difficultyBand(level), [level]);
 
+  /**
+   * Сравнение режимов по одному уровню: объём пространства и время, за которое
+   * его можно прогнать при текущем лимите. Это ответ на вопрос «насколько
+   * масштабирование лабораторией терпимое».
+   */
+  const scale = useMemo(
+    () =>
+      MODE_ORDER.map((id) => {
+        const geo = boardForMode(id, level);
+        const count = Math.max(1, Math.min(piecesFor(id, level), (geo.height - 2) * geo.width - 1));
+        const typesForMode = id === 'campaign' || id === 'endless' ? availablePieceTypes(level) : PIECE_UNLOCKS.map((entry) => entry.type);
+        const space = placementSpace({ width: geo.width, height: geo.height, count, types: typesForMode, mode: id });
+        const rate = report && report.checked > 0 ? elapsedMs / report.checked : 0;
+        return {
+          id,
+          name: modeDef(id).name,
+          playable: modeDef(id).playable,
+          note: modeDef(id).note,
+          geo,
+          count,
+          total: space.total,
+          seconds: rate > 0 ? (Math.min(space.total, limit) * rate) / 1000 : 0,
+        };
+      }),
+    [elapsedMs, level, limit, report],
+  );
+
   const run = useCallback(async () => {
     if (running) return;
+    const startedAt = performance.now();
     setRunning(true);
     setError('');
     setSaved('');
@@ -152,18 +193,19 @@ function PlacementLab({
     setProgress({ checked: 0, total: 0 });
     try {
       const result = await runPlacementAudit(
-        { width: size, height, count: Math.min(pieces, maxPieces), types },
+        { width: size, height, count: Math.min(pieces, maxPieces), types, mode },
         { limit, seed: level * 7919, band, maxDepth: height + 3 },
         (next) => setProgress(next),
       );
       setReport(result);
+      setElapsedMs(performance.now() - startedAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Разбор не удался');
     } finally {
       setRunning(false);
       setProgress(null);
     }
-  }, [band, height, level, limit, maxPieces, pieces, running, size, types]);
+  }, [band, height, level, limit, maxPieces, mode, pieces, running, size, types]);
 
   const save = useCallback(async () => {
     if (!report || saving) return;
@@ -172,7 +214,7 @@ function PlacementLab({
     try {
       await saveReport(
         'placements',
-        { level, size, height, pieces: Math.min(pieces, maxPieces), types, limit, band },
+        { level, mode, size, height, pieces: Math.min(pieces, maxPieces), types, limit, band },
         {
           checked: report.checked,
           exhaustive: report.exhaustive,
@@ -197,7 +239,7 @@ function PlacementLab({
     } finally {
       setSaving(false);
     }
-  }, [band, height, level, limit, maxPieces, onSaved, onUnauthorized, pieces, report, saving, size, types]);
+  }, [band, height, level, limit, maxPieces, mode, onSaved, onUnauthorized, pieces, report, saving, size, types]);
 
   return (
     <Panel
@@ -210,6 +252,17 @@ function PlacementLab({
       }
     >
       <div className="adm-toolbar is-tight">
+        <label className="adm-field is-inline">
+          <span className="adm-label">Режим</span>
+          <select value={mode} onChange={(event) => setMode(event.target.value as ModeId)}>
+            {MODE_ORDER.map((id) => (
+              <option key={id} value={id}>
+                {modeDef(id).name}
+                {modeDef(id).playable ? '' : ' (лаборатория)'}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="adm-field is-inline">
           <span className="adm-label">Уровень</span>
           <input
@@ -246,7 +299,8 @@ function PlacementLab({
       </div>
 
       <p className="adm-note">
-        Поле {size}×{height}, фигуры: {types.map((type) => PIECE_GLYPH[type]).join(' ')}. Полоса уровня{' '}
+        Режим «{modeDef(mode).name}»: {modeDef(mode).note} Поле {size}×{height}, фигуры:{' '}
+        {types.map((type) => PIECE_GLYPH[type]).join(' ')}. Полоса уровня{' '}
         {band.min}–{band.max}, цель {band.target}.
       </p>
 
@@ -256,6 +310,34 @@ function PlacementLab({
           {progress && progress.total > 0 ? ` из ${formatNumber(progress.total)}` : ''}
         </p>
       )}
+      <div className="adm-panel">
+        <div className="adm-panel-head">
+          <h3 className="adm-panel-title">Масштаб режимов на уровне {level}</h3>
+        </div>
+        <Table head={['Режим', 'Поле', 'Фигур', 'Вариантов', 'Прогон']} empty="Нет данных">
+          {scale.map((row) => (
+            <tr key={row.id} className={row.id === mode ? 'is-active' : undefined}>
+              <td>{row.name}</td>
+              <td className="is-mono">
+                {row.geo.width}×{row.geo.height}
+              </td>
+              <td>{row.count}</td>
+              <td className="is-mono">{formatNumber(row.total)}</td>
+              <td className="is-mono">
+                {row.seconds > 0
+                  ? `${formatNumber(Math.min(row.total, limit))} расстановок, ~${row.seconds.toFixed(1)} c`
+                  : 'после разбора'}
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <p className="adm-note">
+          Время пересчитано из последнего прогона в этом окне: {formatNumber(Math.min(report?.checked ?? 0, limit))}{' '}
+          расстановок за {(elapsedMs / 1000).toFixed(2)} c в потоке браузера. Прогресса в сервере здесь нет
+          намеренно: перебор остаётся на устройстве, а сервер только хранит отчёты.
+        </p>
+      </div>
+
       {error && <StatusLine kind="error">{error}</StatusLine>}
       {saved && <StatusLine kind="ok">{saved}</StatusLine>}
 

@@ -1,4 +1,5 @@
 import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
+import type { ModeId } from './modes';
 import { applyAction } from './rules';
 import { Rng, mix32 } from './rng';
 import type { GameAction, GameState, MoveDx, PieceType } from './types';
@@ -371,6 +372,11 @@ export interface PlacementSpec {
   height: number;
   count: number;
   types: PieceType[];
+  /**
+   * Режим расстановок: у него свои правила (взятия, двойной ход, способ движения
+   * фигур), поэтому одна и та же доска в «Парковке» и в кампании решается по-разному.
+   */
+  mode?: ModeId;
 }
 
 export interface Placement {
@@ -495,7 +501,7 @@ function makePlacement(
   const seed = mix32(0xa11d17, spec.width * 31 + spec.height, comboIndex, startX * 7919 + tag);
   const state: GameState = {
     version: 1,
-    mode: 'campaign',
+    mode: spec.mode ?? 'campaign',
     width: spec.width,
     height: spec.height,
     player: { x: startX, y: 0 },
