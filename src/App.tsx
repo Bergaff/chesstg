@@ -125,7 +125,7 @@ export default function App(): ReactNode {
         setSession(response);
         setBootError(null);
         if (response.referral?.rewarded) {
-          toast(`Приглашение сработало: +${response.referral.bonus}  монет`, 'success');
+          toast(`Приглашение сработало: +${response.referral.bonus} монет`, 'success');
         }
       } catch (error) {
         if (cancelled) return;
