@@ -61,7 +61,19 @@ npm run db:status        # какие миграции уже есть в бое
 npm run db:remote        # применить недостающие
 ```
 
-Если таблиц нет, `/api/session` отвечает 503 `db_not_ready`, а `/api/health` перечисляет отсутствующие таблицы в поле `missing`.
+Признак неприменённых миграций: `/api/session` отвечает 503 `db_not_ready`, а `/api/health` перечисляет отсутствующие таблицы в поле `missing`.
+
+### Только через панель Cloudflare, без CLI
+
+Если `npx wrangler login` неудобен, база поднимается из интерфейса.
+
+1. `Workers & Pages` -> `D1` -> выбрать базу, которая привязана к воркеру -> вкладка `Console`.
+2. Вставить целиком содержимое `docs/db-setup.sql` и нажать `Run`. Файл собирается из `migrations/*.sql` командой `npm run db:sql`, руками его не правят. Все `CREATE` идут с `IF NOT EXISTS`, поэтому повторный запуск безопасен.
+3. Последний запрос в файле, `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;`, это проверка: консоль вернёт `ad_events`, `admin_attempts`, `audit_runs`, `d1_migrations`, `events`, `grants`, `level_checks`, `payments`, `runs`, `users` плюс служебную `sqlite_sequence`.
+4. Файл проставляет записи в `d1_migrations`, поэтому будущий `npm run db:remote` ничего не применит повторно и не упадёт.
+5. Если консоль отказывается выполнять скрипт целиком, запускайте запросы по одному сверху вниз: порядок не важен, кроме последних двух блоков со служебной таблицей.
+
+Проверить, что воркер смотрит в ту же базу: `Workers & Pages` -> ваш воркер -> `Settings` -> `Bindings` -> `D1 Database`, Binding `DB`. Имя и ID базы должны совпадать с тем, что в `wrangler.jsonc`. Если в панели висит другая база, примените скрипт к ней и поправьте `database_id` в `wrangler.jsonc`, иначе локальная и боевая схемы разойдутся.
 
 ## 2. Переменные
 
@@ -311,7 +323,7 @@ npx wrangler rollback <deployment-id>
 | `401 invalid_init_data` | Открыто не из Telegram, либо `BOT_TOKEN` не тот, либо initData старше 48 часов. Открой через кнопку бота. |
 | `503 auth_not_configured` | Не задан `BOT_TOKEN`. |
 | `401 guests_disabled` | `ALLOW_GUESTS=false`, а запрос без `tma`-заголовка. |
-| `health` 503, `error: db_not_ready` | Боевая база пустая или не та. `npm run db:status`, затем `npm run db:remote`. Поле `missing` показывает, каких таблиц не хватает. |
+| `health` 503, `error: db_not_ready` | Боевая база пустая или не та. `npm run db:status` и `npm run db:remote`, либо `docs/db-setup.sql` в консоли D1 (раздел 1). Поле `missing` показывает, каких таблиц не хватает. |
 | `/api/session` 500 | До этой правки означало отсутствующие таблицы. Сейчас такой запрос возвращает 503 `db_not_ready`. Если всё ещё 500, смотрите `wrangler tail`: ошибка внутри кода, а не в схеме. |
 | `health` 503, `error: db_unavailable` | Воркер не может открыть D1: проверьте `database_id` и привязку `DB`. |
 | `health` без поля `schemaVersion` | Задеплоен старый коммит. Проверьте, какая ветка стоит веткой продакшена в Workers Builds. |

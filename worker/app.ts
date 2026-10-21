@@ -139,6 +139,16 @@ async function invitedCount(env: WorkerEnv, userId: string): Promise<number> {
   return Number(row?.n ?? 0);
 }
 
+/** Локальный адрес воркера: его Telegram не откроет. */
+function isLocalOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname.endsWith('.localhost');
+  } catch {
+    return true;
+  }
+}
+
 async function sessionBody(env: WorkerEnv, authCtx: AppEnv['Variables']['auth'], extra: Record<string, unknown> = {}) {
   return {
     profile: toProfile(authCtx.user),
@@ -157,12 +167,15 @@ app.get('/api/health', async (c) => {
   const warnings: string[] = [];
   const webappUrl = c.env.WEBAPP_URL?.trim() ?? '';
   if (!webappUrl) {
-    warnings.push('webapp_url_missing');
+    // В бою адрес приложения берётся из самого запроса, пустая переменная допустима.
+    // На localhost такие ссылки боту бесполезны, поэтому предупреждаем только там.
+    if (isLocalOrigin(origin)) warnings.push('webapp_url_missing');
   } else if (!webappUrl.startsWith('https://')) {
     warnings.push('webapp_url_not_https');
   } else {
     try {
-      if (new URL(webappUrl).origin !== origin) warnings.push('webapp_url_origin_mismatch');
+      // На локальном хосте совпадений не ищем: там адрес всегда свой.
+      if (!isLocalOrigin(origin) && new URL(webappUrl).origin !== origin) warnings.push('webapp_url_origin_mismatch');
     } catch {
       warnings.push('webapp_url_invalid');
     }

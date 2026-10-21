@@ -91,7 +91,8 @@ describe('health', () => {
     expect(body.warnings).toContain('webhook_secret_missing');
     expect(body.warnings).toContain('admin_secret_missing');
     expect(body.warnings).toContain('adsgram_block_missing');
-    expect(body.warnings).toContain('webapp_url_missing');
+    // Пустой WEBAPP_URL в бою не проблема: адрес берётся из заголовка Origin.
+    expect(body.warnings).not.toContain('webapp_url_missing');
   });
 
   it('ругается на localhost в адресе приложения', async () => {

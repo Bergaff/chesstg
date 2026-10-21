@@ -26,7 +26,8 @@ export function publicConfig(env: WorkerEnv) {
     devMode,
     demoAds: devMode && !blockId,
     paymentsEnabled: Boolean(env.BOT_TOKEN?.trim()),
-    environment: env.ENVIRONMENT ?? 'development',
+    // Переменная ENVIRONMENT задаётся в wrangler.jsonc (production) и в .dev.vars (development).
+    environment: env.ENVIRONMENT?.trim() || 'development',
     adsgram: {
       blockId,
       src: env.ADSGRAM_SRC?.trim() || 'https://sad.adsgram.ai/js/sad.min.js',

@@ -186,7 +186,7 @@ npm run deploy
 
 После деплоя:
 
-1. Примените миграции к боевой базе: `npm run db:status`, затем `npm run db:remote`. Без этого `/api/health` вернёт `db_not_ready`, а сессия не создастся.
+1. Примените миграции к боевой базе: `npm run db:status`, затем `npm run db:remote`, либо вставьте `docs/db-setup.sql` в консоль D1 на панели Cloudflare. Без этого `/api/health` вернёт `db_not_ready`, а сессия не создастся.
 2. В `wrangler.jsonc` замените `WEBAPP_URL` на `https://<worker>.workers.dev` или свой домен, `BOT_USERNAME` на username бота. Для продакшена поставьте `DEV_MODE: "false"`.
 3. В BotFather: `/newapp` (Mini App, не `/newgame`), выберите бота, укажите URL приложения. Кнопку меню и команды ставит вкладка `Бот` в админке, вручную через `/setmenubutton` их дублировать не нужно. Иконка 512×512 лежит в `public/icon-512.png`.
 4. Проверьте `/api/health`: в `warnings` должен остаться пустой массив. Откройте Mini App из бота, пройдите уровень.

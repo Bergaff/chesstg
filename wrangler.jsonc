@@ -19,7 +19,11 @@
     }
   ],
   "vars": {
-    "WEBAPP_URL": "",
+    "ENVIRONMENT": "production",
+    // Публичные переменные. Всё, что не секрет, держим здесь: `wrangler deploy`
+    // затирает обычные переменные, добавленные только в панели.
+    // WEBAPP_URL участвует в ссылках бота, поэтому должен совпадать с доменом воркера.
+    "WEBAPP_URL": "https://chesstg.tgmg.workers.dev",
     "BOT_USERNAME": "pawn_vs_all_bot",
     "ALLOW_GUESTS": "true",
     "DEV_MODE": "false",
