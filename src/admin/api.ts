@@ -173,6 +173,7 @@ export function setupBot(payload: {
   secret: string;
   commands: boolean;
   menuButton: boolean;
+  dropPending?: boolean;
 }): Promise<BotSetupResponse> {
   return request<BotSetupResponse>('/bot/setup', {
     method: 'POST',

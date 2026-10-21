@@ -23,6 +23,7 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
   const [secret, setSecret] = useState('');
   const [commands, setCommands] = useState(true);
   const [menuButton, setMenuButton] = useState(true);
+  const [dropPending, setDropPending] = useState(false);
 
   const handleAuth = useCallback(
     (err: unknown): boolean => {
@@ -51,23 +52,26 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
     void load();
   }, [load]);
 
+  const pending = status?.webhook?.pending ?? 0;
+
   const connect = useCallback(async () => {
     if (busy) return;
     setBusy('setup');
     setError('');
     setSteps([]);
     try {
-      const result = await setupBot({ appUrl, secret, commands, menuButton });
+      const result = await setupBot({ appUrl, secret, commands, menuButton, dropPending });
       setStatus(result.status);
       setSteps(result.steps);
       setSecret('');
+      setDropPending(false);
     } catch (err) {
       if (handleAuth(err)) return;
       setError(err instanceof Error ? err.message : 'Не удалось настроить бота');
     } finally {
       setBusy('');
     }
-  }, [appUrl, busy, commands, handleAuth, menuButton, secret]);
+  }, [appUrl, busy, commands, dropPending, handleAuth, menuButton, secret]);
 
   const disconnect = useCallback(async () => {
     if (busy) return;
@@ -111,7 +115,9 @@ export function BotView({ onUnauthorized }: { onUnauthorized: (message: string) 
 npx wrangler secret put WEBHOOK_SECRET
 npm run deploy</pre>
             <p className="adm-note">
-              Токен выдаёт BotFather. После добавления секрета перезагрузите эту страницу.
+              Токен выдаёт BotFather. Секреты добавляются в панели: Workers &amp; Pages
+              → ваш воркер → Settings → Variables and Secrets → Add → Secret, либо командой{' '}
+              <code>npx wrangler secret put</code>. После добавления перезагрузите эту страницу.
             </p>
           </>
         )}
@@ -203,10 +209,12 @@ npm run deploy</pre>
 
             {status.secretSet && !secret.trim() && (
               <StatusLine kind="error">
-                В воркере уже задан WEBHOOK_SECRET. Вставьте то же значение в поле секрета, иначе Telegram
-                будет присылать запросы без заголовка и получит отказ 403. Если секрет утерян, задайте новый:
-                впишите его здесь, сохраните, затем выполните wrangler secret put WEBHOOK_SECRET с тем же
-                значением.
+                В воркере уже задан WEBHOOK_SECRET, а поле пустое, поэтому кнопка «Подключить бота»
+                заблокирована: Telegram должен присылать то же значение в заголовке
+                X-Telegram-Bot-Api-Secret-Token, иначе воркер ответит 403. Панель секрет не показывает,
+                так что вставьте значение, которое задавали раньше, или задайте новое: Workers &amp; Pages
+                → ваш воркер → Settings → Variables and Secrets → Add → Secret, имя WEBHOOK_SECRET. Значение
+                из панели применяется сразу, пересборка не нужна, а затем скопируйте его в поле выше.
               </StatusLine>
             )}
 
@@ -223,6 +231,16 @@ npm run deploy</pre>
                 />
                 <span>Кнопка меню «Играть»</span>
               </label>
+              {pending > 0 && (
+                <label className="adm-check">
+                  <input
+                    type="checkbox"
+                    checked={dropPending}
+                    onChange={(event) => setDropPending(event.target.checked)}
+                  />
+                  <span>Сбросить очередь из {pending} обновлений</span>
+                </label>
+              )}
             </div>
 
             <div className="adm-toolbar is-tight">
@@ -245,9 +263,9 @@ npm run deploy</pre>
             </div>
 
             <p className="adm-note">
-              Вебхук ставится на {status.expectedUrl}. Если задать новый секрет, его же нужно записать в секрет
-              воркера командой <code>npx wrangler secret put WEBHOOK_SECRET</code>, иначе Telegram получит отказ
-              403 и повторит доставку позже. Секрет показывается только здесь, после сохранения его не прочитать.
+              Вебхук ставится на {status.expectedUrl}. Секрет в Telegram и секрет воркера должны совпадать:
+              поменяли один, поменяйте и второй, иначе Telegram получит 403 и будет повторять доставку.
+              Значение видно только при вводе, прочитать его потом нельзя.
             </p>
           </>
         )}
