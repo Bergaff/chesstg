@@ -24,7 +24,7 @@ interface DemoRequest {
 
 export default function App(): ReactNode {
   const [session, setSession] = useState<SessionResponse | null>(null);
-  const [bootError, setBootError] = useState<{ message: string; hint: string } | null>(null);
+  const [bootError, setBootError] = useState<{ message: string; hint: string; diag?: string } | null>(null);
   const [screen, setScreen] = useState<Screen>('menu');
   const [shopTab, setShopTab] = useState<ShopTab>('bonuses');
   const [gameMode, setGameMode] = useState<GameMode>('campaign');
@@ -133,9 +133,13 @@ export default function App(): ReactNode {
           if (error.code === 'invalid_init_data') {
             // Телеграм прислал initData, но проверка не прошла. Причины разные:
             // кэш недавних приложений, чужой BOT_TOKEN, расхождение часов.
+            const raw = typeof error.details.raw === 'string' ? error.details.raw : undefined;
             setBootError({
               message: error.message,
-              hint: 'Закрой игру и открой заново кнопкой в чате бота. Если не поможет, причина в настройке BOT_TOKEN: владельцу видно код в логах воркера.',
+              hint: raw
+                ? 'Ниже блок «Диагностика»: выдели его, скопируй и пришли владельцу игры.'
+                : 'Закрой игру и открой заново кнопкой в чате бота. Если не поможет, причина в BOT_TOKEN: владельцу видно код в логах воркера.',
+              diag: raw,
             });
           } else if (error.status === 401) {
             setBootError({
@@ -284,6 +288,12 @@ export default function App(): ReactNode {
           <div className="boot-error">
             <p className="boot-text" style={{ marginTop: 0 }}>{bootError.message}</p>
             <p className="boot-text" style={{ marginTop: 0 }}>{bootError.hint}</p>
+            {bootError.diag ? (
+              <>
+                <p className="boot-label">Диагностика</p>
+                <p className="boot-diag">{bootError.diag}</p>
+              </>
+            ) : null}
             <button
               type="button"
               className="btn btn-primary"

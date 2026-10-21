@@ -2134,6 +2134,16 @@ a {
   color: var(--accent);
 }
 
+.boot-diag {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  user-select: all;
+  opacity: 0.75;
+}
+
 .boot-text {
   margin-top: 16px;
   max-width: 300px;

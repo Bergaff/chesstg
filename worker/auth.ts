@@ -224,9 +224,11 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
         `age=${result.ageSec ?? '?'}`,
         `fields=${result.fields.join(',')}`,
       );
+      const debug = c.env.AUTH_DEBUG === 'true' ? { raw: initData.slice(0, 900) } : {};
       fail(401, 'invalid_init_data', INIT_DATA_MESSAGES[reason], {
         reason,
         authDateAgeSec: result.ageSec,
+        ...debug,
       });
     }
     if (result.variant && result.variant !== 'canonical') {
