@@ -2378,6 +2378,87 @@ a {
 }
 
 
+/* =========================================================
+   Парковка: перегон пробки фигур
+   ========================================================= */
+
+.jam-screen .goal-line .num {
+  color: var(--accent);
+}
+
+.jam-progress {
+  flex: 0 0 auto;
+  height: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+}
+
+.jam-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Верхняя половина - цель белых, нижняя - цель чёрных. Половина подкрашена
+   латунным отливом, чтобы направление читалось без подписи. */
+.jam-board .cell-half-top {
+  background: #242117;
+}
+
+.jam-board .cell-half-top.cell-light {
+  background: #2d2a1c;
+}
+
+.jam-board .cell-half-bottom {
+  background: #1b1a12;
+}
+
+.jam-board .cell-half-bottom.cell-light {
+  background: #252319;
+}
+
+.jam-board .cell-parked.cell-light,
+.jam-board .cell-parked.cell-dark {
+  background: var(--accent-wash);
+}
+
+.jam-piece .piece-glyph {
+  color: #6f6754;
+}
+
+.jam-white .piece-glyph {
+  color: #f0e7d4;
+}
+
+.jam-parked::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 3px;
+  height: 2px;
+  background: var(--accent-dim);
+}
+
+.jam-selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Фигура из подсказки: её клетка-источник помечена пунктиром, цель цифрой. */
+.cell-hint-source {
+  outline: 1px dashed var(--accent-dim);
+  outline-offset: -2px;
+}
+
+.jam-board .cell[disabled] {
+  cursor: default;
+}
+
+.jam-board .cell:not([disabled]) {
+  cursor: pointer;
+}
+
 @media (min-width: 600px) {
   .modal-backdrop {
     align-items: center;

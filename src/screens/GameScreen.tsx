@@ -13,6 +13,7 @@ import {
   analyzeState,
   applyAction,
   applyActions,
+  isJamState,
   legalMoves,
   newPiecesAtLevel,
   skipsLeft,
@@ -52,8 +53,14 @@ import { RulesModal } from '../components/RulesModal';
 
 type Phase = 'loading' | 'pre' | 'playing' | 'resolving' | 'finishing' | 'won' | 'lost' | 'quit';
 
+type PawnMode = Exclude<GameMode, 'jam'>;
+
+/** Забег пешечного экрана: initial и actions всегда в форме GameState. */
+type PawnRun = Omit<RunPayload, 'initial' | 'actions'> & { initial: GameState; actions: GameAction[] };
+
 interface GameScreenProps {
-  mode: GameMode;
+  /** «Парковка» живёт на отдельном экране: здесь только пешечные режимы. */
+  mode: PawnMode;
   onExit: () => void;
   onNoLives: () => void;
   onTerms: () => void;
@@ -63,7 +70,7 @@ interface GameScreenProps {
 export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: GameScreenProps): ReactNode {
   const { profile, config, setProfile, refresh, toast, showAd, goShop, goShopStars } = useApp();
   const [phase, setPhase] = useState<Phase>('loading');
-  const [run, setRun] = useState<RunPayload | null>(null);
+  const [run, setRun] = useState<PawnRun | null>(null);
   const [state, setState] = useState<GameState | null>(null);
   const [actions, setActions] = useState<GameAction[]>([]);
   const [historyDepth, setHistoryDepth] = useState(0);
@@ -80,7 +87,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   const [noCoins, setNoCoins] = useState(false);
   const [preOpen, setPreOpen] = useState(false);
 
-  const runRef = useRef<RunPayload | null>(null);
+  const runRef = useRef<PawnRun | null>(null);
   const stateRef = useRef<GameState | null>(null);
   const actionsRef = useRef<GameAction[]>([]);
   const historyRef = useRef<GameState[]>([]);
@@ -130,7 +137,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   }, []);
 
   const finishRun = useCallback(
-    async (target: RunPayload, finalActions: GameAction[]) => {
+    async (target: PawnRun, finalActions: GameAction[]) => {
       if (finishingRef.current) return;
       finishingRef.current = true;
       setFinishError(null);
@@ -209,7 +216,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         method: 'POST',
         body: isLevelMode(mode) && repeat ? { mode, repeat: true } : { mode },
       });
-      const nextRun = response.run;
+      const payload = response.run;
+      if (isJamState(payload.initial)) {
+        setStartError('Этот режим открыт на другом экране. Вернитесь в меню.');
+        changePhase('loading');
+        return;
+      }
+      const pawnActions = payload.actions.filter((action): action is GameAction => action.type !== 'piece');
+      const nextRun: PawnRun = { ...payload, initial: payload.initial, actions: pawnActions };
       let current = nextRun.initial;
       const history: GameState[] = [];
       try {
@@ -719,11 +733,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <span>
             {isEndless
               ? 'Поднимайтесь выше, поле растёт'
-              : mode === 'jam'
-                ? 'Дорога прочищается взятиями: фигуры стоят'
-                : mode === 'race'
-                  ? 'Фигуры идут вниз, разойдитесь с ними и дойдите до верха'
-                  : 'Дойти до верхнего ряда'}
+              : mode === 'race'
+                ? 'Фигуры идут вниз, разойдитесь с ними и дойдите до верха'
+                : 'Дойти до верхнего ряда'}
           </span>
           <span className="num">{state.score > 0 ? `${state.score} кл.` : ''}</span>
         </div>
@@ -826,19 +838,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           ) : null}
         </div>
         <p className="control-hint">
-          {!playerAlive
-            ? mode === 'jam'
-              ? 'Тупик: ходов нет, взятия кончились.'
-              : 'Пешка поймана.'
-            : settling
-              ? mode === 'jam'
-                ? 'Фигуры стоят.'
-                : 'Ход фигур.'
-              : mode === 'jam'
-                ? 'Пешка ходит вперёд и бьёт по диагонали: взятие снимает фигуру и открывает клетку.'
-                : mode === 'race'
-                  ? 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'
-                  : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
+          {!playerAlive ? 'Пешка поймана.' : settling ? 'Ход фигур.' : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
 
@@ -853,11 +853,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <p className="modal-text">
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
-              : mode === 'jam'
-                ? `Дойти до верхнего ряда. Фигуры стоят и не ходят: дорогу прочищают взятия, их ${rules.captureQuota} на забег.`
-                : mode === 'race'
-                  ? 'Дойти до верхнего ряда. Фигуры едут вниз рядом с вами, ушедшие за край исчезают с доски.'
-                  : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
+              : mode === 'race'
+                ? 'Дойти до верхнего ряда. Фигуры едут вниз рядом с вами, ушедшие за край исчезают с доски.'
+                : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
           <div className="pre-meta">

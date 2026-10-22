@@ -11,6 +11,7 @@ import { NoLivesModal } from './components/NoLivesModal';
 import { RulesModal } from './components/RulesModal';
 import { MenuScreen } from './screens/MenuScreen';
 import { GameScreen } from './screens/GameScreen';
+import { JamScreen } from './screens/JamScreen';
 import { ShopScreen } from './screens/ShopScreen';
 import { RecordsScreen } from './screens/RecordsScreen';
 import { LegalScreen } from './screens/LegalScreen';
@@ -350,16 +351,25 @@ export default function App(): ReactNode {
             onPrivacy={() => openLegal('privacy')}
           />
         )}
-        {screen === 'game' && (
-          <GameScreen
-            key={gameKey}
-            mode={gameMode}
-            onExit={exitGame}
-            onNoLives={handleNoLives}
-            onTerms={() => openLegal('terms')}
-            onPrivacy={() => openLegal('privacy')}
-          />
-        )}
+        {screen === 'game' &&
+          (gameMode === 'jam' ? (
+            <JamScreen
+              key={gameKey}
+              onExit={exitGame}
+              onNoLives={handleNoLives}
+              onTerms={() => openLegal('terms')}
+              onPrivacy={() => openLegal('privacy')}
+            />
+          ) : (
+            <GameScreen
+              key={gameKey}
+              mode={gameMode}
+              onExit={exitGame}
+              onNoLives={handleNoLives}
+              onTerms={() => openLegal('terms')}
+              onPrivacy={() => openLegal('privacy')}
+            />
+          ))}
         {screen === 'shop' && (
           <ShopScreen
             onBack={goMenu}

@@ -2,7 +2,14 @@
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createCampaignLevel, createJamLevel, legalMoves, type GameState } from '../src/engine';
+import {
+  createCampaignLevel,
+  createJamPuzzle,
+  jamPieceMoves,
+  legalMoves,
+  type GameState,
+  type JamState,
+} from '../src/engine';
 import type { AppConfig, FinishResult, Profile, SessionResponse } from '../src/lib/types';
 
 const SEED = 20261019;
@@ -72,6 +79,8 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 let initial: GameState = createCampaignLevel(1, SEED);
+/** Поле «Парковки» сервер отдаёт другой формы, поэтому оно в своей переменной. */
+let jamInitial: JamState | null = null;
 let finishOutcome: FinishResult = {
   outcome: 'won',
   mode: 'campaign',
@@ -110,6 +119,7 @@ beforeEach(() => {
   localStorage.clear();
   Object.assign(profile, structuredClone(baseProfile));
   initial = createCampaignLevel(1, SEED);
+  jamInitial = null;
   finishOutcome = { ...finishOutcome, outcome: 'won', capturedBy: null, lives: 5, coinsEarned: 10 };
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, 'scrollTo', { value: vi.fn(), writable: true });
@@ -139,7 +149,8 @@ beforeEach(() => {
       if (url === '/api/run/start') {
         // Сервер сам решает уровень, а режим только эхо запроса: тест сверяет id режима.
         const requested = (body as { mode?: string } | undefined)?.mode ?? 'campaign';
-        return jsonResponse({ resumed: false, run: { ...run, mode: requested, initial } });
+        const payload = requested === 'jam' && jamInitial ? jamInitial : initial;
+        return jsonResponse({ resumed: false, run: { ...run, mode: requested, initial: payload } });
       }
       if (url.endsWith('/save')) return jsonResponse({ ok: true });
       if (url.includes('/finish')) {
@@ -254,22 +265,49 @@ describe('UI smoke', () => {
     expect(calls.some((call) => call.url === '/api/run/start')).toBe(false);
   });
 
-  it('«Парковка» стартует своим режимом и показывает квоту взятий', async () => {
+  it('«Парковка» открывает головоломку про перегон фигур', async () => {
     profile.maxLevel = 6;
     profile.level = 4;
     profile.modes.campaign = { level: 4, maxLevel: 6, unlocked: true, unlockAtLevel: 1 };
     profile.modes.jam = { level: 4, maxLevel: 5, unlocked: true, unlockAtLevel: 3 };
-    initial = createJamLevel(4, SEED);
+    jamInitial = createJamPuzzle(4, SEED);
     await boot();
 
     fireEvent.click(screen.getByText('Парковка').closest('button')!);
     expect(await screen.findByText('Начать')).toBeTruthy();
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('jam');
-    expect(screen.getAllByText('Парковка').length).toBeGreaterThan(0);
-    // Квота взятий видна в статусной строке: без неё уровень не понять.
-    expect(screen.getByText(/взятий 3/)).toBeTruthy();
-    expect(screen.getByText(/дорога прочищается взятиями/i)).toBeTruthy();
+    // В предпросмотре видно бюджет перестановок: без него уровень не спланировать.
+    expect(screen.getByText('Перестановок дано')).toBeTruthy();
+    expect(screen.getByText(String(jamInitial.budget))).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Начать'));
+    const grid = await screen.findByRole('grid', { name: 'Поле парковки' });
+    expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(jamInitial.width * jamInitial.height);
+    expect(screen.getByText(`ходов ${jamInitial.budget}`)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`на месте \\d+ из ${jamInitial.pieces.length}`))).toBeTruthy();
+
+    // Тап по фигуре подсвечивает клетки, тап по клетке делает перестановку.
+    const first = jamInitial.pieces.find((piece) => jamPieceMoves(jamInitial!, piece).length > 0)!;
+    const target = jamPieceMoves(jamInitial, first)[0];
+    const source = grid.querySelectorAll('[role="gridcell"]')[
+      (jamInitial.height - 1 - first.y) * jamInitial.width + first.x
+    ] as HTMLButtonElement;
+    fireEvent.click(source);
+    const dest = grid.querySelectorAll('[role="gridcell"]')[
+      (jamInitial.height - 1 - target.y) * jamInitial.width + target.x
+    ] as HTMLButtonElement;
+    fireEvent.click(dest);
+
+    await waitFor(() => expect(screen.getByText(`ходов ${jamInitial!.budget - 1}`)).toBeTruthy());
+
+    // Выход просит подтверждение и сохраняет позицию: пробку можно продолжить позже.
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    expect(await screen.findByText('Выйти в меню')).toBeTruthy();
+    fireEvent.click(screen.getByText('Выйти'));
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
+    const saved = calls.filter((call) => call.url.endsWith('/save')).at(-1);
+    expect((saved?.body as { actions?: unknown[] } | undefined)?.actions?.length).toBe(1);
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {

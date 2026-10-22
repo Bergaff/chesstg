@@ -101,8 +101,15 @@ export function jamBudget(level: number): number {
   return Math.round(jamScramble(level) * factor) + slack;
 }
 
-export function isJamState(state: { mode: string } | null | undefined): state is JamState {
-  return state?.mode === 'jam';
+/**
+ * Форма состояния-головоломки. Проверяем не только `mode`: у старой песочницы
+ * (`createJamLevel`) состояние тоже помечено как `jam`, но фигур `pieces` у него
+ * нет, и ложное срабатывание роняет экран.
+ */
+export function isJamState(state: unknown): state is JamState {
+  if (!state || typeof state !== 'object') return false;
+  const candidate = state as { mode?: unknown; pieces?: unknown; mid?: unknown };
+  return candidate.mode === 'jam' && Array.isArray(candidate.pieces) && typeof candidate.mid === 'number';
 }
 
 /** Половина, куда должна попасть фигура: белые вверх, чёрные вниз. */

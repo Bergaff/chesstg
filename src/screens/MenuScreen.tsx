@@ -217,7 +217,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="menu-list">
-        {modeRow('jam', 'Парковка', 'Фигуры стоят стеной, дорога прочищается взятиями.')}
+        {modeRow('jam', 'Парковка', 'Пробка фигур: перегоните белых наверх, чёрных вниз. Бить нельзя.')}
         {modeRow('race', 'Гонки', 'Фигуры едут вниз навстречу, разойдитесь с ними.')}
         <button
           type="button"

@@ -1,4 +1,13 @@
-import type { BonusId, GameAction, GameMode, GameState, PieceType, SkinId } from '../engine';
+import type {
+  BonusId,
+  GameAction,
+  GameMode,
+  GameState,
+  JamState,
+  PieceType,
+  RunAction,
+  SkinId,
+} from '../engine';
 
 export interface ModeProgress {
   /** Текущий уровень режима; для бесконечного всегда 0. */
@@ -72,8 +81,9 @@ export interface RunPayload {
   mode: GameMode;
   level: number;
   seed: number;
-  initial: GameState;
-  actions: GameAction[];
+  /** Форма зависит от режима: у «Парковки» своё состояние головоломки. */
+  initial: GameState | JamState;
+  actions: RunAction[];
   moves: number;
   score: number;
   status: string;
@@ -103,6 +113,8 @@ export interface StartRunResponse {
 
 export interface FinishResult {
   outcome: 'won' | 'lost' | 'quit';
+  /** Причина конца в «Парковке»: `budget` значит «не хватило ходов». */
+  reason?: string;
   mode: GameMode;
   level: number;
   score: number;
