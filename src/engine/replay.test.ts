@@ -6,7 +6,7 @@ import {
   analyzeVariant,
   compareVariants,
 } from './replay';
-import { auditState } from './audit';
+import { SURVIVAL_DEPTH, auditState, survivalTargetFor } from './audit';
 import { MODE_RULES, rulesFor } from './modes';
 import { createSpecialLevel } from './specials';
 import type { ModeId } from './modes';
@@ -54,6 +54,19 @@ describe('прогон сравнений', () => {
     expect(auditState(state!, { maxDepth: 14, maxNodes: 60_000 }).steps).toBeGreaterThanOrEqual(report.steps);
     // Обычные «Гонки» так же не считаются.
     expect(auditState(createSpecialLevel('race', 8, 4242)!, { maxDepth: 10 }).survival).toBe(false);
+  });
+
+  it('цель по жизни убывает с уровнем и не выходит за границы', () => {
+    expect(survivalTargetFor(1)).toBe(11);
+    expect(survivalTargetFor(8)).toBe(9);
+    expect(survivalTargetFor(16)).toBe(7);
+    expect(survivalTargetFor(60)).toBe(4);
+  });
+
+  it('генератор не выдаёт досок с бесконечным уклонением', () => {
+    const dodge = analyzeVariant({ mode: 'raceDodge', level: 12, samples: 5, seed: 77 });
+    expect(dodge.survival!.capped).toBe(0);
+    expect(dodge.survival!.max).toBeLessThan(SURVIVAL_DEPTH);
   });
 
   it('отчёт по уклонению измеряет жизнь, отчёт по гонкам её не измеряет', () => {

@@ -1,5 +1,5 @@
 import { anyEnemyAttacksPlayer, legalMoves } from './board';
-import { auditState, difficultyBand, survivalTargetFor } from './audit';
+import { auditState, difficultyBand, SURVIVAL_DEPTH, survivalTargetFor } from './audit';
 import { boardForMode, piecesFor, rulesFor, type ModeId } from './modes';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
@@ -137,12 +137,17 @@ export function createSpecialLevel(mode: ModeId, level: number, seed: number, at
   for (let shift = 0; shift < attempts; shift++) {
     const state = createSpecialCandidate(mode, level, seed + shift * 104729);
     if (state.enemies.length === 0 || legalMoves(state).length === 0 || anyEnemyAttacksPlayer(state)) continue;
-    const depth = rulesFor(mode).goal === 'survive' ? Math.max(state.height + 4, survivalTargetFor(level) + 4) : state.height + 4;
+    const survivalMode = rulesFor(mode).goal === 'survive';
+    const depth = survivalMode ? SURVIVAL_DEPTH : state.height + 4;
     const report = auditState(state, { maxDepth: depth, maxNodes: 60_000 });
     // В режиме на выживание полоса другая: считается не цена ошибки, а длина
     // жизни, поэтому цель для него своя и берётся ближайший к ней вариант.
     if (!report.solvable && !report.survival) continue;
     if (report.survival) {
+      // Доска, где пешка доживает до потолка разбора, уровню не годится: у неё
+      // нет конца, счёт превращается в бесконечный. Такие попытки отбрасываем,
+      // а если свободных не осталось, лаборатория увидит fallback.
+      if (report.survivalCapped) continue;
       const target = survivalTargetFor(level);
       const quality = -Math.abs(report.steps - target);
       if (!best || quality > best.quality) best = { state, quality };

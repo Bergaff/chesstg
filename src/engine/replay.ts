@@ -1,4 +1,4 @@
-import { auditState, difficultyBand, type AuditResult } from './audit';
+import { auditState, difficultyBand, SURVIVAL_DEPTH, type AuditResult } from './audit';
 import { rulesFor } from './modes';
 import { applyAction } from './rules';
 import { createSpecialLevel } from './specials';
@@ -126,7 +126,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
     const report = auditState(state, {
       // Для режима на уклонение глубина нужна заметно больше высоты поля:
       // только так видно, уклонение кончается или продолжается до упора.
-      maxDepth: options.maxDepth ?? (survivalMode ? 22 : state.height + 4),
+      maxDepth: options.maxDepth ?? (survivalMode ? SURVIVAL_DEPTH : state.height + 4),
       maxNodes: 60_000,
     });
     layouts.add(layoutKey(state));
