@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { parseModeLevels, profileModes, serializeModeLevels, modeProgress, toProfile } from './db';
+import {
+  parseModeLevels,
+  profileModes,
+  resumableRun,
+  runShapeMatchesMode,
+  serializeModeLevels,
+  modeProgress,
+  toProfile,
+} from './db';
+import { RACE_PIN_ROW, RACE_ROWS, RACE_WIDTH } from '../src/engine';
 import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
 import type { UserRow } from './types';
 
@@ -127,5 +136,70 @@ describe('прогресс режимов в JSON-колонке', () => {
     expect(middle.endless.unlocked).toBe(false);
     expect(toProfile(user({ max_level: 5 })).endlessUnlocked).toBe(false);
     expect(profileModes(user({ max_level: 11 })).endless.unlocked).toBe(true);
+  });
+});
+
+describe('активная партия и поле прежней сборки', () => {
+  /** Головоломка «Парковки»: фигуры и линия парковки, пешки нет. */
+  const puzzle = {
+    mode: 'jam',
+    width: 5,
+    height: 7,
+    mid: 3,
+    pieces: [{ id: 'w1', type: 'rook', x: 0, y: 0, side: 'white' }],
+    moves: 0,
+    budget: 20,
+    status: 'playing',
+  };
+  /** Прежняя песочница того же режима: пешка, враги, ни фигур, ни линии. */
+  const sandbox = {
+    mode: 'jam',
+    width: 5,
+    height: 7,
+    level: 1,
+    seed: 1,
+    tier: 1,
+    player: { x: 1, y: 1 },
+    enemies: [],
+    moves: 0,
+    score: 0,
+    skips: 0,
+    freeze: 0,
+    shield: 0,
+    status: 'playing',
+  };
+  const pawn = { ...sandbox, mode: 'race', player: { x: 3, y: RACE_PIN_ROW } };
+  const runRow = (patch: Partial<{ mode: string; initial_state: string; actions: string }> = {}) => ({
+    mode: 'jam',
+    initial_state: JSON.stringify(puzzle),
+    actions: '[]',
+    ...patch,
+  });
+
+  it('головоломку отличает от прежней песочницы с тем же mode', () => {
+    expect(runShapeMatchesMode(runRow())).toBe(true);
+    expect(runShapeMatchesMode(runRow({ initial_state: JSON.stringify(sandbox) }))).toBe(false);
+  });
+
+  it('у конвейера требует приколотый ряд', () => {
+    expect(runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify(pawn) }))).toBe(true);
+    expect(
+      runShapeMatchesMode(
+        runRow({ mode: 'race', initial_state: JSON.stringify({ ...pawn, player: { x: 3, y: 0 } }) }),
+      ),
+    ).toBe(false);
+    expect(RACE_WIDTH).toBeGreaterThan(0);
+    expect(RACE_ROWS).toBeGreaterThan(0);
+  });
+
+  it('журнал чужого режима партию не продолжает', () => {
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'move', dx: 1 }]) }))).toBe(false);
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 1, y: 1 } }]) }))).toBe(true);
+  });
+
+  it('битое поле и пустая строка не продолжаются, но и не падают', () => {
+    expect(resumableRun(runRow({ initial_state: '{' }))).toBe(false);
+    expect(resumableRun(null)).toBe(false);
+    expect(resumableRun(undefined)).toBe(false);
   });
 });

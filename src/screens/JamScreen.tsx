@@ -171,7 +171,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       });
       const nextRun = response.run;
       if (!isJamState(nextRun.initial)) {
-        setStartError('Сервер прислал не то поле. Попробуйте ещё раз.');
+        setStartError('Сервер прислал поле прежнего забега, этот режим его не принимает. Нажмите «Повторить»: старый забег закроется, поле сгенерируется заново.');
         changePhase('loading');
         return;
       }

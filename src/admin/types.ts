@@ -339,6 +339,7 @@ export interface DiagResponse {
   webApp?: { present: boolean; note: string; checkedAt: number };
   /** Состояние схемы: хватает ли колонки прогресса режимов. */
   schema?: { version: number; usersColumns: string[]; modeLevels: boolean; note: string };
+  runs?: { active: number; stale: number; byMode: Record<string, number>; oldestAt: number | null; note: string };
   entries: DiagEntry[];
 }
 

@@ -73,6 +73,7 @@ import {
   refreshLives,
   requireOwnRun,
   serializeModeLevels,
+  resumableRun,
   serializeRun,
   toProfile,
 } from './db';
@@ -537,8 +538,18 @@ app.post('/api/run/start', async (c) => {
     .bind(user.id, mode)
     .first<RunRow>();
 
-  if (existing) {
+  if (existing && resumableRun(existing)) {
     return c.json({ resumed: true, run: serializeRun(existing) });
+  }
+  if (existing) {
+    // Активная партия из прежней сборки: её поле или журнал текущий клиент
+    // принять не может, а без закрытия старт режима возвращал бы ту же строку вечно.
+    // Считаем выходом: жизнь не списываем, награду не начисляем.
+    const closedAt = nowMs();
+    await c.env.DB
+      .prepare(`UPDATE runs SET status = 'quit', updated_at = ?, finished_at = ? WHERE id = ? AND status = 'active'`)
+      .bind(closedAt, closedAt, existing.id)
+      .run();
   }
 
   const lives = materializeLives(user.lives, user.lives_at, nowMs());

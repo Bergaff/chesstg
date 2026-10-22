@@ -9,13 +9,14 @@ import {
   msUntilNextLife,
   PAID_SKINS,
   PLAYABLE_MODES,
+  RACE_PIN_ROW,
   randomSeed,
   shortCode,
   SKINS,
   type GameMode,
   type SkinId,
 } from '../src/engine';
-import { fail } from './http';
+import { fail, parseActions } from './http';
 import type { TelegramUser, UserRow, WorkerEnv, RunRow } from './types';
 
 export const WELCOME_COINS = 30;
@@ -237,6 +238,70 @@ export function runSummary(run: RunRow) {
     status: run.status,
     updatedAt: run.updated_at,
   };
+}
+
+/**
+ * Форма начального поля должна совпадать с режимом.
+ *
+ * Активные партии переживают сборку: «Парковка» до экрана головоломки была
+ * песочницей с пешкой, а «Гонки» были погоней с нулевого ряда. Если отдать
+ * клиенту такую строку, его экран её не нарисует, а активная она быть не может,
+ * потому что старт режима всегда возвращает именно её. По этому признаку
+ * старую партию закрываем, жизнь и награды при этом не трогаем.
+ */
+export function runShapeMatchesMode(run: { mode: string; initial_state: string } | null | undefined): boolean {
+  if (!run) return false;
+  let state: unknown = null;
+  try {
+    state = JSON.parse(run.initial_state);
+  } catch {
+    return false;
+  }
+  return initialMatchesMode(state, run.mode);
+}
+
+/**
+ * Можно ли продолжить активную партию: поле должно подходить режиму, а журнал
+ * разбираться его правилами. Старые сборки писали в `runs` другие состояния, и
+ * такой забег проще закрыть, чем чинить: клиент на нём только спотыкается.
+ */
+export function resumableRun(run: { mode: string; initial_state: string; actions: string } | null | undefined): boolean {
+  if (!runShapeMatchesMode(run)) return false;
+  try {
+    parseActions(JSON.parse(run!.actions) as unknown, run!.mode as GameMode);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Тот же разбор для уже распарсенного состояния: нужен диагностике админки. */
+export function initialMatchesMode(state: unknown, mode: string): boolean {
+  if (!state || typeof state !== 'object') return false;
+  const value = state as {
+    mode?: unknown;
+    pieces?: unknown;
+    mid?: unknown;
+    width?: unknown;
+    height?: unknown;
+    enemies?: unknown;
+    player?: { x?: unknown; y?: unknown };
+  };
+  if (value.mode !== mode) return false;
+  if (mode === 'jam') {
+    return Array.isArray(value.pieces) && typeof value.mid === 'number';
+  }
+  const shaped =
+    typeof value.width === 'number' &&
+    typeof value.height === 'number' &&
+    Array.isArray(value.enemies) &&
+    typeof value.player?.x === 'number' &&
+    typeof value.player?.y === 'number';
+  if (!shaped) return false;
+  // Конвейерного игрока генератор ставит в закреплённый ряд; погоня начинала с
+  // нулевого, и такой забег новый клиент досчитает как победу.
+  if (mode === 'race') return value.player?.y === RACE_PIN_ROW;
+  return true;
 }
 
 export function serializeRun(run: RunRow) {

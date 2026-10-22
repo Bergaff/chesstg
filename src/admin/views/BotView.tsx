@@ -325,6 +325,18 @@ npm run deploy</pre>
                   ? `Схема базы v${diag.schema.version}: ${diag.schema.note}.`
                   : 'Схему базы проверить не удалось: SQL консоль D1 не ответила.'}
               </p>
+              {diag.runs && (
+                <p className={`adm-note${diag.runs.stale > 0 ? ' is-warn' : ''}`}>
+                  Активных партий {diag.runs.active}, из них не продолжаемых {diag.runs.stale}
+                  {Object.keys(diag.runs.byMode).length > 0
+                    ? ` (${Object.entries(diag.runs.byMode)
+                        .map(([name, count]) => `${name} ${count}`)
+                        .join(', ')})`
+                    : ''}
+                  . {diag.runs.note}
+                  {diag.runs.oldestAt ? ` Старшей ${Math.max(1, Math.round((Date.now() - diag.runs.oldestAt) / 60000))} мин.` : ''}
+                </p>
+              )}
               {diag.enabled && diag.entries.length === 0 && (
                 <p className="adm-note">Пока пусто: откройте игру из бота, и отказ проверки появится здесь.</p>
               )}

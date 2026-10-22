@@ -10,7 +10,7 @@ import {
   type AuditResult,
   type PieceType,
 } from '../src/engine';
-import { parseModeLevels, profileModes } from './db';
+import { parseModeLevels, profileModes, resumableRun } from './db';
 import { SCHEMA_VERSION } from './schema';
 import { fail, readJson } from './http';
 import { botToken, hasBotToken } from './token';
@@ -1075,6 +1075,19 @@ adminApp.get('/diag', async (c) => {
   const usersInfo = await db.prepare('PRAGMA table_info(users)').all<{ name: string }>().catch(() => null);
   const usersColumns = (usersInfo?.results ?? []).map((col) => col.name);
   const hasModeLevels = usersColumns.includes('mode_levels');
+  // Активные партии, которые текущий клиент продолжить не сможет: поле или
+  // журнал written прежней сборкой. Старт режима закрывает их сам, но в
+  // диагностике их видно, чтобы не гадать, почему «поле не загрузилось».
+  const actives = await db
+    .prepare(
+      `SELECT id, mode, level, initial_state, actions, updated_at
+       FROM runs WHERE status = 'active' ORDER BY updated_at DESC LIMIT 300`,
+    )
+    .all<{ id: string; mode: string; level: number; initial_state: string; actions: string; updated_at: number }>()
+    .catch(() => null);
+  const stale = (actives?.results ?? []).filter((row) => !resumableRun(row));
+  const staleByMode = new Map<string, number>();
+  for (const row of stale) staleByMode.set(row.mode, (staleByMode.get(row.mode) ?? 0) + 1);
   return c.json({
     enabled: true,
     authDebug: c.env.AUTH_DEBUG === 'true',
@@ -1086,6 +1099,16 @@ adminApp.get('/diag', async (c) => {
       note: hasModeLevels
         ? 'колонка mode_levels на месте, прогресс «Парковки» и «Гонок» сохраняется'
         : 'нет колонки mode_levels: примените migrations/0004_mode_levels.sql в SQL консоли D1, иначе прогресс режимов не сохранится',
+    },
+    runs: {
+      active: actives?.results.length ?? 0,
+      stale: stale.length,
+      byMode: Object.fromEntries(staleByMode),
+      oldestAt: stale.length ? Math.min(...stale.map((row) => row.updated_at)) : null,
+      note:
+        stale.length === 0
+          ? 'все активные партии подходят текущим правилам'
+          : 'партии прежних сборок: старт режима закроет их и выдаст новое поле, ничего делать не нужно',
     },
     entries,
   });

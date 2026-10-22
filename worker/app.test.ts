@@ -116,16 +116,28 @@ describe('health', () => {
 
 interface StartProbe {
   status: number;
-  body: { resumed?: boolean; run?: { level?: number; seed?: number } };
+  body: { resumed?: boolean; run?: { level?: number; seed?: number; mode?: string; initial?: unknown } };
   seed: number | null;
   queries: string[];
+}
+
+/** Активная партия того же режима: её старт либо возвращает, либо закрывает. */
+interface StoredRun {
+  initial_state: string;
+  actions: string;
+  mode?: string;
+  status?: string;
 }
 
 /**
  * Старт забега через гостевой доступ:_fake_база запоминает, что именно
  * отправилось в `runs`, чтобы видно было выбранное зерно.
  */
-async function startRun(body: Record<string, unknown>, storedSeed: number | null): Promise<StartProbe> {
+async function startRun(
+  body: Record<string, unknown>,
+  storedSeed: number | null,
+  existing: StoredRun | null = null,
+): Promise<StartProbe> {
   const queries: string[] = [];
   let inserted: unknown[] = [];
   const statement = (sql: string) => ({
@@ -160,6 +172,26 @@ async function startRun(body: Record<string, unknown>, storedSeed: number | null
           };
         }
         if (sql.startsWith('SELECT 1 FROM users WHERE invite_code')) return null;
+        if (sql.includes("status = 'active'")) {
+          if (!existing) return null;
+          return {
+            id: 'stale-run',
+            user_id: 'guest:b2d66a3b522c33cca95fb5325813b4f4',
+            mode: existing.mode ?? String(body.mode ?? 'campaign'),
+            level: 1,
+            seed: 7,
+            initial_state: existing.initial_state,
+            actions: existing.actions,
+            moves: 0,
+            score: 0,
+            status: existing.status ?? 'active',
+            result: null,
+            finish_id: null,
+            created_at: 0,
+            updated_at: 0,
+            finished_at: null,
+          };
+        }
         if (sql.startsWith('SELECT seed FROM runs')) return storedSeed === null ? null : { seed: storedSeed };
         if (sql.startsWith('SELECT * FROM runs WHERE id = ?')) {
           return {
@@ -215,6 +247,50 @@ async function startRun(body: Record<string, unknown>, storedSeed: number | null
 }
 
 describe('старт забега', () => {
+  it('партию прежней сборки закрывает и выдаёт новое поле', async () => {
+    // Активная строка изTime прежнего режима: «Парковка»-головоломка в забеге
+    // кампании. Продолжить её нельзя, и отдавать её клиенту смысла нет.
+    const probe = await startRun({ mode: 'campaign' }, null, {
+      initial_state: JSON.stringify({ mode: 'jam', width: 5, height: 7, mid: 3, pieces: [], moves: 0, budget: 10, status: 'playing' }),
+      actions: '[]',
+      mode: 'campaign',
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(false);
+    expect(probe.queries.some((sql) => sql.startsWith('UPDATE runs SET status'))).toBe(true);
+    expect((probe.body.run?.initial as { mode?: string } | undefined)?.mode).toBe('campaign');
+  });
+
+  it('подходящую активную партию отдаёт как есть и не трогает', async () => {
+    const initial = {
+      mode: 'campaign',
+      width: 3,
+      height: 4,
+      level: 1,
+      seed: 1,
+      tier: 1,
+      player: { x: 1, y: 0 },
+      enemies: [],
+      moves: 1,
+      score: 0,
+      skips: 2,
+      freeze: 0,
+      shield: 0,
+      status: 'playing',
+    };
+    const probe = await startRun({ mode: 'campaign' }, null, { initial_state: JSON.stringify(initial), actions: '[]', mode: 'campaign' });
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(true);
+    expect(probe.queries.some((sql) => sql.startsWith('UPDATE runs SET status'))).toBe(false);
+  });
+
+  it('битое поле активной партии тоже закрывается', async () => {
+    const probe = await startRun({ mode: 'campaign' }, null, { initial_state: '{', actions: '[]', mode: 'campaign' });
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(false);
+    expect(probe.queries.some((sql) => sql.startsWith('UPDATE runs SET status'))).toBe(true);
+  });
+
   it('repeat берёт зерно последнего забега этого уровня', async () => {
     const probe = await startRun({ mode: 'campaign', repeat: true }, 4242);
     expect(probe.status).toBe(200);
