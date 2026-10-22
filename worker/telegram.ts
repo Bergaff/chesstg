@@ -1,4 +1,5 @@
 import type { WorkerEnv } from './types';
+import { authCallbackData } from './authLink';
 import { botToken } from './token';
 
 const API_BASE = 'https://api.telegram.org';
@@ -122,5 +123,44 @@ export async function notifyReferrer(env: WorkerEnv, chatId: number, name: strin
     chat_id: chatId,
     text: `По вашей ссылке пришёл ${escapeHtml(name)}. Начислено ${bonus} монет.`,
     disable_web_page_preview: true,
+  });
+}
+
+// ─────────────────── привязка сайта к Telegram ───────────────────
+
+export const AUTH_PROMPT_TTL_MINUTES = Math.round(5 * 60 * 1000 / 60000);
+
+export async function sendAuthPrompt(env: WorkerEnv, chatId: number, firstName: string, code: string): Promise<void> {
+  const text =
+    `<b>Привязка прогресса</b>\n\n` +
+    `${escapeHtml(firstName)}, этот запрос пришёл со страницы игры в браузере. ` +
+    `Если кнопку «Привязать Telegram» нажал именно ты, подтверди: прогресс с сайта переедет в твой аккаунт ` +
+    `и будет доступен с любого устройства.\n\n` +
+    `Запрос живёт ${AUTH_PROMPT_TTL_MINUTES} минуты и используется один раз.`;
+  await callTelegram(env, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [[{ text: 'Да, привязать', callback_data: authCallbackData('yes', code) }], [{ text: 'Не надо', callback_data: authCallbackData('no', code) }]],
+    },
+  });
+}
+
+/** Сообщение без разметки: для коротких служебных ответов. */
+export async function sendPlain(env: WorkerEnv, chatId: number, text: string): Promise<void> {
+  await callTelegram(env, 'sendMessage', { chat_id: chatId, text });
+}
+
+export async function editAuthMessage(env: WorkerEnv, chatId: number, messageId: number, text: string): Promise<void> {
+  await callTelegram(env, 'editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' });
+  // Клавиатуру снимаем отдельно: иначе повторные нажатия остались бы висеть на сообщении.
+  await callTelegram(env, 'editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+}
+
+export async function answerCallbackQuery(env: WorkerEnv, queryId: string, text?: string, alert = false): Promise<void> {
+  await callTelegram(env, 'answerCallbackQuery', {
+    callback_query_id: queryId,
+    ...(text ? { text: text.slice(0, 190), show_alert: alert } : {}),
   });
 }

@@ -14,10 +14,13 @@ export const GAME_TABLES = ['users', 'runs', 'grants', 'ad_events', 'payments'] 
 /** Таблицы админки и статистики (миграция 0002). */
 export const ADMIN_TABLES = ['admin_attempts', 'events', 'level_checks', 'audit_runs'] as const;
 
-export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES] as const;
+/** Привязка сайта к Telegram (миграция 0003). Без неё игра работает, входа на сайте нет. */
+export const AUTH_TABLES = ['auth_links'] as const;
+
+export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES] as const;
 
 /** Номер последней миграции, на которую рассчитан код. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface SchemaState {
   tables: Record<string, boolean>;
@@ -25,6 +28,8 @@ export interface SchemaState {
   missingGame: string[];
   /** Игра работает, статистика и защита входа нет. */
   missingAdmin: string[];
+  /** Нет таблицы привязки сайта: вход на сайте не работает, игра работает. */
+  missingAuth: string[];
   /** Всего таблиц в базе, включая служебные. */
   total: number;
 }
@@ -46,6 +51,7 @@ export async function readSchema(env: WorkerEnv): Promise<SchemaState> {
     tables,
     missingGame: GAME_TABLES.filter((table) => !names.has(table)),
     missingAdmin: ADMIN_TABLES.filter((table) => !names.has(table)),
+    missingAuth: AUTH_TABLES.filter((table) => !names.has(table)),
     total: names.size,
   };
 }

@@ -20,3 +20,8 @@ ADMIN_PASSWORD=
 # Либо хеш пароля: sha256 в hex (printf '%s' 'пароль' | sha256sum)
 ADMIN_PASSWORD_HASH=
 ADMIN_SECRET=
+# Необязательно: отдельный секрет для подписи сеансовых токенов сайта.
+# По умолчанию используется ADMIN_SECRET. В боле задаётся в панели:
+# Workers -> chesstg -> Settings -> Variables and Secrets.
+# Меняешь его (или ADMIN_SECRET) = все вошедшие на сайте браузеры войдут заново.
+SESSION_SECRET=

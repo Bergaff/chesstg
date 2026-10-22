@@ -174,6 +174,13 @@ async function boot() {
 }
 
 describe('UI smoke', () => {
+  it('на сайте предлагает привязать Telegram', async () => {
+    await boot();
+    expect(screen.getByText(/Сохранение прогресса/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Привязать Telegram' })).toBeTruthy();
+    expect(screen.getByText(/Без входа прогресс живёт в этом браузере/)).toBeTruthy();
+  });
+
   it('загружает меню и показывает ключевые блоки', async () => {
     await boot();
     expect(screen.getByText('против всех')).toBeTruthy();

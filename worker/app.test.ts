@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import app from './app';
-import { ADMIN_TABLES, GAME_TABLES } from './schema';
+import { ADMIN_TABLES, AUTH_TABLES, GAME_TABLES } from './schema';
 import type { WorkerEnv } from './types';
 
 interface DbOptions {
@@ -43,7 +43,7 @@ async function health(options: DbOptions, partial: Partial<WorkerEnv> = {}): Pro
   return { status: response.status, body: (await response.json()) as HealthBody };
 }
 
-const full = [...GAME_TABLES, ...ADMIN_TABLES];
+const full = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES];
 const configured: Partial<WorkerEnv> = {
   WEBAPP_URL: 'https://pawn.test',
   BOT_TOKEN: '123:abc',
@@ -61,13 +61,21 @@ describe('health', () => {
     expect(body.ok).toBe(false);
     expect(body.error).toBe('db_not_ready');
     expect(body.missing).toEqual([...GAME_TABLES]);
-    expect(body.schemaVersion).toBe(2);
+    expect(body.schemaVersion).toBe(3);
   });
 
   it('отличает недоступную базу от пустой', async () => {
     const { status, body } = await health({ throws: true });
     expect(status).toBe(503);
     expect(body.error).toBe('db_unavailable');
+  });
+
+  it('игра работает без таблицы привязки, но предупреждает', async () => {
+    const { status, body } = await health({ tables: [...GAME_TABLES, ...ADMIN_TABLES] }, configured);
+    expect(status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.warnings).toContain('auth_tables_missing');
+    expect(body.tables?.auth_links).toBe(false);
   });
 
   it('работает без таблиц админки, но предупреждает', async () => {

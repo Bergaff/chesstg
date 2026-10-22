@@ -397,15 +397,17 @@ a {
   gap: 8px;
 }
 
-.tg-login {
+.tg-link {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 44px;
 }
 
-.tg-login-host {
-  display: block;
+.tg-link-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .note {

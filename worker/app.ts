@@ -25,7 +25,18 @@ import { authMiddleware, syncTelegramName } from './auth';
 import { adminApp } from './admin';
 import { logEventInBackground } from './events';
 import { botToken, hasBotToken } from './token';
-import { canSignSessions, signSession, verifyLoginWidget } from './session';
+import { canSignSessions, signSession } from './session';
+import {
+  authStartParam,
+  consumeAuthLink,
+  createAuthLink,
+  isAuthCode,
+  parseAuthCallback,
+  parseAuthStartParam,
+  readAuthLink,
+  confirmAuthLink,
+  rejectAuthLink,
+} from './authLink';
 import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import { build as BUILD } from '../version.json';
 import {
@@ -45,7 +56,11 @@ import {
 import { fail, HttpError, isPrefix, parseActions, readJson, nowMs } from './http';
 import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment } from './payments';
 import {
+  answerCallbackQuery,
   answerPreCheckout,
+  editAuthMessage,
+  sendAuthPrompt,
+  sendPlain,
   botStartLink,
   sendHelp,
   sendWelcome,
@@ -61,7 +76,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
-const publicPaths = new Set(['/api/health', '/api/config', '/api/telegram/webhook', '/api/auth/telegram']);
+const publicPaths = new Set(['/api/health', '/api/config', '/api/telegram/webhook', '/api/auth/link', '/api/auth/logout']);
 
 app.use('/api/*', async (c, next) => {
   if (publicPaths.has(c.req.path)) return next();
@@ -238,6 +253,8 @@ app.get('/api/health', async (c) => {
   }
 
   if (schema.missingAdmin.length > 0) warnings.push('admin_tables_missing');
+  // Игра работает и без неё, но привязать прогресс на сайте не получится.
+  if (schema.missingAuth.length > 0) warnings.push('auth_tables_missing');
 
   return c.json({
     ...base,
@@ -317,90 +334,134 @@ app.post('/api/session', async (c) => {
   return c.json(await sessionBody(c.env, authCtx, { challenge, referral }));
 });
 
+const GUEST_RE = /^[a-f0-9]{32}$/;
+
 /**
- * Вход на сайте через виджет Telegram Login.
+ * Перенос гостевого профиля в телеграмовский.
  *
- * Telegram отдаёт профиль с подписью, мы её проверяем и выдаём свой токен сеанса.
- * Если до входа играли как гость, гостевой профиль переезжает в телеграмовский:
- * уровень, монеты, жизни и история забегов остаются на месте.
+ * Строка `guest:<id>` переименовывается в `tg:<id>`, вместе с ней едут забеги,
+ * награды, реклама, платежи и события. Если телеграмовский профиль уже есть,
+ * гостевой остаётся как есть: два прогресса не сливаем в один.
  */
-app.post('/api/auth/telegram', async (c) => {
-  const body = await readJson(c);
-  const fields: Record<string, string> = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (typeof value === 'string' || typeof value === 'number') fields[key] = String(value);
-  }
-
-  const token = botToken(c.env);
-  if (!token) fail(503, 'auth_not_configured', 'Бот ещё не настроен, вход через Telegram недоступен');
-  if (!canSignSessions(c.env)) {
-    fail(503, 'session_secret_missing', 'Воркеру нечем подписывать сеансы: добавьте секрет ADMIN_SECRET или SESSION_SECRET');
-  }
-
-  const check = await verifyLoginWidget(fields, token);
-  if (!check.ok) {
-    console.warn('login_widget_rejected', check.reason);
-    const reasonText: Record<string, string> = {
-      no_hash: 'Telegram не прислал подпись профиля',
-      no_user: 'В ответе Telegram нет идентификатора пользователя',
-      bad_signature: 'Подпись профиля не совпал с BOT_TOKEN воркера',
-      no_auth_date: 'У ответа Telegram нет отметки времени',
-      too_old: 'Ответ Telegram слишком старый, нажмите кнопку входа заново',
-      clock_skew: 'Часы устройства сильно расходятся с сервером',
-    };
-    fail(401, 'login_rejected', reasonText[check.reason] ?? 'Telegram не подтвердил вход');
-  }
-
-  const userId = `tg:${check.user.id}`;
+async function attachGuestToTelegram(
+  env: WorkerEnv,
+  guestId: string,
+  tg: { id: number; first_name: string; username?: string },
+): Promise<{ user: UserRow; merged: boolean }> {
+  const userId = `tg:${tg.id}`;
   const now = nowMs();
-  let user = await getUserById(c.env, userId);
+  let user = await getUserById(env, userId);
   let merged = false;
 
   if (!user) {
-    const guestId = c.req.header('X-Guest-Id')?.trim().toLowerCase() ?? '';
-    const guest = /^[a-f0-9]{32}$/.test(guestId) ? await getUserById(c.env, `guest:${guestId}`) : null;
+    const guest = GUEST_RE.test(guestId) ? await getUserById(env, `guest:${guestId}`) : null;
     if (guest) {
       const tables = ['runs', 'grants', 'ad_events', 'payments', 'events'];
       const statements = [
-        c.env.DB.prepare(
+        env.DB.prepare(
           'UPDATE users SET id = ?, tg_id = ?, is_guest = 0, first_name = ?, username = ?, updated_at = ? WHERE id = ?',
-        ).bind(userId, check.user.id, check.user.firstName, check.user.username || null, now, guest.id),
-        ...tables.map((table) =>
-          c.env.DB.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).bind(userId, guest.id),
-        ),
+        ).bind(userId, tg.id, tg.first_name, tg.username ?? null, now, guest.id),
+        ...tables.map((table) => env.DB.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).bind(userId, guest.id)),
       ];
-      const moved = await c.env.DB.batch(statements).then(() => true).catch(() => false);
+      const moved = await env.DB.batch(statements).then(() => true).catch(() => false);
       if (moved) {
-        user = await getUserById(c.env, userId);
+        user = await getUserById(env, userId);
         merged = Boolean(user);
       }
     }
   }
 
   if (!user) {
-    const created = await getOrCreateUser(c.env, {
+    const created = await getOrCreateUser(env, {
       id: userId,
       isGuest: false,
-      tgUser: { id: check.user.id, first_name: check.user.firstName || 'Игрок', username: check.user.username || undefined },
+      tgUser: { id: tg.id, first_name: tg.first_name || 'Игрок', username: tg.username },
     });
     user = created.user;
   } else {
-    await c.env.DB.prepare('UPDATE users SET first_name = ?, username = ?, updated_at = ? WHERE id = ?')
-      .bind(check.user.firstName || user.first_name, check.user.username || user.username, now, user.id)
+    await env.DB.prepare('UPDATE users SET first_name = ?, username = ?, updated_at = ? WHERE id = ?')
+      .bind(tg.first_name || user.first_name, tg.username ?? user.username, now, user.id)
       .run()
       .catch(() => undefined);
-    user = (await getUserById(c.env, user.id)) ?? user;
+    user = (await getUserById(env, user.id)) ?? user;
   }
 
-  user = await refreshLives(c.env, user);
+  return { user: await refreshLives(env, user), merged };
+}
+
+/**
+ * Запрос привязки: сайт получает одноразовый код и ссылку на чат бота.
+ *
+ * Так не нужно настраивать домен в BotFather и полагаться на виджет Telegram
+ * Login: бот уже умеет говорить с игроком, а вебхук подписан секретом.
+ */
+app.post('/api/auth/link', async (c) => {
+  const username = (c.env.BOT_USERNAME ?? '').trim().replace(/^@/, '');
+  if (!username) fail(503, 'bot_username_missing', 'В воркере не указан BOT_USERNAME, ссылка на бота не соберётся');
+  if (!canSignSessions(c.env)) {
+    fail(503, 'session_secret_missing', 'Воркеру нечем подписывать сеансы: добавьте секрет ADMIN_SECRET или SESSION_SECRET');
+  }
+  const guestId = (c.req.header('X-Guest-Id') ?? '').trim().toLowerCase();
+  if (!GUEST_RE.test(guestId)) fail(400, 'guest_required', 'Нет идентификатора браузера, привязка невозможна');
+
+  try {
+    const { code, expiresAt } = await createAuthLink(c.env, guestId);
+    return c.json({
+      code,
+      botUsername: `@${username}`,
+      link: `https://t.me/${username}?start=${authStartParam(code)}`,
+      expiresIn: Math.max(0, Math.round((expiresAt - nowMs()) / 1000)),
+    });
+  } catch (error) {
+    if (isDatabaseError(error)) fail(503, 'auth_not_ready', 'В базе нет таблицы auth_links, примените миграцию 0003');
+    throw error;
+  }
+});
+
+/**
+ * Опрос статуса кода. Как только бот получил «Да», здесь же выдаётся токен
+ * сеанса и обновлённый профиль: код используется один раз.
+ */
+app.get('/api/auth/link', async (c) => {
+  const code = c.req.query('code') ?? '';
+  if (!isAuthCode(code)) fail(400, 'bad_code', 'Некорректный код привязки');
+
+  let row;
+  try {
+    row = await readAuthLink(c.env, code);
+  } catch (error) {
+    if (isDatabaseError(error)) fail(503, 'auth_not_ready', 'В базе нет таблицы auth_links, примените миграцию 0003');
+    throw error;
+  }
+  if (!row) return c.json({ status: 'unknown' });
+  if (row.status === 'pending' || row.status === 'rejected' || row.status === 'expired' || row.status === 'used') {
+    return c.json({ status: row.status });
+  }
+
+  const guestId = (c.req.header('X-Guest-Id') ?? '').trim().toLowerCase();
+  if (guestId && row.guest_id && guestId !== row.guest_id) {
+    fail(403, 'link_forbidden', 'Этот код выдал другой браузер');
+  }
+
+  const consumed = await consumeAuthLink(c.env, code);
+  if (!consumed || !consumed.tg_id) return c.json({ status: 'expired' });
+
+  const { user, merged } = await attachGuestToTelegram(c.env, consumed.guest_id, {
+    id: consumed.tg_id,
+    first_name: consumed.first_name || 'Игрок',
+    username: consumed.username ?? undefined,
+  });
   const session = await signSession(c.env, user.id);
   await c.env.DB.prepare('INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)')
-    .bind(user.id, 'telegram_login', 1, JSON.stringify({ merged, username: check.user.username || null }), now)
+    .bind(user.id, 'telegram_link', 1, JSON.stringify({ merged, username: consumed.username ?? null }), nowMs())
     .run()
     .catch(() => undefined);
 
-  return c.json({ token: session, merged, profile: toProfile(user), config: publicConfig(c.env) });
+  return c.json({ status: 'linked', token: session, merged, profile: toProfile(user), config: publicConfig(c.env) });
 });
+
+/** Выход на сайте: токен подписан и ничего не хранит, поэтому достаточно удалить его у клиента. */
+app.post('/api/auth/logout', (c) => c.json({ ok: true }));
 
 app.get('/api/session', async (c) => {
   const authCtx = auth(c);
@@ -1011,6 +1072,61 @@ function withRequestOrigin(env: WorkerEnv, origin: string): WorkerEnv {
   return { ...env, WEBAPP_URL: origin.startsWith('https://') ? origin : '' };
 }
 
+/** Ответ на нажатие кнопок «Да» и «Нет» в сообщении про привязку. */
+async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unknown>): Promise<void> {
+  const queryId = typeof callback.id === 'string' ? callback.id : '';
+  const data = typeof callback.data === 'string' ? callback.data : '';
+  const parsed = parseAuthCallback(data);
+  const from = record(callback.from);
+  const message = record(callback.message);
+  const chatId = typeof record(message?.chat)?.id === 'number' ? (record(message?.chat)?.id as number) : null;
+  const messageId = typeof message?.message_id === 'number' ? message.message_id : null;
+
+  if (!parsed) {
+    if (queryId) await answerCallbackQuery(env, queryId);
+    return;
+  }
+
+  if (parsed.action === 'no') {
+    await rejectAuthLink(env, parsed.code);
+    if (queryId) await answerCallbackQuery(env, queryId, 'Отменили');
+    if (chatId && messageId) await editAuthMessage(env, chatId, messageId, 'Привязка отменена. Ничего не изменилось.');
+    return;
+  }
+
+  const tgId = Number(from?.id);
+  const firstName = typeof from?.first_name === 'string' ? from.first_name : 'Игрок';
+  const username = typeof from?.username === 'string' ? from.username : undefined;
+  if (!Number.isInteger(tgId) || tgId <= 0) {
+    if (queryId) await answerCallbackQuery(env, queryId, 'Telegram не передал профиль, попробуй ещё раз', true);
+    return;
+  }
+
+  const result = await confirmAuthLink(env, parsed.code, { id: tgId, firstName, username });
+  if (result.ok) {
+    if (queryId) await answerCallbackQuery(env, queryId, 'Готово, вернись во вкладку с игрой');
+    if (chatId && messageId) {
+      await editAuthMessage(
+        env,
+        chatId,
+        messageId,
+        'Привязал. Открой вкладку с игрой в браузере: прогресс должен подтянуться сам. Дальше он хранится в этом аккаунте Telegram.',
+      );
+    }
+    return;
+  }
+
+  const reasonText: Record<string, string> = {
+    expired: 'Ссылка устарела, она живёт пять минут. Нажми «Привязать Telegram» в игре ещё раз.',
+    rejected: 'Этот запрос уже отменили.',
+    used: 'Этот запрос уже использован.',
+    unknown: 'Не нашёл такой запрос: возможно, его выдали с другого браузера.',
+    already: 'Запрос уже подтверждён. Открой вкладку с игрой.',
+  };
+  const text = reasonText[result.reason ?? 'unknown'] ?? 'Не получилось подтвердить запрос.';
+  if (queryId) await answerCallbackQuery(env, queryId, text, true);
+}
+
 async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Promise<void> {
   const message = record(update.message);
   if (message) {
@@ -1023,6 +1139,21 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
 
     if (chatId && text.startsWith('/start')) {
       const payload = text.split(/\s+/)[1] ?? undefined;
+      // Код привязки сайта: вместо приветствия просим подтвердить переход прогресса.
+      const authCode = parseAuthStartParam(payload);
+      if (authCode) {
+        const link = await readAuthLink(env, authCode);
+        if (!link || link.status !== 'pending') {
+          await sendPlain(
+            env,
+            chatId,
+            'Такая ссылка уже не действует: они живут пять минут. Открой игру в браузере и нажми «Привязать Telegram» ещё раз.',
+          );
+          return;
+        }
+        await sendAuthPrompt(env, chatId, firstName, authCode);
+        return;
+      }
       await sendWelcome(env, chatId, firstName, payload);
       return;
     }
@@ -1057,6 +1188,12 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
       await refundPayment(env, refund.invoice_payload);
       return;
     }
+  }
+
+  const callback = record(update.callback_query);
+  if (callback) {
+    await handleAuthCallback(env, callback);
+    return;
   }
 
   const preCheckout = record(update.pre_checkout_query);

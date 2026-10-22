@@ -8,7 +8,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { api, ApiError, clearSessionToken, isLinked } from '../lib/api';
 import { getTg } from '../lib/telegram';
-import { TelegramLogin } from '../components/TelegramLogin';
+import { TelegramLink } from '../components/TelegramLink';
 import { cn, formatDuration, formatNumber } from '../lib/format';
 import { useCountdown, useNow } from '../lib/hooks';
 import type { AdRewardResponse } from '../lib/types';
@@ -142,7 +142,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
             <div className="account-actions">
               <button
                 type="button"
-                className="btn btn-ghost btn-sm"
+                className="btn btn-quiet"
                 onClick={() => {
                   clearSessionToken();
                   setLinked(false);
@@ -157,12 +157,11 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         ) : (
           <>
             <p className="account-text">
-              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Войди через Telegram, и
-              уровень, монеты и рекорды останутся с аккаунтом на любом устройстве. Гостевой прогресс перенесётся.
+              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Привяжи Telegram: уровень,
+              монеты и рекорды останутся с аккаунтом на любом устройстве, а текущий прогресс переедет следом.
+              Откроется чат бота, там нужно нажать «Да».
             </p>
-            <TelegramLogin
-              botUsername={config.botUsername}
-              label="Войти через Telegram"
+            <TelegramLink
               onLinked={({ merged }) => {
                 setLinked(true);
                 void refresh();

@@ -2,13 +2,13 @@ import { botToken } from './token';
 import type { WorkerEnv } from './types';
 
 /**
- * Вход через Telegram на сайте и подписанные сеансы.
+ * Сеансы сайта.
  *
- * Mini App получает личность из initData, а у сайта в браузере её нет. Для сайта
- * есть виджет Telegram Login: Telegram отдаёт профиль вместе с подписью, мы её
- * проверяем и выдаём свой короткий токен сеанса. Дальше клиент приносит его в
- * заголовке Authorization, и прогресс игрока переживает перезапуск браузера и
- * смену устройства.
+ * Mini App получает личность из initData, а у сайта в браузере её нет. Игрок
+ * привязывает прогресс через бота: сайт получает одноразовый код, бот спрашивает
+ * «привязать?», после «Да» воркер выдаёт токен сеанса. Клиент приносит его в
+ * заголовке Authorization, и прогресс переживает перезапуск браузера и смену
+ * устройства.
  */
 
 const encoder = new TextEncoder();
@@ -47,57 +47,6 @@ function b64urlDecode(value: string): Uint8Array {
   const norm = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
   const binary = atob(norm);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-export interface LoginUser {
-  id: number;
-  firstName: string;
-  username: string;
-  photoUrl: string;
-  authDate: number;
-}
-
-export type LoginCheck = { ok: true; user: LoginUser } | { ok: false; reason: string };
-
-/**
- * Проверка подписи виджета Telegram Login.
- *
- * Важно: у виджета ключ другой, чем у Mini App. Здесь secret_key это обычный
- * SHA-256 от токена, а не HMAC с константой WebAppData, поэтому функции не
- * взаимозаменяемы.
- */
-export async function verifyLoginWidget(fields: Record<string, string>, token: string): Promise<LoginCheck> {
-  const hash = (fields.hash ?? '').trim().toLowerCase();
-  if (!hash) return { ok: false, reason: 'no_hash' };
-  const id = Number(fields.id);
-  if (!Number.isInteger(id) || id <= 0) return { ok: false, reason: 'no_user' };
-
-  const dataCheckString = Object.keys(fields)
-    .filter((key) => key !== 'hash' && key !== '')
-    .sort()
-    .map((key) => `${key}=${fields[key]}`)
-    .join('\n');
-
-  const secretKey = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token)));
-  const expected = toHex(await hmac(secretKey, dataCheckString));
-  if (!safeEqual(expected, hash)) return { ok: false, reason: 'bad_signature' };
-
-  const authDate = Number(fields.auth_date ?? 0);
-  if (!Number.isFinite(authDate) || authDate <= 0) return { ok: false, reason: 'no_auth_date' };
-  const ageSec = Math.floor(Date.now() / 1000) - authDate;
-  if (ageSec > DAY_SEC) return { ok: false, reason: 'too_old' };
-  if (ageSec < -300) return { ok: false, reason: 'clock_skew' };
-
-  return {
-    ok: true,
-    user: {
-      id,
-      firstName: (fields.first_name ?? '').slice(0, 64),
-      username: (fields.username ?? '').slice(0, 64),
-      photoUrl: fields.photo_url ?? '',
-      authDate,
-    },
-  };
 }
 
 function sessionSecret(env: WorkerEnv): string {
