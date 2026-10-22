@@ -114,6 +114,129 @@ describe('health', () => {
   });
 });
 
+interface StartProbe {
+  status: number;
+  body: { resumed?: boolean; run?: { level?: number; seed?: number } };
+  seed: number | null;
+  queries: string[];
+}
+
+/**
+ * Старт забега через гостевой доступ:_fake_база запоминает, что именно
+ * отправилось в `runs`, чтобы видно было выбранное зерно.
+ */
+async function startRun(body: Record<string, unknown>, storedSeed: number | null): Promise<StartProbe> {
+  const queries: string[] = [];
+  let inserted: unknown[] = [];
+  const statement = (sql: string) => ({
+    bind: (...args: unknown[]) => ({
+      first: async () => {
+        if (sql.startsWith('SELECT * FROM users')) {
+          const now = Date.now();
+          return {
+            id: 'guest:b2d66a3b522c33cca95fb5325813b4f4',
+            tg_id: null,
+            first_name: 'Гость',
+            username: null,
+            is_guest: 1,
+            level: 12,
+            max_level: 12,
+            coins: 100,
+            lives: 5,
+            lives_at: now,
+            endless_best: 0,
+            endless_best_tier: 1,
+            endless_best_moves: 0,
+            ad_free: 0,
+            skins: 'classic',
+            skin: 'classic',
+            inv_hint: 0,
+            inv_freeze: 0,
+            inv_undo: 0,
+            invite_code: 'GUEST12',
+            referred_by: null,
+            created_at: now,
+            updated_at: now,
+          };
+        }
+        if (sql.startsWith('SELECT 1 FROM users WHERE invite_code')) return null;
+        if (sql.startsWith('SELECT seed FROM runs')) return storedSeed === null ? null : { seed: storedSeed };
+        if (sql.startsWith('SELECT * FROM runs WHERE id = ?')) {
+          return {
+            id: String(args[0]),
+            user_id: inserted[1],
+            mode: 'campaign',
+            level: inserted[3],
+            seed: inserted[4],
+            initial_state: String(inserted[5] ?? '{}'),
+            actions: '[]',
+            moves: 0,
+            score: 0,
+            status: 'active',
+            result: null,
+            finish_id: null,
+            created_at: 0,
+            updated_at: 0,
+            finished_at: null,
+          };
+        }
+        return null;
+      },
+      all: async () => ({ results: [] }),
+      run: async () => {
+        if (sql.startsWith('INSERT INTO runs')) inserted = args;
+        return { success: true, meta: { changes: 1, last_row_id: 1 } };
+      },
+      batch: async () => [],
+    }),
+  });
+  const db = {
+    prepare: (sql: string) => {
+      queries.push(sql);
+      return statement(sql);
+    },
+    batch: async () => [],
+  } as unknown as WorkerEnv['DB'];
+
+  const response = await app.fetch(
+    new Request('https://pawn.test/api/run/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-guest-id': 'b2d66a3b522c33cca95fb5325813b4f4' },
+      body: JSON.stringify(body),
+    }),
+    env({}, { ...configured, ALLOW_GUESTS: 'true', DB: db }),
+  );
+  return {
+    status: response.status,
+    body: (await response.json()) as StartProbe['body'],
+    seed: inserted.length ? Number(inserted[4]) : null,
+    queries,
+  };
+}
+
+describe('старт забега', () => {
+  it('repeat берёт зерно последнего забега этого уровня', async () => {
+    const probe = await startRun({ mode: 'campaign', repeat: true }, 4242);
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(false);
+    expect(probe.seed).toBe(4242);
+    expect(probe.queries.some((sql) => sql.startsWith('SELECT seed FROM runs'))).toBe(true);
+  });
+
+  it('без repeat зерно новое, и прошлое не читается', async () => {
+    const probe = await startRun({ mode: 'campaign' }, 4242);
+    expect(probe.status).toBe(200);
+    expect(probe.seed).not.toBe(4242);
+    expect(probe.queries.some((sql) => sql.startsWith('SELECT seed FROM runs'))).toBe(false);
+  });
+
+  it('в бесконечном режиме повтор не имеет смысла и зерно не подглядывается', async () => {
+    const probe = await startRun({ mode: 'endless', repeat: true }, 4242);
+    expect(probe.status).toBe(200);
+    expect(probe.queries.some((sql) => sql.startsWith('SELECT seed FROM runs'))).toBe(false);
+  });
+});
+
 describe('ошибки базы', () => {
   it('сессия отвечает 503 с понятным кодом, а не 500', async () => {
     const response = await app.fetch(

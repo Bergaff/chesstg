@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   MODE_RULES,
+  analyzeVariant,
   anyEnemyAttacksPlayer,
   applyAction,
   auditState,
@@ -14,6 +15,7 @@ import {
   heightForLevel,
   legalMoves,
   modeDef,
+  modeFamily,
   piecesFor,
   placementSpace,
   sizeForLevel,
@@ -252,6 +254,95 @@ describe('полоса сложности по режимам', () => {
       expect(report.score).toBeGreaterThanOrEqual(band.min);
       expect(report.score).toBeLessThanOrEqual(band.max);
     }
+  });
+});
+
+describe('переключатели вариантов', () => {
+  it('свободная диагональ включена в кампании и выключена в строгом варианте', () => {
+    const state = (mode: GameState['mode']) =>
+      base({ mode, width: 4, height: 6, player: { x: 1, y: 1 }, enemies: [{ id: 'e1', type: 'rook', x: 3, y: 4 }] });
+    expect(legalMoves(state('campaign')).some((m) => m.dx === 1 && !m.takes)).toBe(true);
+    expect(legalMoves(state('campaignFreeDiag')).some((m) => m.dx === 1 && !m.takes)).toBe(true);
+    expect(legalMoves(state('campaignStrictDiag')).some((m) => m.dx === 1 && !m.takes)).toBe(false);
+    // Прямо вверх ходят оба варианта.
+    expect(legalMoves(state('campaignStrictDiag')).some((m) => m.dx === 0)).toBe(true);
+    // Взятие по диагонали остаётся: занятая клетка это уже не «свободная диагональ».
+    const capture = base({
+      mode: 'campaignStrictDiag',
+      width: 4,
+      height: 6,
+      player: { x: 1, y: 1 },
+      enemies: [{ id: 'e1', type: 'pawn', x: 2, y: 2 }],
+    });
+    expect(legalMoves(capture).some((m) => m.dx === 1 && m.takes === 'pawn')).toBe(true);
+  });
+
+  it('уход с площадки: вбок и в четыре стороны', () => {
+    const blocked = {
+      width: 4,
+      height: 6,
+      player: { x: 3, y: 0 },
+      enemies: [
+        { id: 'e1', type: 'rook' as const, x: 1, y: 1 },
+        { id: 'e2', type: 'rook' as const, x: 0, y: 1 },
+      ],
+    };
+    // Слева край в одном шаге: ладья уходит с поля целиком.
+    const escape = applyAction(base({ mode: 'jamExit2', ...blocked, enemies: [{ id: 'e1', type: 'rook', x: 0, y: 3 }] }), {
+      type: 'move',
+      dx: 0,
+      dy: 1,
+    });
+    expect(escape.enemies.find((e) => e.id === 'e1')).toBeUndefined();
+    expect(escape.lastEvent).toBe('escaped');
+
+    // Левый путь перекрыт своей же фигурой: вариант в две стороны смещается
+    // вправо, вариант в четыре стороны выбирает ближайший край и уходит вверх.
+    const two = applyAction(base({ mode: 'jamExit2', ...blocked }), { type: 'move', dx: 0, dy: 1 });
+    const four = applyAction(base({ mode: 'jamExit4', ...blocked }), { type: 'move', dx: 0, dy: 1 });
+    expect(two.enemies.find((e) => e.id === 'e1')).toMatchObject({ x: 2, y: 1 });
+    expect(four.enemies.find((e) => e.id === 'e1')).toMatchObject({ x: 1, y: 0 });
+  });
+
+  it('в режиме на уклонение верхний ряд переливает пешку вниз, а не даёт победу', () => {
+    const near = base({
+      mode: 'raceDodge',
+      width: 4,
+      height: 6,
+      player: { x: 1, y: 4 },
+      enemies: [{ id: 'e1', type: 'pawn', x: 3, y: 2 }],
+      status: 'playing',
+    });
+    const state = applyAction(near, { type: 'move', dx: 0, dy: 1 });
+    expect(state.status).toBe('playing');
+    expect(state.player.y).toBe(0);
+    expect(state.lastEvent).toBe('wrap');
+    // Обычные «Гонки» на том же ходу побеждают.
+    expect(applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 }).status).toBe('won');
+  });
+
+  it('геометрия варианта совпадает с базовым режимом', () => {
+    expect(boardForMode('campaignStrictDiag', 12)).toEqual(boardForMode('campaign', 12));
+    expect(boardForMode('jamExit4', 12)).toEqual(boardForMode('jam', 12));
+    expect(piecesFor('jamExit2', 12)).toBe(piecesFor('jam', 12));
+    expect(modeDef('raceDodge').playable).toBe(false);
+    expect(modeFamily('campaignStrictDiag')).toBe('campaign');
+  });
+
+  it('анализ варианта детерминирован и различает режимы', () => {
+    const a = analyzeVariant({ mode: 'jam', level: 8, samples: 4, seed: 11 });
+    const b = analyzeVariant({ mode: 'jam', level: 8, samples: 4, seed: 11 });
+    const { ms: msA, ...restA } = a;
+    const { ms: msB, ...restB } = b;
+    expect(restA).toEqual(restB);
+    expect(typeof msA).toBe('number');
+    expect(msB).toBeGreaterThanOrEqual(0);
+    const exit = analyzeVariant({ mode: 'jamExit2', level: 8, samples: 4, seed: 11 });
+    expect(exit.avgEscapes).toBeGreaterThan(0);
+    expect(a.avgEscapes).toBe(0);
+    expect(a.replayIndex).toBeGreaterThan(0);
+    expect(a.replayIndex).toBeLessThanOrEqual(100);
+    expect(a.uniqueLayouts).toBeLessThanOrEqual(a.samples);
   });
 });
 

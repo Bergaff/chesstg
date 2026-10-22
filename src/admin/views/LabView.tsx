@@ -24,6 +24,7 @@ import { PIECE_UNLOCKS } from '../../engine';
 import { AdminError, deleteReport, fetchLevels, saveReport } from '../api';
 import type { AuditReportRow, LevelsResponse } from '../types';
 import { runPlacementAudit } from '../auditClient';
+import { VariantsPanel } from './VariantsPanel';
 import { Metric, Panel, StatusLine, Table, formatDateTime, formatNumber, formatPercent } from '../ui';
 import { cn } from '../../lib/format';
 
@@ -337,6 +338,8 @@ function PlacementLab({
           намеренно: перебор остаётся на устройстве, а сервер только хранит отчёты.
         </p>
       </div>
+
+      <VariantsPanel level={level} />
 
       {error && <StatusLine kind="error">{error}</StatusLine>}
       {saved && <StatusLine kind="ok">{saved}</StatusLine>}

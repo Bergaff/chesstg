@@ -1,4 +1,5 @@
 import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
+import { rulesFor } from './modes';
 import type { ModeId } from './modes';
 import { applyAction } from './rules';
 import { Rng, mix32 } from './rng';
@@ -38,6 +39,9 @@ export interface AuditResult {
   coverage: number;
   /** Число полных победных линий, с потолком. */
   paths: number;
+  /** Режим на выживание: да, и найденная длина упёрлась в границу поиска. */
+  survival?: boolean;
+  survivalCapped?: boolean;
   pathsCapped: boolean;
   /** Оценка требовательности от 0 до 100. */
   score: number;
@@ -60,9 +64,22 @@ const DEFAULT_PATH_CAP = 512;
  * а вот вынужденный пропуск обязателен, иначе тупик будет выглядеть нерешаемым.
  */
 function actionsFrom(state: GameState): GameAction[] {
+  const rules = rulesFor(state.mode);
   const moves = legalMoves(state);
-  if (moves.length === 0) return [{ type: 'skip' }];
-  return moves.map((move) => ({ type: 'move' as const, dx: move.dx, dy: move.dy ?? 1 }));
+  if (moves.length > 0) {
+    const list: GameAction[] = moves.map((move) => ({ type: 'move', dx: move.dx, dy: move.dy ?? 1 }));
+    // В режиме на выживание ожидание это полноценный способ уклониться, поэтому
+    // оно входит в перебор наравне с движениями. В остальных режимах лишняя
+    // ветка удвоила бы стоимость разбора, а пользы не принесла бы.
+    if (rules.goal === 'survive' && (state.skips ?? 0) < rules.skipQuota) list.push({ type: 'skip' });
+    return list;
+  }
+  // Тупик: остаётся пропуск, и он разрешён не всегда. В режиме, где фигуры не
+  // ходят, ждать нечего, а добровольный пропуск лимитирован квотой. Возвращаем
+  // пустой список, и разбор зафиксирует позицию как безвыходную вместо того,
+  // чтобы словить отказ правил.
+  if (rules.motion !== 'static') return [{ type: 'skip' }];
+  return (state.skips ?? 0) < rules.skipQuota ? [{ type: 'skip' }] : [];
 }
 
 function positionKey(state: GameState): string {
@@ -128,10 +145,15 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
     };
   }
 
+  // В режиме на выживание цели дойти до верха нет: там успехом считается сам
+  // факт, что пешка осталась в живых на всей глубине поиска.
+  const survival = rulesFor(start.mode).goal === 'survive';
+
   /** Есть ли победа за оставшиеся depth действий. */
   const canWin = (state: GameState, depth: number): boolean => {
-    if (state.status === 'won') return true;
-    if (state.status === 'lost' || depth <= 0) return false;
+    if (state.status === 'won') return !survival;
+    if (state.status === 'lost') return false;
+    if (depth <= 0) return survival;
     if (nodes > maxNodes) {
       truncated = true;
       return false;
@@ -179,13 +201,26 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
   };
 
   let steps = 0;
-  for (let depth = 1; depth <= maxDepth; depth++) {
-    if (canWin(start, depth)) {
-      steps = depth;
-      break;
+  if (survival) {
+    // Ищем максимум: с самой большой глубины вниз, иначе «продержался один ход»
+    // выглядел бы решением.
+    for (let depth = maxDepth; depth >= 1; depth--) {
+      if (canWin(start, depth)) {
+        steps = depth;
+        break;
+      }
+      if (truncated) break;
     }
-    if (truncated) break;
+  } else {
+    for (let depth = 1; depth <= maxDepth; depth++) {
+      if (canWin(start, depth)) {
+        steps = depth;
+        break;
+      }
+      if (truncated) break;
+    }
   }
+  const survivedCapped = survival && steps >= maxDepth;
 
   const solution: GameAction[] = [];
   let cursor = start;
@@ -283,6 +318,8 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
       : 0,
     nodes,
     truncated,
+    survival,
+    survivalCapped: survivedCapped,
   };
 }
 
@@ -361,6 +398,15 @@ export function difficultyTarget(level: number): number {
  * сгенерированных уровней 57, 66, 70 для «Парковки» и 53, 67, 70 для «Гонок»
  * на уровнях 5, 10 и 20.
  */
+/**
+ * Цель по длительности уклонения для режимов на выживание: столько ходов пешка
+ * обязана продержаться, чтобы уровень не был ни мгновенной смертью, ни
+ * бесконечной прогулкой. Потолок 18 задан заодно с глубиной разбора.
+ */
+export function survivalTargetFor(level: number): number {
+  return Math.min(18, 6 + Math.round(level / 3));
+}
+
 export function difficultyTargetFor(mode: ModeId | undefined, level: number): number {
   if (mode === 'jam') return Math.round(Math.min(88, 58 + level * 1.1));
   if (mode === 'race') return Math.round(Math.min(84, 46 + level * 1.2));

@@ -1,9 +1,14 @@
 import {
   cloneState,
   enemyAt,
+  enemyAttacksCell,
   enemyTarget,
   legalMoves,
 } from './board';
+import { Rng } from './rng';
+
+/** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
+const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
 import { rulesFor } from './modes';
 import { ensureEndlessSpace } from './endless';
 import type { BuffKind, GameAction, GameState, MoveDx } from './types';
@@ -20,6 +25,40 @@ function boardSignature(state: GameState): string {
     .sort()
     .join(';');
   return `${state.player.x},${state.player.y}|${enemies}`;
+}
+
+function noMovesLeft(state: GameState): boolean {
+  return state.status === 'playing' && legalMoves(state).length === 0;
+}
+
+/**
+ * Приток фигур сверху: движок «Гонок на уклонение». Колонка и тип берутся из
+ * `state.rng`, то есть из зерна уровня, поэтому сервер воспроизводит партию
+ * шаг в шаг и договориться о «невидимом» появлении фигуры нельзя.
+ */
+function spawnPhase(state: GameState): void {
+  const rules = rulesFor(state.mode);
+  if (rules.spawnPerTurn <= 0 || state.status !== 'playing') return;
+  const rng = new Rng(state.rng || 1);
+  const y = state.height - 1;
+  const taken = (x: number) => state.enemies.some((e) => e.x === x && e.y === y) || (state.player.x === x && state.player.y === y);
+  for (let spawned = 0; spawned < rules.spawnPerTurn; spawned++) {
+    let placed = false;
+    for (let attempt = 0; attempt < 8 && !placed; attempt++) {
+      const x = rng.int(state.width);
+      if (taken(x)) continue;
+      const type = SPAWN_POOL[rng.int(SPAWN_POOL.length)];
+      const candidate = { id: `s${state.moves}-${spawned}-${x}`, type, x, y };
+      // Фигура, которая бьёт пешку прямо с клетки рождения, хода не оставляет:
+      // в режимах на выживание такое не подставляется, иначе длина жизни
+      // превращается в лотерею. Не удалось подобрать место за 8 попыток, значит
+      // приток в этом ходу пропускается.
+      if (rules.goal === 'survive' && enemyAttacksCell(state, candidate, state.player.x, state.player.y)) continue;
+      state.enemies.push(candidate);
+      placed = true;
+    }
+  }
+  state.rng = rng.save();
 }
 
 function enemyPhase(state: GameState): void {
@@ -127,7 +166,20 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // Победа по верхнему ряду во всех режимах, кроме бесконечного: там цели нет,
   // есть высота. «Парковка» и «Гонки» иначе никогда не выигрывают, и лаборатория
   // показывает 0% решаемых расстановок при работающих правилах.
-  if (state.mode !== 'endless' && state.player.y >= state.height - 1) {
+  const goal = rulesFor(state.mode).goal;
+  // Режим на уклонение: верхний ряд не победа, а перелив в нижний. Пешка
+  // «проскакивает» на стартовую линию, и дальше всё продолжается, пока её не
+  // съели. Именно поэтому метрика режима длина жизни, а не проход.
+  if (goal === 'survive' && state.player.y >= state.height - 1) {
+    state.player = { x: state.player.x, y: 0 };
+    state.lastEvent = 'wrap';
+  }
+
+  if (
+    state.mode !== 'endless' &&
+    goal === 'top' &&
+    state.player.y >= state.height - 1
+  ) {
     state.status = 'won';
     state.lastEvent = 'won';
     return state;
@@ -138,24 +190,24 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
     ensureEndlessSpace(state);
   }
 
-  // Тупик режима с стоячими фигурами («Парковка»): там нечего ждать, позиция
-  // не изменится ни через один пропуск, поэтому закрытая дорога это поражение,
-  // а не вечное ожидание. В остальных режимах ход противника ещё может открыть
-  // проход, и право пропустить ход остаётся.
-  if (rulesFor(state.mode).motion === 'static' && state.status === 'playing' && legalMoves(state).length === 0) {
+  // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.
+  const waitingForNothing = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && noMovesLeft(state);
+  const before = waitingForNothing ? boardSignature(state) : '';
+  enemyPhase(state);
+  spawnPhase(state);
+
+  // Тупик: если после хода фигур и притока ходить нечем, а режима не даёт
+  // ни победы по верхнему ряду, ни осмысленного ожидания, партия проиграна.
+  // Заморозка и щит ожиданием не считаются: там позиция обязана измениться.
+  const rules = rulesFor(state.mode);
+  const stuckByRules = rules.motion === 'static' || rules.goal === 'survive';
+  const noProgress = waitingForNothing && before === boardSignature(state);
+  if (stuckByRules && noMovesLeft(state)) {
     state.status = 'lost';
     state.lastEvent = 'stuck';
     return state;
   }
-
-  // Страховка от вечного ожидания: если игрок пропустил ход, потому что ходить
-  // некуда, и после хода фигур не сдвинулась ни одна клетка, партия зашла в
-  // тупик. Заморозка и щит считаются осмысленным ожиданием: там позиция
-  // обязана измениться на следующем шаге, поэтому не трогаем.
-  const waiting = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && legalMoves(state).length === 0;
-  const before = waiting ? boardSignature(state) : '';
-  enemyPhase(state);
-  if (waiting && state.status === 'playing' && boardSignature(state) === before) {
+  if (noProgress) {
     state.status = 'lost';
     state.lastEvent = 'stuck';
   }

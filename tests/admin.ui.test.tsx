@@ -180,5 +180,9 @@ describe('админка', () => {
     expect(await screen.findByText('Лаборатория расстановок')).toBeTruthy();
     expect(screen.getByText('Запустить разбор')).toBeTruthy();
     expect(screen.getByText('Сохранённые отчёты')).toBeTruthy();
+    // Прогон вариантов это часть лаборатории: панели и таблица сравнения.
+    expect(screen.getByText('Прогон сравнений')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Сравнить варианты' })).toBeTruthy();
+    expect(screen.getByText('«Парковка»: стоят фигуры или уходят с площадки')).toBeTruthy();
   });
 });

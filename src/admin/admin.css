@@ -325,6 +325,14 @@ body {
   flex: 0 0 auto;
 }
 
+.adm-variant-group {
+  margin-top: 16px;
+}
+
+.adm-variant-group .adm-note {
+  margin-top: 0;
+}
+
 .adm-subtitle {
   margin: 18px 0 6px;
   font-size: 10px;

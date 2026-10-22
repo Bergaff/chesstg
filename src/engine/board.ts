@@ -44,7 +44,9 @@ export function legalMoves(state: GameState): MoveOption[] {
     if (!inside(state, x, y)) continue;
     const occupant = enemyAt(state, x, y);
     if (!occupant) {
-      result.push({ x, y, dx, dy: 1 });
+      // Свободная диагональ разрешена не во всех режимах: в строгом варианте
+      // диагональный шаг возможен только как взятие.
+      if (dx === 0 || rules.freeDiagonal) result.push({ x, y, dx, dy: 1 });
       continue;
     }
     // Пешка бьёт только по диагонали вперёд, прямо фигуру ставить нельзя.
@@ -82,7 +84,11 @@ export function skipsLeft(state: GameState): number {
 /** Может ли игрок пропустить ход: если ходов нет, пропуск обязателен, иначе нужна квота. */
 export function canSkip(state: GameState): boolean {
   if (state.status !== 'playing') return false;
-  return legalMoves(state).length === 0 || skipsLeft(state) > 0;
+  const rules = rulesFor(state.mode);
+  // Вынужденный пропуск бесплатен, но только там, где ход фигур что-то меняет;
+  // в статичном режиме он тратит квоту, и при нулевой квоте правило отказывает.
+  if (legalMoves(state).length === 0 && rules.motion !== 'static') return true;
+  return skipsLeft(state) > 0;
 }
 
 /**
@@ -234,11 +240,41 @@ export function downStep(state: GameState, enemy: Enemy): Cell | 'escape' | null
   return sides.length ? sides[0] : null;
 }
 
+/**
+ * «Уход с площадки»: фигура делает шаг в сторону края и покидает доску.
+ * При `exitDirections: 2` края боковые, при 4 фигура выбирает ближайший из
+ * четырёх. Это не разбег в случайные стороны, а детерминированный отход,
+ * поэтому разбор и повтор партии остаются точными.
+ */
+export function exitStep(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const { exitDirections } = rulesFor(state.mode);
+  const dirs: Array<{ dx: number; dy: number; until: number }> = [
+    { dx: -1, dy: 0, until: enemy.x + 1 },
+    { dx: 1, dy: 0, until: state.width - enemy.x },
+  ];
+  if (exitDirections === 4) {
+    dirs.push({ dx: 0, dy: -1, until: enemy.y + 1 });
+    dirs.push({ dx: 0, dy: 1, until: state.height - enemy.y });
+  }
+
+  let best: { target: Cell | 'escape'; until: number } | null = null;
+  for (const dir of dirs) {
+    const x = enemy.x + dir.dx;
+    const y = enemy.y + dir.dy;
+    const offBoard = x < 0 || x >= state.width || y < 0 || y >= state.height;
+    if (!offBoard && enemyAt(state, x, y, enemy.id)) continue;
+    const target: Cell | 'escape' = offBoard ? 'escape' : { x, y };
+    if (!best || dir.until < best.until) best = { target, until: dir.until };
+  }
+  return best ? best.target : null;
+}
+
 /** Цель хода фигуры с учётом способа движения режима. */
 export function enemyTarget(state: GameState, enemy: Enemy): Cell | 'escape' | null {
   const motion = rulesFor(state.mode).motion;
   if (motion === 'static') return null;
   if (motion === 'down') return downStep(state, enemy);
+  if (motion === 'exit') return exitStep(state, enemy);
   return chooseEnemyMove(state, enemy);
 }
 

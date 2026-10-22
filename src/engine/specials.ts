@@ -1,9 +1,9 @@
 import { anyEnemyAttacksPlayer, legalMoves } from './board';
-import { auditState, difficultyBand } from './audit';
-import { boardForMode, piecesFor, type ModeId } from './modes';
+import { auditState, difficultyBand, survivalTargetFor } from './audit';
+import { boardForMode, piecesFor, rulesFor, type ModeId } from './modes';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
-import { availablePieceTypes } from './level';
+import { availablePieceTypes, createCampaignLevel } from './level';
 
 /**
  * Генераторы режимов лаборатории: «Парковка» и «Гонки».
@@ -118,7 +118,12 @@ export function createRaceLevel(level: number, seed: number): GameState {
  * просмотренный вариант, а не крутимся бесконечно.
  */
 function createSpecialCandidate(mode: ModeId, level: number, seed: number): GameState {
-  return mode === 'jam' ? createJamLevel(level, seed) : createRaceLevel(level, seed);
+  const family = mode.startsWith('jam') ? 'jam' : mode.startsWith('race') ? 'race' : 'campaign';
+  const base =
+    family === 'jam' ? createJamLevel(level, seed) : family === 'race' ? createRaceLevel(level, seed) : createCampaignLevel(level, seed);
+  // Важно: режим на состоянии подменяется на вариант, иначе движок читает
+  // правила базового режима и сравнение вариантов показывает одно и то же.
+  return base.mode === mode ? base : { ...base, mode };
 }
 
 /**
@@ -128,16 +133,24 @@ function createSpecialCandidate(mode: ModeId, level: number, seed: number): Game
  */
 export function createSpecialLevel(mode: ModeId, level: number, seed: number, attempts = 12): GameState {
   const band = difficultyBand(level, mode);
-  let best: { state: GameState; delta: number } | null = null;
+  let best: { state: GameState; quality: number } | null = null;
   for (let shift = 0; shift < attempts; shift++) {
     const state = createSpecialCandidate(mode, level, seed + shift * 104729);
     if (state.enemies.length === 0 || legalMoves(state).length === 0 || anyEnemyAttacksPlayer(state)) continue;
-    const report = auditState(state, { maxDepth: state.height + 4, maxNodes: 60_000 });
-    if (!report.solvable) continue;
-    // Решаемых расстановок много, поэтому берём ту, что ближе к цели режима:
-    // иначе генератор отдаёт первый попавшийся проход, а не задачу нужной цены.
-    const delta = Math.abs(report.score - band.target);
-    if (!best || delta < best.delta) best = { state, delta };
+    const depth = rulesFor(mode).goal === 'survive' ? Math.max(state.height + 4, survivalTargetFor(level) + 4) : state.height + 4;
+    const report = auditState(state, { maxDepth: depth, maxNodes: 60_000 });
+    // В режиме на выживание полоса другая: считается не цена ошибки, а длина
+    // жизни, поэтому цель для него своя и берётся ближайший к ней вариант.
+    if (!report.solvable && !report.survival) continue;
+    if (report.survival) {
+      const target = survivalTargetFor(level);
+      const quality = -Math.abs(report.steps - target);
+      if (!best || quality > best.quality) best = { state, quality };
+      if (Math.abs(report.steps - target) <= 1) return { ...state, lastEvent: 'level' };
+      continue;
+    }
+    const quality = -Math.abs(report.score - band.target);
+    if (!best || quality > best.quality) best = { state, quality };
     if (report.score >= band.min && report.score <= band.max) return { ...state, lastEvent: 'level' };
   }
   if (best) return { ...best.state, lastEvent: 'level' };

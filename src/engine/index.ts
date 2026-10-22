@@ -9,3 +9,4 @@ export * from './endless';
 export * from './solver';
 export * from './balance';
 export * from './specials';
+export * from './replay';

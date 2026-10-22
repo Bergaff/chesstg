@@ -5,7 +5,16 @@ export type PieceType = 'pawn' | 'rook' | 'bishop' | 'knight' | 'queen';
 export type GameMode = 'campaign' | 'endless';
 
 /** Режимы лаборатории: «Парковка» и «Гонки» описаны в `modes.ts`. */
-export type LabMode = 'jam' | 'race';
+export type LabMode =
+  | 'jam'
+  | 'race'
+  // Варианты для прогонов в лаборатории: тот же движок, другие переключатели.
+  | 'jamExit2'
+  | 'jamExit4'
+  | 'raceDodge'
+  | 'campaignFreeDiag'
+  | 'campaignStrictDiag'
+  | 'jamStrictDiag';
 
 export type AnyMode = GameMode | LabMode;
 
