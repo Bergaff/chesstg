@@ -11,7 +11,7 @@ import type { WorkerEnv } from './types';
  * подпись вебхува ему уже доверяется.
  */
 
-export type AuthLinkStatus = 'pending' | 'confirmed' | 'rejected' | 'used' | 'expired';
+export type AuthLinkStatus = 'pending' | 'confirmed' | 'granted' | 'rejected' | 'used' | 'expired';
 
 export interface AuthLinkRow {
   code: string;
@@ -27,6 +27,13 @@ export interface AuthLinkRow {
 
 /** Время жизни кода: игрок успевает переключиться во вкладку Telegram. */
 export const AUTH_LINK_TTL_MS = 5 * 60 * 1000;
+/**
+ * Окно повторной выдачи токена. Telegram открывает ссылку системным браузером,
+ * и одна и та же привязка может дойти до двух вкладок (или до вкладки внутри
+ * Telegram и до обычной). Пусть код отдаёт токен дважды за две минуты: гостевой
+ * идентификатор при этом всё равно проверяется, а вечным код не становится.
+ */
+export const AUTH_LINK_GRACE_MS = 2 * 60 * 1000;
 export const AUTH_LINK_PREFIX = 'auth_';
 
 const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -104,6 +111,10 @@ export async function readAuthLink(env: WorkerEnv, code: string): Promise<AuthLi
     await run(env, "UPDATE auth_links SET status = 'expired', updated_at = ? WHERE code = ?", nowMs(), code);
     return { ...row, status: 'expired' };
   }
+  if (row.status === 'granted' && nowMs() - row.updated_at > AUTH_LINK_GRACE_MS) {
+    await run(env, "UPDATE auth_links SET status = 'used', updated_at = ? WHERE code = ?", nowMs(), code);
+    return { ...row, status: 'used' };
+  }
   return row;
 }
 
@@ -115,7 +126,7 @@ export async function confirmAuthLink(
 ): Promise<{ ok: boolean; reason?: string }> {
   const row = await readAuthLink(env, code);
   if (!row) return { ok: false, reason: 'unknown' };
-  if (row.status === 'confirmed' || row.status === 'used') return { ok: false, reason: 'already' };
+  if (row.status === 'confirmed' || row.status === 'granted' || row.status === 'used') return { ok: false, reason: 'already' };
   if (row.status !== 'pending') return { ok: false, reason: row.status };
   await run(
     env,
@@ -135,12 +146,13 @@ export async function rejectAuthLink(env: WorkerEnv, code: string): Promise<void
 }
 
 /**
- * Выдать код браузеру один раз. Подтверждённый код сразу помечается использованным,
- * поэтому украденная ссылка не даст второй токен.
+ * Обменять подтверждённый код на данные пользователя. После первой выдачи код
+ * переходит в `granted` и живёт ещё {@link AUTH_LINK_GRACE_MS}, дальше `used`.
  */
 export async function consumeAuthLink(env: WorkerEnv, code: string): Promise<AuthLinkRow | null> {
   const row = await readAuthLink(env, code);
-  if (!row || row.status !== 'confirmed' || !row.user_id) return null;
-  await run(env, "UPDATE auth_links SET status = 'used', updated_at = ? WHERE code = ? AND status = 'confirmed'", nowMs(), code);
+  if (!row || !row.user_id) return null;
+  if (row.status !== 'confirmed' && row.status !== 'granted') return null;
+  await run(env, "UPDATE auth_links SET status = 'granted', updated_at = ? WHERE code = ? AND status IN ('confirmed', 'granted')", nowMs(), code);
   return row;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, ApiError, setSessionToken } from '../lib/api';
+import { api, ApiError, clearSessionToken, isLinked, setLinkCode, setSessionToken, storedLinkCode, takeLinkFromUrl } from '../lib/api';
 import { cn } from '../lib/format';
 
 /**
@@ -10,8 +10,8 @@ import { cn } from '../lib/format';
  * сеанса. Никаких настроек домена в BotFather для этого не нужно.
  */
 
-const LINK_KEY = 'pva.link.v1';
 const POLL_MS = 2000;
+const MAX_WAIT_MS = 6 * 60 * 1000;
 
 interface LinkResponse {
   code: string;
@@ -31,26 +31,10 @@ interface TelegramLinkProps {
   onLinked?: (info: { merged: boolean }) => void;
 }
 
-function readStoredCode(): string {
-  try {
-    const value = localStorage.getItem(LINK_KEY);
-    return value && /^[a-z2-9]{16}$/.test(value) ? value : '';
-  } catch {
-    return '';
-  }
-}
 
-function storeCode(code: string): void {
-  try {
-    if (code) localStorage.setItem(LINK_KEY, code);
-    else localStorage.removeItem(LINK_KEY);
-  } catch {
-    /* приватный режим: просто не восстановим запрос после перезагрузки */
-  }
-}
 
 export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactNode {
-  const [code, setCode] = useState(readStoredCode);
+  const [code, setCode] = useState(() => takeLinkFromUrl() || storedLinkCode());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [hint, setHint] = useState('');
@@ -63,7 +47,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
         const response = await api<StatusResponse>(`/api/auth/link?code=${encodeURIComponent(activeCode)}`);
         if (response.status === 'linked' && response.token) {
           setSessionToken(response.token);
-          storeCode('');
+          setLinkCode('');
           setCode('');
           setError('');
           setHint('');
@@ -74,7 +58,15 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
           setHint('Ждём подтверждения в чате бота');
           return;
         }
-        storeCode('');
+        if (isLinked()) {
+          // Токен уже в общем хранилище: вторая вкладка забрала его раньше.
+          setLinkCode('');
+          setCode('');
+          setHint('');
+          onLinked?.({ merged: false });
+          return;
+        }
+        setLinkCode('');
         setCode('');
         setHint('');
         setError(
@@ -87,7 +79,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === 'auth_not_ready') {
           setError('На сервере ещё нет таблицы привязки, попроси разработчика применить миграцию.');
-          storeCode('');
+          setLinkCode('');
           setCode('');
           return;
         }
@@ -103,6 +95,12 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
   useEffect(() => {
     if (!code) return;
     void check(code);
+    const deadline = window.setTimeout(() => {
+      setHint('');
+      setError('Подтверждение не дошло. Открой чат бота и нажми «Да, привязать», потом повтори.');
+      setLinkCode('');
+      setCode('');
+    }, MAX_WAIT_MS);
     const timer = window.setInterval(() => {
       void check(code);
     }, POLL_MS);
@@ -113,6 +111,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
     window.addEventListener('focus', onFocus);
     return () => {
       window.clearInterval(timer);
+      window.clearTimeout(deadline);
       document.removeEventListener('visibilitychange', onFocus);
       window.removeEventListener('focus', onFocus);
     };
@@ -124,7 +123,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
     setError('');
     try {
       const response = await api<LinkResponse>('/api/auth/link', { method: 'POST' });
-      storeCode(response.code);
+      setLinkCode(response.code);
       setCode(response.code);
       setHint(`Открылся чат ${response.botUsername}, нажми «Да, привязать»`);
       const opened = window.open(response.link, '_blank', 'noopener');
@@ -139,7 +138,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
   }
 
   function cancel(): void {
-    storeCode('');
+    setLinkCode('');
     setCode('');
     setHint('');
     setError('');

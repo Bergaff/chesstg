@@ -152,15 +152,40 @@ export async function sendPlain(env: WorkerEnv, chatId: number, text: string): P
   await callTelegram(env, 'sendMessage', { chat_id: chatId, text });
 }
 
-export async function editAuthMessage(env: WorkerEnv, chatId: number, messageId: number, text: string): Promise<void> {
+export async function editAuthMessage(
+  env: WorkerEnv,
+  chatId: number,
+  messageId: number,
+  text: string,
+  returnUrl?: string,
+): Promise<void> {
   await callTelegram(env, 'editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' });
-  // Клавиатуру снимаем отдельно: иначе повторные нажатия остались бы висеть на сообщении.
-  await callTelegram(env, 'editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+  // Кнопку оставляем только если есть куда вернуться: без неё повторные нажатия
+  // висели бы на сообщении.
+  await callTelegram(env, 'editMessageReplyMarkup', {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: returnUrl ? [[{ text: 'Открыть игру', url: returnUrl }]] : [] },
+  });
 }
 
-export async function answerCallbackQuery(env: WorkerEnv, queryId: string, text?: string, alert = false): Promise<void> {
+export async function answerCallbackQuery(
+  env: WorkerEnv,
+  queryId: string,
+  options: { text?: string; alert?: boolean; url?: string } = {},
+): Promise<void> {
   await callTelegram(env, 'answerCallbackQuery', {
     callback_query_id: queryId,
-    ...(text ? { text: text.slice(0, 190), show_alert: alert } : {}),
+    ...(options.text ? { text: options.text.slice(0, 190), show_alert: options.alert ?? false } : {}),
+    // Поле url заставляет клиент открыть ссылку сразу после нажатия: игрок
+    // возвращается на сайт сам, без ручного переключения вкладок.
+    ...(options.url ? { url: options.url } : {}),
   });
+}
+
+/** Адрес сайта с кодом привязки: по нему страница забирает токен сеанса. */
+export function authReturnUrl(env: WorkerEnv, code: string): string {
+  const base = (env.WEBAPP_URL?.trim() ?? '').replace(/\/+$/, '');
+  if (!base.startsWith('https://')) return '';
+  return `${base}/?link=${encodeURIComponent(code)}`;
 }

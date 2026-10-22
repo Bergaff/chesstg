@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { GameMode } from './engine';
 import { AppContext, type AppContextValue, type ShopTab } from './context/AppContext';
-import { api, apiWithRetry, ApiError } from './lib/api';
+import { api, apiWithRetry, ApiError, isLinked, SESSION_KEY, takeLinkFromUrl } from './lib/api';
 import { initTelegram, getStartParam, hapticNotify } from './lib/telegram';
 import { showAdsgram } from './lib/ads';
 import type { SessionResponse } from './lib/types';
@@ -50,7 +50,12 @@ export default function App(): ReactNode {
 
   useEffect(() => {
     initTelegram();
+    // Telegram может вернуть на сайт ссылкой вида ?link=<код>. Забираем код до
+    // загрузки профиля: компонент меню подхватит его из хранилища и дождётся
+    // подтверждения.
+    takeLinkFromUrl();
   }, []);
+
 
   const toast = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = ++toastId.current;
@@ -85,6 +90,22 @@ export default function App(): ReactNode {
       /* офлайн-режим: продолжаем с последними данными */
     }
   }, []);
+
+  // Привязку могло завершить другое окно (браузер внутри Telegram). Запись в
+  // общем localStorage видна здесь, поэтому просто перечитываем сессию.
+  useEffect(() => {
+    let linkedAtBoot = isLinked();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== SESSION_KEY) return;
+      const linked = isLinked();
+      if (linked === linkedAtBoot) return;
+      linkedAtBoot = linked;
+      void refresh();
+      toast(linked ? 'Прогресс привязан к Telegram' : 'Сеанс закрыт, играешь как гость');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [refresh, toast]);
 
   const showAd = useCallback(
     async (label: string): Promise<boolean> => {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerEnv } from './types';
 import {
+  AUTH_LINK_GRACE_MS,
   AUTH_LINK_TTL_MS,
   authCallbackData,
   authStartParam,
@@ -60,6 +61,9 @@ function fakeDb() {
         } else if (sql.includes("SET status = 'rejected'")) {
           const row = rows.get(String(values[values.length - 1]));
           if (row && row.status === 'pending') row.status = 'rejected';
+        } else if (sql.includes("SET status = 'granted'")) {
+          const row = rows.get(String(values[values.length - 1]));
+          if (row && (row.status === 'confirmed' || row.status === 'granted')) row.status = 'granted';
         } else if (sql.includes("SET status = 'used'")) {
           const row = rows.get(String(values[values.length - 1]));
           if (row && row.status === 'confirmed') row.status = 'used';
@@ -153,7 +157,7 @@ describe('код привязки сайта к Telegram', () => {
     expect(await confirmAuthLink(env, code, { id: 1, firstName: 'Игрок' })).toMatchObject({ ok: false, reason: 'rejected' });
   });
 
-  it('токен выдаётся один раз', async () => {
+  it('токен доступен обеим вкладкам, потом гасится', async () => {
     const { env } = fakeDb();
     const { code } = await createAuthLink(env, 'e'.repeat(32));
     expect(await consumeAuthLink(env, code)).toBeNull();
@@ -161,6 +165,11 @@ describe('код привязки сайта к Telegram', () => {
     const granted = await consumeAuthLink(env, code);
     expect(granted?.guest_id).toBe('e'.repeat(32));
     expect(granted?.user_id).toBe('tg:7');
+    // Telegram открывает сайт в своём окне: вторая вкладка того же браузера
+    // тоже должна успеть забрать токен, иначе игрок увидит пустой прогресс.
+    expect((await consumeAuthLink(env, code))?.user_id).toBe('tg:7');
+    expect((await readAuthLink(env, code))?.status).toBe('granted');
+    clock += AUTH_LINK_GRACE_MS + 1;
     expect(await consumeAuthLink(env, code)).toBeNull();
     expect((await readAuthLink(env, code))?.status).toBe('used');
   });

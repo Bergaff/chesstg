@@ -58,6 +58,7 @@ import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment 
 import {
   answerCallbackQuery,
   answerPreCheckout,
+  authReturnUrl,
   editAuthMessage,
   sendAuthPrompt,
   sendPlain,
@@ -434,7 +435,7 @@ app.get('/api/auth/link', async (c) => {
     throw error;
   }
   if (!row) return c.json({ status: 'unknown' });
-  if (row.status === 'pending' || row.status === 'rejected' || row.status === 'expired' || row.status === 'used') {
+  if (row.status !== 'confirmed' && row.status !== 'granted') {
     return c.json({ status: row.status });
   }
 
@@ -1086,10 +1087,11 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
     if (queryId) await answerCallbackQuery(env, queryId);
     return;
   }
+  const returnUrl = authReturnUrl(env, parsed.code);
 
   if (parsed.action === 'no') {
     await rejectAuthLink(env, parsed.code);
-    if (queryId) await answerCallbackQuery(env, queryId, 'Отменили');
+    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Отменили' });
     if (chatId && messageId) await editAuthMessage(env, chatId, messageId, 'Привязка отменена. Ничего не изменилось.');
     return;
   }
@@ -1098,19 +1100,24 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
   const firstName = typeof from?.first_name === 'string' ? from.first_name : 'Игрок';
   const username = typeof from?.username === 'string' ? from.username : undefined;
   if (!Number.isInteger(tgId) || tgId <= 0) {
-    if (queryId) await answerCallbackQuery(env, queryId, 'Telegram не передал профиль, попробуй ещё раз', true);
+    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Telegram не передал профиль, попробуй ещё раз', alert: true });
     return;
   }
 
   const result = await confirmAuthLink(env, parsed.code, { id: tgId, firstName, username });
   if (result.ok) {
-    if (queryId) await answerCallbackQuery(env, queryId, 'Готово, вернись во вкладку с игрой');
+    // url в ответе на callback заставляет клиента Telegram открыть сайт:
+    // игроку не нужно искать вкладку с игрой руками.
+    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Готово, возвращаем в игру', url: returnUrl || undefined });
     if (chatId && messageId) {
       await editAuthMessage(
         env,
         chatId,
         messageId,
-        'Привязал. Открой вкладку с игрой в браузере: прогресс должен подтянуться сам. Дальше он хранится в этом аккаунте Telegram.',
+        returnUrl
+          ? 'Привязал. Открыл игру, если вкладка не появилась нажми кнопку ниже. Прогресс теперь хранится в этом аккаунте Telegram.'
+          : 'Привязал. Открой вкладку с игрой в браузере: прогресс подтянется сам. Дальше он хранится в этом аккаунте Telegram.',
+        returnUrl || undefined,
       );
     }
     return;
@@ -1124,7 +1131,7 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
     already: 'Запрос уже подтверждён. Открой вкладку с игрой.',
   };
   const text = reasonText[result.reason ?? 'unknown'] ?? 'Не получилось подтвердить запрос.';
-  if (queryId) await answerCallbackQuery(env, queryId, text, true);
+  if (queryId) await answerCallbackQuery(env, queryId, { text, alert: true });
 }
 
 async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Promise<void> {

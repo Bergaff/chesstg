@@ -1,5 +1,7 @@
 const GUEST_KEY = 'pva.guest.v1';
-const SESSION_KEY = 'pva.session.v1';
+export const SESSION_KEY = 'pva.session.v1';
+const LINK_KEY = 'pva.link.v1';
+const LINK_RE = /^[a-z2-9]{16}$/;
 
 export class ApiError extends Error {
   status: number;
@@ -67,6 +69,43 @@ export function clearSessionToken(): void {
 
 export function isLinked(): boolean {
   return Boolean(sessionToken());
+}
+
+/** Код привязки из ссылки, по которой Telegram вернул игрока на сайт. */
+export function storedLinkCode(): string {
+  try {
+    const value = localStorage.getItem(LINK_KEY);
+    return value && LINK_RE.test(value) ? value : '';
+  } catch {
+    return '';
+  }
+}
+
+export function setLinkCode(code: string): void {
+  try {
+    if (code) localStorage.setItem(LINK_KEY, code);
+    else localStorage.removeItem(LINK_KEY);
+  } catch {
+    /* приватный режим */
+  }
+}
+
+/**
+ * Забирает `?link=<код>` из адреса. Строку убираем сразу, чтобы код не остался
+ * в истории и не был отправлен повторно при перезагрузке.
+ */
+export function takeLinkFromUrl(): string {
+  try {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('link') ?? '';
+    if (!LINK_RE.test(code)) return '';
+    url.searchParams.delete('link');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    setLinkCode(code);
+    return code;
+  } catch {
+    return '';
+  }
 }
 
 export function authHeaders(): Record<string, string> {
