@@ -13,6 +13,15 @@ function validateDx(dx: unknown): asserts dx is MoveDx {
   if (dx !== -1 && dx !== 0 && dx !== 1) throw new RuleError('Некорректное направление хода');
 }
 
+/** Позиция без счётчиков хода: нужна, чтобы понять, сдвинулось ли хоть что-то. */
+function boardSignature(state: GameState): string {
+  const enemies = state.enemies
+    .map((enemy) => `${enemy.type[0]}${enemy.x},${enemy.y}`)
+    .sort()
+    .join(';');
+  return `${state.player.x},${state.player.y}|${enemies}`;
+}
+
 function enemyPhase(state: GameState): void {
   const rules = rulesFor(state.mode);
   if (state.freeze > 0) {
@@ -139,7 +148,17 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
     return state;
   }
 
+  // Страховка от вечного ожидания: если игрок пропустил ход, потому что ходить
+  // некуда, и после хода фигур не сдвинулась ни одна клетка, партия зашла в
+  // тупик. Заморозка и щит считаются осмысленным ожиданием: там позиция
+  // обязана измениться на следующем шаге, поэтому не трогаем.
+  const waiting = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && legalMoves(state).length === 0;
+  const before = waiting ? boardSignature(state) : '';
   enemyPhase(state);
+  if (waiting && state.status === 'playing' && boardSignature(state) === before) {
+    state.status = 'lost';
+    state.lastEvent = 'stuck';
+  }
   return state;
 }
 
