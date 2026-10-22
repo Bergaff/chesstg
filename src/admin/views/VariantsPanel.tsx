@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   MODE_ORDER,
   analyzeVariant,
@@ -9,6 +9,7 @@ import {
   type VariantReport,
 } from '../../engine';
 import { Panel, StatusLine, Table, formatPercent } from '../ui';
+import { runVariantSuite } from '../variantsClient';
 
 /**
  * Сравнение вариантов правил одним прогоном.
@@ -21,7 +22,9 @@ import { Panel, StatusLine, Table, formatPercent } from '../ui';
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
-const SAMPLE_OPTIONS = [8, 16, 32, 64];
+const SAMPLE_PRESETS = [16, 64, 100, 250, 1000];
+const MIN_SAMPLES = 4;
+const MAX_SAMPLES = 2000;
 const DEFAULT_PICKS: ModeId[] = ['jam', 'jamExit2', 'jamExit4', 'race', 'raceDodge', 'campaign', 'campaignStrictDiag'];
 
 interface Group {
@@ -84,11 +87,14 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(0);
+  const [sample, setSample] = useState<{ mode: ModeId; done: number; total: number } | null>(null);
   const [reports, setReports] = useState<VariantReport[]>([]);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [stopped, setStopped] = useState(false);
   const busyRef = useRef(false);
-  const cancelRef = useRef(false);
+  const stopRef = useRef(false);
+  const suiteRef = useRef<{ cancel: () => void } | null>(null);
 
   const ordered = useMemo(
     () => picks.slice().sort((a, b) => MODE_ORDER.indexOf(a) - MODE_ORDER.indexOf(b)),
@@ -108,32 +114,45 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     });
   };
 
-  const run = useCallback(async () => {
+  const run = () => {
     if (busyRef.current || ordered.length === 0) return;
     busyRef.current = true;
-    cancelRef.current = false;
+    stopRef.current = false;
     setRunning(true);
     setError('');
     setCopied('');
     setDone(0);
+    setStopped(false);
+    setSample({ done: 0, total: samples, mode: ordered[0] });
     setReports([]);
-    const collected: VariantReport[] = [];
-    try {
-      for (const mode of ordered) {
-        // Между вариантами отдаём поток браузеру, иначе вкладка выглядит зависшей.
-        await new Promise((resolve) => window.setTimeout(resolve, 0));
-        if (cancelRef.current) break;
-        collected.push(analyzeVariant({ mode, level, samples, seed }));
-        setReports([...collected]);
-        setDone(collected.length);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Прогон не удался');
-    } finally {
-      setRunning(false);
-      busyRef.current = false;
-    }
-  }, [level, ordered, samples, seed]);
+    const suite = runVariantSuite(
+      { modes: ordered, level, samples, seed },
+      {
+        onSample: (mode, sampleDone, sampleTotal) => setSample({ done: sampleDone, total: sampleTotal, mode }),
+        onReport: (item) => {
+          setReports((current) => [...current, item]);
+          setDone((current) => current + 1);
+        },
+      },
+    );
+    suiteRef.current = suite;
+    suite.done
+      .catch((error: unknown) => {
+        if (!stopRef.current) setError(error instanceof Error ? error.message : 'Прогон не удался');
+      })
+      .finally(() => {
+        setRunning(false);
+        busyRef.current = false;
+        suiteRef.current = null;
+        setSample(null);
+      });
+  };
+
+  const stop = () => {
+    stopRef.current = true;
+    setStopped(true);
+    suiteRef.current?.cancel();
+  };
 
   const report = useMemo(() => buildText(reports, { level, samples, seed }), [reports, level, samples, seed]);
 
@@ -145,7 +164,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   return (
     <Panel
       title="Прогон сравнений"
-      note={`Уровень ${level}: доска и число фигур берутся из его полос, отбор расстановок по полосе каждого режима`}
+      note={`Уровень ${level}: доска и число фигур из его полос, отбор по полосе режима. 1000 досок на вариант: лёгкие режимы считаются секунды, «Гонки на уклонение» и строгая диагональ до полуминуты, на 24 уровне дольше`}
     >
       <div className="adm-variant-groups">
         {GROUPS.map((group) => (
@@ -174,13 +193,16 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       <div className="adm-row-actions">
         <label className="adm-field is-inline">
           <span className="adm-label">Досок на вариант</span>
-          <select value={samples} onChange={(event) => setSamples(Number(event.target.value))}>
-            {SAMPLE_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
+          <input
+            type="number"
+            min={MIN_SAMPLES}
+            max={MAX_SAMPLES}
+            step={4}
+            value={samples}
+            onChange={(event) =>
+              setSamples(Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, Number(event.target.value) || MIN_SAMPLES)))
+            }
+          />
         </label>
         <label className="adm-field is-inline">
           <span className="adm-label">Зерно</span>
@@ -194,17 +216,31 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         </label>
       </div>
 
+      <div className="adm-checks">
+        {SAMPLE_PRESETS.map((value) => (
+          <button
+            key={value}
+            type="button"
+            className={`adm-chip${samples === value ? ' is-active' : ''}`}
+            onClick={() => setSamples(value)}
+            disabled={running}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+
       <div className="adm-row-actions">
         <button
           type="button"
           className="btn btn-primary"
-          onClick={() => void run()}
+          onClick={run}
           disabled={running || ordered.length === 0}
         >
-          {running ? `Считаем ${done} из ${ordered.length}` : `Сравнить (${ordered.length})`}
+          {running ? `Вариант ${done + 1} из ${ordered.length}` : `Сравнить (${ordered.length})`}
         </button>
         {running && (
-          <button type="button" className="btn btn-outline" onClick={() => (cancelRef.current = true)}>
+          <button type="button" className="btn btn-outline" onClick={stop}>
             Остановить
           </button>
         )}
@@ -225,6 +261,12 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
           </button>
         )}
       </div>
+
+      {running && sample && (
+        <p className="adm-progress" aria-live="polite">
+          {modeDef(sample.mode).name}: {sample.done} из {sample.total}
+        </p>
+      )}
 
       {error && <StatusLine kind="error">{error}</StatusLine>}
       {copied && <StatusLine kind="ok">{copied}</StatusLine>}
@@ -275,8 +317,8 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         <>
           <div className="adm-row-actions">
             <span className="adm-muted">
-              Готово: {reports.length} из {ordered.length} вариантов, {samples} досок каждый
-              {running ? ', считаем дальше' : ''}
+              {stopped ? 'Остановлено на' : 'Готово:'} {reports.length} из {ordered.length} вариантов, {samples} досок
+              каждый{running ? ', считаем дальше' : ''}
             </span>
           </div>
           <pre className="adm-code adm-copyable">{report}</pre>

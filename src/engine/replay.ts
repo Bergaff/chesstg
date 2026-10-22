@@ -92,6 +92,8 @@ export interface AnalyzeOptions {
   seed?: number;
   /** Ограничение глубины разбора, по умолчанию высота поля + 4. */
   maxDepth?: number;
+  /** Прогресс прогона: сколько досок разобрано из `samples`. */
+  onProgress?: (done: number, total: number) => void;
 }
 
 /**
@@ -100,7 +102,7 @@ export interface AnalyzeOptions {
  */
 export function analyzeVariant(options: AnalyzeOptions): VariantReport {
   const { mode, level } = options;
-  const samples = Math.max(4, Math.min(200, options.samples ?? 20));
+  const samples = Math.max(4, Math.min(2_000, options.samples ?? 20));
   const seed = options.seed ?? 20261022;
   const band = difficultyBand(level, mode);
   const startedAt = Date.now();
@@ -148,6 +150,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
     paths.push(report.paths ?? 0);
     captures.push(report.captures ?? 0);
     forced.push(report.steps > 0 ? report.forced / report.steps : 0);
+    options.onProgress?.(index + 1, samples);
     if (report.survival) {
       solvable += 1;
       survivalSteps.push(report.steps);
