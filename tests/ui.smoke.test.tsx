@@ -2,7 +2,7 @@
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createCampaignLevel, legalMoves, type GameState } from '../src/engine';
+import { createCampaignLevel, createJamLevel, legalMoves, type GameState } from '../src/engine';
 import type { AppConfig, FinishResult, Profile, SessionResponse } from '../src/lib/types';
 
 const SEED = 20261019;
@@ -28,10 +28,19 @@ const profile: Profile = {
   skins: ['classic'],
   skin: 'classic',
   inventory: { hint: 0, freeze: 0, undo: 0 },
+  modes: {
+    campaign: { level: 1, maxLevel: 1, unlocked: true, unlockAtLevel: 1 },
+    jam: { level: 1, maxLevel: 1, unlocked: false, unlockAtLevel: 3 },
+    race: { level: 1, maxLevel: 1, unlocked: false, unlockAtLevel: 5 },
+    endless: { level: 0, maxLevel: 0, unlocked: false, unlockAtLevel: 11 },
+  },
   inviteCode: 'abc12345',
   createdAt: Date.now(),
   prices: { hint: 20, freeze: 30, undo: 15 },
 };
+
+/** Исходный прогресс: тесты меняют profile.modes, а потом возвращают как было. */
+const baseProfile = structuredClone(profile);
 
 const config: AppConfig = {
   botUsername: 'pawn_vs_all_bot',
@@ -99,6 +108,7 @@ let calls: Array<{ url: string; body: unknown }> = [];
 beforeEach(() => {
   calls = [];
   localStorage.clear();
+  Object.assign(profile, structuredClone(baseProfile));
   initial = createCampaignLevel(1, SEED);
   finishOutcome = { ...finishOutcome, outcome: 'won', capturedBy: null, lives: 5, coinsEarned: 10 };
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -126,7 +136,11 @@ beforeEach(() => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
       calls.push({ url, body });
       if (url === '/api/session') return jsonResponse(session());
-      if (url === '/api/run/start') return jsonResponse({ resumed: false, run: { ...run, initial } });
+      if (url === '/api/run/start') {
+        // Сервер сам решает уровень, а режим только эхо запроса: тест сверяет id режима.
+        const requested = (body as { mode?: string } | undefined)?.mode ?? 'campaign';
+        return jsonResponse({ resumed: false, run: { ...run, mode: requested, initial } });
+      }
       if (url.endsWith('/save')) return jsonResponse({ ok: true });
       if (url.includes('/finish')) {
         return jsonResponse({
@@ -222,6 +236,40 @@ describe('UI smoke', () => {
     // Сердечки ведут сразу на вкладку Stars — там продаются жизни.
     fireEvent.click(screen.getByRole('button', { name: 'Жизни: 5 из 5' }));
     expect(await screen.findByText('Поддержать игру')).toBeTruthy();
+  });
+
+  it('меню показывает «Парковку» и «Гонки» с условиями открытия', async () => {
+    await boot();
+    expect(screen.getByText('Парковка')).toBeTruthy();
+    expect(screen.getByText('Гонки')).toBeTruthy();
+    expect(screen.getByText(/Откроется на 3 уровне кампании/)).toBeTruthy();
+    expect(screen.getByText(/Откроется на 5 уровне кампании/)).toBeTruthy();
+    expect(screen.getByText(/Уровень в «Парковке»/)).toBeTruthy();
+  });
+
+  it('закрытый режим не запускает забег', async () => {
+    await boot();
+    fireEvent.click(screen.getByText('Гонки').closest('button')!);
+    expect(await screen.findByText(/режим откроется на 5 уровне кампании/)).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/run/start')).toBe(false);
+  });
+
+  it('«Парковка» стартует своим режимом и показывает квоту взятий', async () => {
+    profile.maxLevel = 6;
+    profile.level = 4;
+    profile.modes.campaign = { level: 4, maxLevel: 6, unlocked: true, unlockAtLevel: 1 };
+    profile.modes.jam = { level: 4, maxLevel: 5, unlocked: true, unlockAtLevel: 3 };
+    initial = createJamLevel(4, SEED);
+    await boot();
+
+    fireEvent.click(screen.getByText('Парковка').closest('button')!);
+    expect(await screen.findByText('Начать')).toBeTruthy();
+    const start = calls.find((call) => call.url === '/api/run/start');
+    expect((start?.body as { mode?: string } | undefined)?.mode).toBe('jam');
+    expect(screen.getAllByText('Парковка').length).toBeGreaterThan(0);
+    // Квота взятий видна в статусной строке: без неё уровень не понять.
+    expect(screen.getByText(/взятий 3/)).toBeTruthy();
+    expect(screen.getByText(/дорога прочищается взятиями/i)).toBeTruthy();
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useApp } from '../context/AppContext';
+import { modeDef } from '../engine';
 import { api, ApiError } from '../lib/api';
 import { appBaseUrl, cn, formatNumber } from '../lib/format';
 import { shareContent } from '../lib/telegram';
@@ -9,7 +10,7 @@ interface RecordsScreenProps {
   onBack: () => void;
 }
 
-type Metric = 'endless' | 'campaign';
+type Metric = 'endless' | 'campaign' | 'jam' | 'race';
 type Scope = 'global' | 'friends';
 
 export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
@@ -51,13 +52,21 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
   async function shareRecord() {
     const bot = config.botUsername;
+    const levelMetric = metric === 'campaign' || metric === 'jam' || metric === 'race';
     const payload =
-      metric === 'endless' ? `ch_0_${profile.endlessBest}` : `ch_${profile.maxLevel}_${profile.maxLevel}`;
+      metric === 'endless'
+        ? `ch_0_${profile.endlessBest}`
+        : metric === 'campaign'
+          ? `ch_${profile.maxLevel}_${profile.maxLevel}`
+          : 'play';
     const url = bot ? `https://t.me/${bot}?startapp=${payload}` : appBaseUrl(config.webappUrl);
+    const level = metric === 'campaign' ? profile.maxLevel : profile.modes?.[metric]?.level ?? 1;
     const text =
       metric === 'endless'
         ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
-        : `Я дошёл до ${profile.maxLevel} уровня в «Пешке против всех». Сможешь лучше?`;
+        : metric === 'campaign'
+          ? `Я дошёл до ${profile.maxLevel} уровня в «Пешке против всех». Сможешь лучше?`
+          : `В режиме «${modeDef(metric).name}» я на ${level} уровне ${levelMetric ? ', дойдите и вы' : ''}.`;
     const status = await shareContent(text, url);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
     if (status === 'failed') toast('Не удалось поделиться', 'error');
@@ -66,7 +75,11 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
   const rows = data?.rows ?? [];
   const myRank = data?.myRank ?? 0;
   const valueFor = (row: LeaderboardRow) =>
-    metric === 'endless' ? `${formatNumber(row.endlessBest)} клеток` : `уровень ${row.maxLevel}`;
+    metric === 'endless'
+      ? `${formatNumber(row.endlessBest)} клеток`
+      : metric === 'campaign'
+        ? `уровень ${row.maxLevel}`
+        : `уровень ${row.modeLevel}`;
 
   return (
     <div className="screen records-screen">
@@ -102,6 +115,12 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
         </button>
         <button type="button" role="tab" aria-selected={metric === 'campaign'} className={cn('tab', metric === 'campaign' && 'active')} onClick={() => setMetric('campaign')}>
           Кампания
+        </button>
+        <button type="button" role="tab" aria-selected={metric === 'jam'} className={cn('tab', metric === 'jam' && 'active')} onClick={() => setMetric('jam')}>
+          Парковка
+        </button>
+        <button type="button" role="tab" aria-selected={metric === 'race'} className={cn('tab', metric === 'race' && 'active')} onClick={() => setMetric('race')}>
+          Гонки
         </button>
       </div>
 

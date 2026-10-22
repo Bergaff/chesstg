@@ -1,7 +1,63 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AdminError, fetchUser, fetchUsers } from '../api';
-import type { UserDetailResponse, UsersResponse } from '../types';
-import { Panel, StatusLine, Table, formatDateTime, formatNumber } from '../ui';
+import type { UserDetailResponse, UserRunRow, UsersResponse } from '../types';
+import { Panel, StatusLine, Table, formatDateTime, formatNumber, modeTitle } from '../ui';
+
+const BONUS_TITLES: Record<string, string> = { hint: 'Подсказка', freeze: 'Заморозка', undo: 'Отмена' };
+const SOURCE_TITLES: Record<string, string> = {
+  purchase: 'покупка',
+  ad: 'реклама',
+  reward: 'награда',
+  level: 'уровень',
+  welcome: 'приветствие',
+};
+const AD_TITLES: Record<string, string> = { life: 'жизнь', coins: 'монеты', reward: 'награда' };
+const PIECE_TITLES: Record<string, string> = {
+  pawn: 'пешка',
+  rook: 'ладья',
+  bishop: 'слон',
+  knight: 'конь',
+  queen: 'ферзь',
+};
+
+function bonusTitle(kind: string): string {
+  return BONUS_TITLES[kind] ?? kind;
+}
+
+function sourceTitle(source: string): string {
+  return SOURCE_TITLES[source] ?? source;
+}
+
+function adTitle(kind: string): string {
+  return AD_TITLES[kind] ?? kind;
+}
+
+function pieceTitle(type: string): string {
+  return PIECE_TITLES[type] ?? type;
+}
+
+/** Итог забега одним словом: «выигран», «пойман (ферзь)», «тупик поля», «в процессе». */
+function runOutcome(row: UserRunRow): ReactNode {
+  const status = String(row.status);
+  if (status === 'active') return <span className="adm-muted">в процессе</span>;
+  if (status === 'won') return 'выигран';
+  if (status === 'quit') return 'свернут';
+  if (row.stuck) return 'тупик поля';
+  const captured = row.capturedBy ? String(row.capturedBy) : '';
+  return captured ? `пойман (${pieceTitle(captured)})` : 'проигран';
+}
+
+/** Уровень режима: «текущий из лучшего», при отсутствии колонки «нет данных». */
+function levelCell(current: number | null, best: number | null): ReactNode {
+  if (current === null || best === null) return <small className="adm-muted">нет данных</small>;
+  if (current === best) return <span>{current}</span>;
+  return (
+    <span>
+      {current}
+      <small className="adm-muted"> из {best}</small>
+    </span>
+  );
+}
 
 const SORTS = [
   { id: 'recent', title: 'По активности' },
@@ -105,8 +161,25 @@ export function UsersView({ onUnauthorized }: { onUnauthorized: (message: string
 
         {error && <StatusLine kind="error">{error}</StatusLine>}
 
+        {data?.degraded && (
+          <StatusLine kind="info">
+            Прогресс «Парковки» и «Гонок» не виден: в базе нет колонки mode_levels. Примените
+            миграцию 0004_mode_levels в SQL консоли D1.
+          </StatusLine>
+        )}
+
         <Table
-          head={['Игрок', 'Уровень', 'Рекорд', 'Монеты', 'Забеги', 'Покупки', 'Активность']}
+          head={[
+            'Игрок',
+            'Кампания',
+            'Парковка',
+            'Гонки',
+            'Рекорд',
+            'Монеты',
+            'Забеги',
+            'Покупки',
+            'Активность',
+          ]}
           empty="Никого не нашли"
         >
           {(data?.rows ?? []).map((row) => (
@@ -120,6 +193,8 @@ export function UsersView({ onUnauthorized }: { onUnauthorized: (message: string
                 </span>
               </td>
               <td>{row.maxLevel}</td>
+              <td>{levelCell(row.jamLevel, row.jamMax)}</td>
+              <td>{levelCell(row.raceLevel, row.raceMax)}</td>
               <td>{row.best}</td>
               <td>{formatNumber(row.coins)}</td>
               <td>{row.runs}</td>
@@ -193,16 +268,102 @@ export function UsersView({ onUnauthorized }: { onUnauthorized: (message: string
             </div>
           </div>
 
+          {selected.progress && (
+            <>
+              <h3 className="adm-subtitle">Прогресс по режимам</h3>
+              <div className="adm-metrics is-compact">
+                {(['campaign', 'jam', 'race', 'endless'] as const).map((mode) => {
+                  const entry = selected.progress?.[mode];
+                  if (!entry) return null;
+                  return (
+                    <div key={mode} className="adm-metric">
+                      <span className="adm-metric-label">{modeTitle(mode)}</span>
+                      <span className="adm-metric-value">
+                        {mode === 'endless'
+                          ? String(selected.user.endless_best ?? 0)
+                          : `${entry.level} из ${entry.maxLevel}`}
+                      </span>
+                      <small className="adm-muted">
+                        {entry.unlocked ? 'открыт' : `откроется на ${entry.unlockAtLevel} уровне кампании`}
+                      </small>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
           <div className="adm-grid">
             <div>
-              <h3 className="adm-subtitle">Забеги</h3>
-              <Table head={['Режим', 'Уровень', 'Ходы', 'Итог', 'Обновлён']} empty="Забегов нет">
+              <h3 className="adm-subtitle">Какие уровни проходил</h3>
+              <Table
+                head={['Режим', 'Уровень', 'Попыток', 'Выиграно', 'Проиграно', 'Брошено', 'Ходов', 'Первый', 'Последний']}
+                empty="Уровни не запускались"
+              >
+                {(selected.history ?? []).map((row) => (
+                  <tr key={`${row.mode}-${row.level}`}>
+                    <td>{modeTitle(row.mode)}</td>
+                    <td>{row.level}</td>
+                    <td>{row.played}</td>
+                    <td>{row.won}</td>
+                    <td>{row.lost}</td>
+                    <td>{row.quit}</td>
+                    <td>{row.avgMoves.toFixed(1)}</td>
+                    <td>{formatDateTime(row.firstAt)}</td>
+                    <td>{formatDateTime(row.lastAt)}</td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+
+            <div>
+              <h3 className="adm-subtitle">Бонусы и реклама</h3>
+              <Table head={['Бонус', 'Откуда', 'Раз', 'Последний раз']} empty="Бонусов нет">
+                {(selected.grants ?? []).map((row, index) => (
+                  <tr key={`${row.kind}-${row.source}-${index}`}>
+                    <td>{bonusTitle(row.kind)}</td>
+                    <td>{sourceTitle(row.source)}</td>
+                    <td>{row.n}</td>
+                    <td>{formatDateTime(row.lastAt)}</td>
+                  </tr>
+                ))}
+              </Table>
+              <Table head={['Реклама', 'Просмотров']} empty="Реклама не показывалась">
+                {(selected.ads ?? []).map((row) => (
+                  <tr key={row.kind}>
+                    <td>{adTitle(row.kind)}</td>
+                    <td>{row.n}</td>
+                  </tr>
+                ))}
+              </Table>
+              <Table head={['Режим', 'Забегов']} empty="Забегов нет">
+                {(selected.byMode ?? []).map((row) => (
+                  <tr key={row.mode}>
+                    <td>{modeTitle(row.mode)}</td>
+                    <td>{row.n}</td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+          </div>
+
+          <div className="adm-grid">
+            <div>
+              <h3 className="adm-subtitle">Последние забеги</h3>
+              <Table
+                head={['Режим', 'Уровень', 'Ходы', 'Итог', 'Монеты', 'Зерно', 'Обновлён']}
+                empty="Забегов нет"
+              >
                 {selected.runs.map((row) => (
                   <tr key={String(row.id)}>
-                    <td>{String(row.mode)}</td>
+                    <td>{modeTitle(String(row.mode))}</td>
                     <td>{String(row.level)}</td>
                     <td>{String(row.moves)}</td>
-                    <td>{String(row.status)}</td>
+                    <td>{runOutcome(row)}</td>
+                    <td>{formatNumber(row.coinsEarned)}</td>
+                    <td>
+                      <small className="adm-muted">{String(row.seed)}</small>
+                    </td>
                     <td>{formatDateTime(Number(row.updatedAt ?? 0))}</td>
                   </tr>
                 ))}

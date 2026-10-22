@@ -10,9 +10,11 @@ import {
   type AuditResult,
   type PieceType,
 } from '../src/engine';
+import { parseModeLevels, profileModes } from './db';
+import { SCHEMA_VERSION } from './schema';
 import { fail, readJson } from './http';
 import { botToken, hasBotToken } from './token';
-import type { AppEnv, WorkerEnv } from './types';
+import type { AppEnv, UserRow, WorkerEnv } from './types';
 import { webAppKeyStatus } from './webAppKey';
 
 /**
@@ -281,6 +283,20 @@ adminApp.get('/overview', async (c) => {
     .bind(start)
     .all<{ kind: string; n: number; value: number }>();
 
+  // Один запрос на все режимы: сколько людей играет каждый режим и как часто выигрывает.
+  const modeStats = await db
+    .prepare(
+      `SELECT mode,
+              COUNT(*) AS n,
+              COUNT(DISTINCT user_id) AS players,
+              COALESCE(SUM(status = 'won'), 0) AS won,
+              COALESCE(SUM(status = 'lost'), 0) AS lost,
+              COALESCE(AVG(moves), 0) AS avgMoves
+       FROM runs WHERE created_at >= ? GROUP BY mode ORDER BY n DESC`,
+    )
+    .bind(start)
+    .all<{ mode: string; n: number; players: number; won: number; lost: number; avgMoves: number }>();
+
   const adEvents = await db
     .prepare('SELECT kind, COUNT(*) AS n FROM ad_events WHERE created_at >= ? GROUP BY kind')
     .bind(start)
@@ -426,8 +442,19 @@ adminApp.get('/overview', async (c) => {
       won: wonRuns,
       winRate: endedRuns ? wonRuns / endedRuns : 0,
       campaign: (runsSummary.results ?? []).filter((row) => row.mode === 'campaign'),
+      jam: (runsSummary.results ?? []).filter((row) => row.mode === 'jam'),
+      race: (runsSummary.results ?? []).filter((row) => row.mode === 'race'),
       endless: (runsSummary.results ?? []).filter((row) => row.mode === 'endless'),
     },
+    modes: (modeStats.results ?? []).map((row) => ({
+      mode: String(row.mode),
+      n: Number(row.n),
+      players: Number(row.players),
+      won: Number(row.won),
+      lost: Number(row.lost),
+      avgMoves: Number(row.avgMoves),
+      winRate: Number(row.n) > 0 ? Number(row.won) / Number(row.n) : 0,
+    })),
     economy: {
       coinsEarned: Number(economyMap.get('coins_earned')?.value ?? 0),
       coinsSpent: Number(economyMap.get('coins_spent')?.value ?? 0),
@@ -478,26 +505,68 @@ adminApp.get('/users', async (c) => {
     .bind(...binds)
     .first<{ n: number }>();
 
-  const rows = await c.env.DB.prepare(
-    `SELECT u.id, u.first_name AS name, u.username, u.is_guest AS isGuest, u.level, u.max_level AS maxLevel,
-            u.coins, u.lives, u.endless_best AS best, u.ad_free AS adFree, u.created_at AS createdAt,
-            u.updated_at AS updatedAt, u.skin,
-            (SELECT COUNT(*) FROM runs r WHERE r.user_id = u.id) AS runs,
-            (SELECT COUNT(*) FROM payments p WHERE p.user_id = u.id AND p.status = 'paid') AS purchases
-     FROM users u ${where}
-     ORDER BY ${order}
-     LIMIT ? OFFSET ?`,
-  )
-    .bind(...binds, pageSize, page * pageSize)
-    .all<Record<string, unknown>>();
+  const rows = await listUsers(c.env.DB, where, binds, order, pageSize, page * pageSize);
 
   return c.json({
     total: Number(total?.n ?? 0),
     page,
     pageSize,
-    rows: rows.results ?? [],
+    rows: rows.rows,
+    degraded: rows.degraded,
   });
 });
+
+const USER_COLUMNS = `u.id, u.first_name AS name, u.username, u.is_guest AS isGuest, u.level,
+       u.max_level AS maxLevel, u.coins, u.lives, u.endless_best AS best, u.ad_free AS adFree,
+       u.created_at AS createdAt, u.updated_at AS updatedAt, u.skin,
+       (SELECT COUNT(*) FROM runs r WHERE r.user_id = u.id) AS runs,
+       (SELECT COUNT(*) FROM payments p WHERE p.user_id = u.id AND p.status = 'paid') AS purchases`;
+
+/**
+ * Список игроков. `mode_levels` появляется только с миграцией 0004, а админка
+ * должна работать и до неё, и после: если колонки нет, повторяем запрос без неё
+ * и отдаём `degraded`, чтобы вкладка показала предупреждение, а не пустой экран.
+ */
+async function listUsers(
+  db: D1Database,
+  where: string,
+  binds: unknown[],
+  order: string,
+  pageSize: number,
+  offset: number,
+): Promise<{ rows: Record<string, unknown>[]; degraded: boolean }> {
+  const withProgress = `SELECT ${USER_COLUMNS}, u.mode_levels AS modeLevels
+     FROM users u ${where}
+     ORDER BY ${order}
+     LIMIT ? OFFSET ?`;
+  try {
+    const result = await db.prepare(withProgress).bind(...binds, pageSize, offset).all<Record<string, unknown>>();
+    return { rows: decorateUsers(result.results ?? [], false), degraded: false };
+  } catch {
+    const fallback = await db
+      .prepare(`SELECT ${USER_COLUMNS} FROM users u ${where} ORDER BY ${order} LIMIT ? OFFSET ?`)
+      .bind(...binds, pageSize, offset)
+      .all<Record<string, unknown>>();
+    // Колонки нет: цифры не выдумываем, отдаём null, вкладка покажет «нет данных».
+    return { rows: decorateUsers(fallback.results ?? [], true), degraded: true };
+  }
+}
+
+/** Прогресс «Парковки» и «Гонок» из JSON кладём в те же строки, что отдаём таблице. */
+function decorateUsers(rows: Record<string, unknown>[], degraded: boolean): Record<string, unknown>[] {
+  return rows.map((row) => {
+    const levels = degraded ? {} : parseModeLevels(row.modeLevels);
+    const { modeLevels: _drop, ...rest } = row;
+    void _drop;
+    return {
+      ...rest,
+      jamLevel: degraded ? null : levels.jam?.level ?? 1,
+      jamMax: degraded ? null : levels.jam?.maxLevel ?? 1,
+      raceLevel: degraded ? null : levels.race?.level ?? 1,
+      raceMax: degraded ? null : levels.race?.maxLevel ?? 1,
+    };
+  });
+}
 
 adminApp.get('/users/:id', async (c) => {
   const id = c.req.param('id');
@@ -505,11 +574,47 @@ adminApp.get('/users/:id', async (c) => {
   if (!user) fail(404, 'user_not_found', 'Игрок не найден');
 
   const runs = await c.env.DB.prepare(
-    `SELECT id, mode, level, moves, score, status, created_at AS createdAt, updated_at AS updatedAt
-     FROM runs WHERE user_id = ? ORDER BY updated_at DESC LIMIT 30`,
+    `SELECT id, mode, level, seed, moves, score, status, result, created_at AS createdAt, updated_at AS updatedAt
+     FROM runs WHERE user_id = ? ORDER BY updated_at DESC LIMIT 60`,
   )
     .bind(id)
     .all<Record<string, unknown>>();
+
+  // История по уровням: сколько раз запускал, сколько выиграл, когда вернулся.
+  const history = await c.env.DB.prepare(
+    `SELECT mode, level,
+            COUNT(*) AS played,
+            SUM(status = 'won') AS won,
+            SUM(status = 'lost') AS lost,
+            SUM(status = 'quit') AS quit,
+            COALESCE(AVG(moves), 0) AS avgMoves,
+            MIN(created_at) AS firstAt,
+            MAX(updated_at) AS lastAt
+     FROM runs WHERE user_id = ?
+     GROUP BY mode, level
+     ORDER BY mode, level DESC`,
+  )
+    .bind(id)
+    .all<Record<string, unknown>>();
+
+  const grants = await c.env.DB.prepare(
+    `SELECT kind, source, COUNT(*) AS n, MIN(created_at) AS firstAt, MAX(created_at) AS lastAt
+     FROM grants WHERE user_id = ? GROUP BY kind, source ORDER BY n DESC`,
+  )
+    .bind(id)
+    .all<Record<string, unknown>>();
+
+  const ads = await c.env.DB.prepare(
+    'SELECT kind, COUNT(*) AS n FROM ad_events WHERE user_id = ? GROUP BY kind',
+  )
+    .bind(id)
+    .all<{ kind: string; n: number }>();
+
+  const active = await c.env.DB.prepare(
+    `SELECT mode, COUNT(*) AS n FROM runs WHERE user_id = ? GROUP BY mode`,
+  )
+    .bind(id)
+    .all<{ mode: string; n: number }>();
 
   const payments = await c.env.DB.prepare(
     `SELECT charge_id AS chargeId, sku, stars, status, created_at AS createdAt, paid_at AS paidAt
@@ -524,8 +629,141 @@ adminApp.get('/users/:id', async (c) => {
     .bind(id)
     .all<Record<string, unknown>>();
 
-  return c.json({ user, runs: runs.results ?? [], payments: payments.results ?? [], events: events.results ?? [] });
+  return c.json({
+    user,
+    progress: profileModes(user as unknown as UserRow),
+    runs: (runs.results ?? []).map(describeRun),
+    history: history.results ?? [],
+    grants: grants.results ?? [],
+    ads: ads.results ?? [],
+    byMode: active.results ?? [],
+    payments: payments.results ?? [],
+    events: events.results ?? [],
+  });
 });
+
+/**
+ * Итог забега лежит в JSON `result`. Разворачиваем его в плоские поля, иначе
+ * таблице админки пришлось бы разбирать JSON на клиенте, а причина поражения
+ * (взятие или тупик) важна именно в таблице.
+ */
+function describeRun(row: Record<string, unknown>): Record<string, unknown> {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = row.result ? (JSON.parse(String(row.result)) as Record<string, unknown>) : {};
+  } catch {
+    /* повреждённый JSON: показываем забег без деталей */
+  }
+  const { result: _drop, ...rest } = row;
+  void _drop;
+  return {
+    ...rest,
+    outcome: String(parsed.outcome ?? row.status ?? ''),
+    capturedBy: parsed.capturedBy ?? null,
+    stuck: parsed.outcome === 'lost' && parsed.capturedBy == null,
+    coinsEarned: Number(parsed.coinsEarned ?? 0),
+    levelUp: Boolean(parsed.levelUp),
+    modeLevel: parsed.level ?? row.level,
+  };
+}
+
+/**
+ * Прохождения по уровням: чем заканчиваются уровни режима, сколько попыток
+ * уходит на один уровень и где игроки встают. Это ответ на вопрос «какие
+ * уровни стоит оставить, а какие перебрать».
+ */
+adminApp.get('/levels/stats', async (c) => {
+  const mode = parseLevelMode(c.req.query('mode'));
+  const days = intParam(c.req.query('days'), 30, 1, 365);
+  const start = Date.now() - days * DAY;
+
+  const levels = await c.env.DB.prepare(
+    `SELECT level,
+            COUNT(*) AS played,
+            COUNT(DISTINCT user_id) AS players,
+            SUM(status = 'won') AS won,
+            SUM(status = 'lost') AS lost,
+            SUM(status = 'quit') AS quit,
+            SUM(status = 'active') AS active,
+            COALESCE(AVG(moves), 0) AS avgMoves,
+            COALESCE(AVG(score), 0) AS avgScore,
+            MIN(created_at) AS firstAt,
+            MAX(updated_at) AS lastAt
+     FROM runs
+     WHERE mode = ? AND level > 0 AND created_at >= ?
+     GROUP BY level
+     ORDER BY level
+     LIMIT 300`,
+  )
+    .bind(mode, start)
+    .all<Record<string, unknown>>();
+
+  // Причина поражения видна только в JSON результата: «тупик» это про генератор,
+  // «съеден» про игру. Считаем отдельно, чтобы не тащить JSON в первую выборку.
+  const stuck = await c.env.DB.prepare(
+    `SELECT level, COUNT(*) AS n
+     FROM runs
+     WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND result LIKE '%"capturedBy":null%'
+     GROUP BY level`,
+  )
+    .bind(mode, start)
+    .all<{ level: number; n: number }>();
+
+  const bonuses = await c.env.DB.prepare(
+    `SELECT r.level AS level, g.kind AS kind, COUNT(*) AS n
+     FROM grants g JOIN runs r ON r.id = g.run_id
+     WHERE r.mode = ? AND r.created_at >= ?
+     GROUP BY r.level, g.kind`,
+  )
+    .bind(mode, start)
+    .all<{ level: number; kind: string; n: number }>();
+
+  const stuckByLevel = new Map((stuck.results ?? []).map((row) => [Number(row.level), Number(row.n)]));
+  const bonusByLevel = new Map<number, Record<string, number>>();
+  for (const row of bonusList(bonuses.results ?? [])) {
+    const entry = bonusByLevel.get(row.level) ?? {};
+    entry[row.kind] = (entry[row.kind] ?? 0) + row.n;
+    bonusByLevel.set(row.level, entry);
+  }
+
+  const rows = (levels.results ?? []).map((row) => {
+    const level = Number(row.level);
+    const played = Number(row.played);
+    const won = Number(row.won);
+    return {
+      level,
+      played,
+      players: Number(row.players),
+      won,
+      lost: Number(row.lost),
+      quit: Number(row.quit),
+      active: Number(row.active),
+      stuck: stuckByLevel.get(level) ?? 0,
+      winRate: played > 0 ? won / played : 0,
+      attemptsPerPlayer: Number(row.players) > 0 ? played / Number(row.players) : 0,
+      avgMoves: Number(row.avgMoves),
+      avgScore: Number(row.avgScore),
+      hints: bonusByLevel.get(level)?.hint ?? 0,
+      freezes: bonusByLevel.get(level)?.freeze ?? 0,
+      undos: bonusByLevel.get(level)?.undo ?? 0,
+      firstAt: Number(row.firstAt),
+      lastAt: Number(row.lastAt),
+    };
+  });
+
+  return c.json({ mode, days, rows });
+});
+
+/** Режимы с номером уровня: только они попадают в статистику прохождений. */
+function parseLevelMode(value: unknown): 'campaign' | 'jam' | 'race' {
+  return value === 'jam' || value === 'race' ? value : 'campaign';
+}
+
+function bonusList(rows: Record<string, unknown>[]): { level: number; kind: string; n: number }[] {
+  return rows
+    .map((row) => ({ level: Number(row.level), kind: String(row.kind), n: Number(row.n) }))
+    .filter((row) => Number.isFinite(row.level));
+}
 
 adminApp.get('/payments', async (c) => {
   const days = intParam(c.req.query('days'), 30, 1, 365);
@@ -804,10 +1042,23 @@ adminApp.get('/diag', async (c) => {
   });
   // Отдельная живая проверка: был ли ключ подписи у приложения на момент просмотра.
   const webApp = await webAppKeyStatus(c.env);
+  // Колонки смотрим напрямую: неприменённая миграция видна игроку как ошибка
+  // сохранения, а здесь она превращается в одну строку предупреждения.
+  const usersInfo = await db.prepare('PRAGMA table_info(users)').all<{ name: string }>().catch(() => null);
+  const usersColumns = (usersInfo?.results ?? []).map((col) => col.name);
+  const hasModeLevels = usersColumns.includes('mode_levels');
   return c.json({
     enabled: true,
     authDebug: c.env.AUTH_DEBUG === 'true',
     webApp: { present: webApp.present, note: webApp.note, checkedAt: webApp.checkedAt },
+    schema: {
+      version: SCHEMA_VERSION,
+      usersColumns,
+      modeLevels: hasModeLevels,
+      note: hasModeLevels
+        ? 'колонка mode_levels на месте, прогресс «Парковки» и «Гонок» сохраняется'
+        : 'нет колонки mode_levels: примените migrations/0004_mode_levels.sql в SQL консоли D1, иначе прогресс режимов не сохранится',
+    },
     entries,
   });
 });

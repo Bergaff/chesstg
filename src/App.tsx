@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { GameMode } from './engine';
+import { modeDef, type GameMode } from './engine';
 import { AppContext, type AppContextValue, type ShopTab } from './context/AppContext';
 import { api, apiWithRetry, ApiError, isLinked, SESSION_KEY, takeLinkFromUrl } from './lib/api';
 import { initTelegram, getStartParam, hapticNotify } from './lib/telegram';
@@ -253,8 +253,9 @@ export default function App(): ReactNode {
   const play = useCallback(
     (mode: GameMode) => {
       if (!session) return;
-      if (mode === 'endless' && !session.profile.endlessUnlocked) {
-        toast('Бесконечный режим откроется после 10 уровня', 'info');
+      const progress = session.profile.modes?.[mode];
+      if (progress && !progress.unlocked) {
+        toast(`${modeDef(mode).name}: режим откроется на ${progress.unlockAtLevel} уровне кампании`, 'info');
         return;
       }
       if (session.profile.lives <= 0 && !session.active[mode]) {

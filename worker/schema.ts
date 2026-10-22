@@ -19,8 +19,12 @@ export const AUTH_TABLES = ['auth_links'] as const;
 
 export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES] as const;
 
-/** Номер последней миграции, на которую рассчитан код. */
-export const SCHEMA_VERSION = 3;
+/**
+ * Номер последней миграции, на которую рассчитан код. Колонка `users.mode_levels`
+ * из 0004 проверяется в диагностике админки (`GET /api/admin/diag` раздел «Схема базы»):
+ * без неё игра работает, но прогресс «Парковки» и «Гонок» не сохраняется.
+ */
+export const SCHEMA_VERSION = 4;
 
 export interface SchemaState {
   tables: Record<string, boolean>;

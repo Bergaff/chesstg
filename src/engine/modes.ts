@@ -155,7 +155,32 @@ export const MODE_ORDER: ModeId[] = [
 ];
 
 /** Режимы, которые принимаются боевым API. Остальные живут в лаборатории. */
-export const PLAYABLE_MODES: GameMode[] = ['campaign', 'endless'];
+export const PLAYABLE_MODES: GameMode[] = ['campaign', 'jam', 'race', 'endless'];
+
+/**
+ * Когда открывается режим: считаем по пройденной кампании, чтобы «Парковка»
+ * приходила вместе с ладьёй, а «Гонки» со слоном. Бесконечный как был: после
+ * десятого уровня.
+ */
+export const MODE_GATES: Record<GameMode, number> = {
+  campaign: 1,
+  jam: 3,
+  race: 5,
+  endless: 11,
+};
+
+export function modeGate(mode: GameMode): number {
+  return MODE_GATES[mode] ?? 1;
+}
+
+export function modeUnlocked(mode: GameMode, campaignMaxLevel: number): boolean {
+  return campaignMaxLevel >= modeGate(mode);
+}
+
+/** Режимы с номером уровня: победил поднялся, проиграл переиграл. Бесконечный не из них. */
+export function isLevelMode(mode: GameMode): boolean {
+  return mode === 'campaign' || mode === 'jam' || mode === 'race';
+}
 
 export function isModeId(value: unknown): value is ModeId {
   return typeof value === 'string' && value in MODE_RULES;
@@ -206,12 +231,12 @@ export function modeDef(mode: ModeId): ModeDef {
     jam: {
       name: 'Парковка',
       note: 'Поле забито фигурами, они не ходят, дорога прочищается взятиями по диагонали.',
-      playable: false,
+      playable: true,
     },
     race: {
       name: 'Гонки',
       note: 'Фигуры едут рядом вниз, пешка навстречу: кто первый разминётся.',
-      playable: false,
+      playable: true,
     },
     jamExit2: {
       name: 'Парковка + уход вбок',

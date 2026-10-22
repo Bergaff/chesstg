@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { GameAction } from '../src/engine';
+import { PLAYABLE_MODES, type GameAction, type GameMode } from '../src/engine';
 import type { AppEnv } from './types';
 
 export class HttpError extends Error {
@@ -40,6 +40,16 @@ export async function readJson(c: Context<AppEnv>): Promise<Record<string, unkno
 export function parseStartOptions(value: unknown): { repeat: boolean } {
   const body = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   return { repeat: body.repeat === true || body.repeat === 'true' };
+}
+
+/**
+ * Режим забега. Принимается только боевой список: лабораторные варианты правил
+ * (диагональ, уход фигур, уклонение) сюда не проходят, иначе игрок мог бы
+ * попросить у сервера расстановку с чужими правилами.
+ */
+export function parseRunMode(value: unknown): GameMode | null {
+  if (typeof value !== 'string') return null;
+  return (PLAYABLE_MODES as readonly string[]).includes(value) ? (value as GameMode) : null;
 }
 
 export function parseActions(value: unknown): GameAction[] {

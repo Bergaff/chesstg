@@ -68,6 +68,130 @@ const botStatus = {
   botError: '',
 };
 
+const levelStats = {
+  mode: 'jam',
+  days: 30,
+  rows: [
+    {
+      level: 1,
+      played: 30,
+      players: 21,
+      won: 24,
+      lost: 5,
+      quit: 1,
+      active: 0,
+      stuck: 0,
+      winRate: 0.8,
+      attemptsPerPlayer: 1.43,
+      avgMoves: 6.2,
+      avgScore: 12,
+      hints: 4,
+      freezes: 0,
+      undos: 1,
+      firstAt: Date.now() - 86_400_000,
+      lastAt: Date.now(),
+    },
+    {
+      level: 2,
+      played: 24,
+      players: 12,
+      won: 5,
+      lost: 18,
+      quit: 1,
+      active: 0,
+      stuck: 3,
+      winRate: 0.208,
+      attemptsPerPlayer: 2,
+      avgMoves: 9.4,
+      avgScore: 8,
+      hints: 11,
+      freezes: 2,
+      undos: 6,
+      firstAt: Date.now() - 3 * 86_400_000,
+      lastAt: Date.now() - 60_000,
+    },
+  ],
+};
+
+const usersList = {
+  total: 2,
+  page: 0,
+  pageSize: 25,
+  degraded: false,
+  rows: [
+    {
+      id: 'u1',
+      name: 'Игрок',
+      username: 'pawn',
+      isGuest: 0,
+      level: 6,
+      maxLevel: 6,
+      coins: 120,
+      lives: 4,
+      best: 18,
+      adFree: 0,
+      createdAt: Date.now() - 86_400_000,
+      updatedAt: Date.now(),
+      skin: 'classic',
+      runs: 14,
+      purchases: 1,
+      jamLevel: 3,
+      jamMax: 4,
+      raceLevel: 2,
+      raceMax: 2,
+    },
+  ],
+};
+
+const userDetail = {
+  user: {
+    id: 'u1',
+    first_name: 'Игрок',
+    username: 'pawn',
+    level: 6,
+    max_level: 6,
+    coins: 120,
+    lives: 4,
+    endless_best: 18,
+    created_at: Date.now() - 86_400_000,
+    mode_levels: JSON.stringify({ jam: { level: 3, maxLevel: 4 }, race: { level: 2, maxLevel: 2 } }),
+  },
+  progress: {
+    campaign: { level: 6, maxLevel: 6, unlocked: true, unlockAtLevel: 1 },
+    jam: { level: 3, maxLevel: 4, unlocked: true, unlockAtLevel: 3 },
+    race: { level: 2, maxLevel: 2, unlocked: true, unlockAtLevel: 5 },
+    endless: { level: 0, maxLevel: 0, unlocked: false, unlockAtLevel: 11 },
+  },
+  runs: [
+    {
+      id: 'r1',
+      mode: 'jam',
+      level: 3,
+      seed: 4242,
+      moves: 9,
+      score: 0,
+      status: 'lost',
+      createdAt: Date.now() - 60_000,
+      updatedAt: Date.now() - 30_000,
+      outcome: 'lost',
+      capturedBy: 'rook',
+      stuck: false,
+      coinsEarned: 0,
+      levelUp: false,
+      modeLevel: 3,
+    },
+  ],
+  history: [
+    { mode: 'jam', level: 3, played: 4, won: 1, lost: 2, quit: 1, avgMoves: 8.5, firstAt: Date.now() - 4000, lastAt: Date.now() - 1000 },
+    { mode: 'jam', level: 2, played: 2, won: 2, lost: 0, quit: 0, avgMoves: 5, firstAt: Date.now() - 9000, lastAt: Date.now() - 8000 },
+  ],
+  grants: [{ kind: 'hint', source: 'purchase', n: 3, firstAt: Date.now() - 5000, lastAt: Date.now() - 1000 }],
+  ads: [{ kind: 'life', n: 2 }],
+  byMode: [{ mode: 'jam', n: 6 }, { mode: 'campaign', n: 8 }],
+  payments: [{ chargeId: 'p1', sku: 'lives', stars: 25, status: 'paid', createdAt: Date.now(), paidAt: Date.now() }],
+  events: [{ kind: 'run_finish', value: '{}', createdAt: Date.now() }],
+};
+
 let statusResponse: unknown = { configured: true, authenticated: false, expiresAt: null };
 let healthResponse: unknown = { ok: true, schemaVersion: 2, warnings: [], tables: { users: true } };
 let loginResponse: () => Response = () => jsonResponse({ token: 'token-1', expiresAt: Date.now() + 3_600_000 });
@@ -85,7 +209,10 @@ beforeEach(() => {
       if (url.endsWith('/api/admin/status')) return jsonResponse(statusResponse);
       if (url.endsWith('/api/admin/login')) return loginResponse();
       if (url.includes('/api/admin/overview')) return jsonResponse(overview);
+      if (url.includes('/api/admin/levels/stats')) return jsonResponse(levelStats);
       if (url.includes('/api/admin/levels')) return jsonResponse(levels);
+      if (url.includes('/api/admin/users/')) return jsonResponse(userDetail);
+      if (url.includes('/api/admin/users')) return jsonResponse(usersList);
       if (url.includes('/api/admin/bot')) return jsonResponse(botStatus);
       return jsonResponse({ ok: true });
     }),
@@ -149,6 +276,46 @@ describe('админка', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Неверный пароль');
     expect(screen.queryByText('Обзор')).toBeNull();
+  });
+
+  it('показывает прохождения по уровням и помечает сложные', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Прохождения' }));
+    expect(await screen.findByText('Прохождения по уровням')).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText('Забегов').length).toBeGreaterThan(0));
+    // Второй уровень: 20.8% побед и три тупика.
+    expect(screen.getByText('тяжело')).toBeTruthy();
+    expect(screen.getByText('край')).toBeTruthy();
+    const note = screen.getByText((_content, element) => element?.classList.contains('adm-stats-note') === true);
+    expect(note.textContent).toContain('уровней с тупиками 1');
+    expect(note.textContent).toContain('уровней с долей побед ниже 25% 1');
+    expect(note.textContent).toContain('край прохождения уровень 2');
+  });
+
+  it('в карточке игрока видно прогресс режимов и пройденные уровни', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Игроки' }));
+    expect(await screen.findByText('@pawn')).toBeTruthy();
+    // В списке колонки прогресса: 3 из 4 в «Парковке».
+    expect(screen.getByText(/из 4/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('@pawn').closest('tr')!);
+    expect(await screen.findByText('Прогресс по режимам')).toBeTruthy();
+    expect(screen.getByText('3 из 4')).toBeTruthy();
+    expect(screen.getByText('откроется на 11 уровне кампании')).toBeTruthy();
+    expect(await screen.findByText('Какие уровни проходил')).toBeTruthy();
+    expect(screen.getAllByText('Парковка').length).toBeGreaterThan(0);
+    // Итог забега разворачивается в слово, а не в сырой JSON результата.
+    expect(screen.getByText('пойман (ладья)')).toBeTruthy();
+    expect(screen.getByText('Бонусы и реклама')).toBeTruthy();
+    expect(screen.getByText('Просмотров')).toBeTruthy();
+    expect(screen.getByText('жизнь')).toBeTruthy();
   });
 
   it('переключается на вкладку уровней', async () => {

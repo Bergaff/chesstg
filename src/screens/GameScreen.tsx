@@ -16,6 +16,10 @@ import {
   legalMoves,
   newPiecesAtLevel,
   skipsLeft,
+  capturesLeft,
+  isLevelMode,
+  modeDef,
+  rulesFor,
   projectHint,
   type BonusId,
   type Cell,
@@ -203,7 +207,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       repeatRef.current = false;
       const response = await api<StartRunResponse>('/api/run/start', {
         method: 'POST',
-        body: mode === 'campaign' && repeat ? { mode, repeat: true } : { mode },
+        body: isLevelMode(mode) && repeat ? { mode, repeat: true } : { mode },
       });
       const nextRun = response.run;
       let current = nextRun.initial;
@@ -248,7 +252,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           onExit();
           return;
         }
-        if (error.code === 'endless_locked') {
+        if (error.code === 'endless_locked' || error.code === 'mode_locked') {
           toast(error.message, 'info');
           onExit();
           return;
@@ -600,11 +604,12 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     const endless = mode === 'endless';
     const payload = endless ? `ch_0_${profile.endlessBest}` : `ch_${level}_${level}`;
     const url = bot ? `https://t.me/${bot}?startapp=${payload}` : appBaseUrl(config.webappUrl);
+    const where = mode === 'campaign' ? 'в «Пешке против всех»' : `в режиме «${modeDef(mode).name}»`;
     const text = endless
       ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
       : kind === 'win'
-        ? `Я прошёл уровень ${result?.level ?? profile.level} в «Пешке против всех». Слабо повторить?`
-        : `Я пал на ${result?.level ?? profile.level} уровне в «Пешке против всех». Сможешь лучше?`;
+        ? `Я прошёл уровень ${result?.level ?? run?.level ?? profile.level} ${where}. Слабо повторить?`
+        : `Я пал на ${result?.level ?? run?.level ?? profile.level} уровне ${where}. Сможешь лучше?`;
     const status = await shareContent(text, url);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
     if (status === 'failed') toast('Не удалось поделиться', 'error');
@@ -646,7 +651,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   }
 
   const isEndless = mode === 'endless';
-  const styles = run.initial.width;
+  const rules = rulesFor(mode);
+  const modeName = isEndless ? 'Бесконечный режим' : modeDef(mode).name;
+  const captures = state ? capturesLeft(state) : Number.POSITIVE_INFINITY;
   const levelTypes = [...new Set(run.initial.enemies.map((enemy) => enemy.type))];
   const unlockedNow = newPiecesAtLevel(run.level);
   const playerAlive = state.status !== 'lost';
@@ -658,7 +665,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           ←
         </button>
         <div className="game-heading">
-          <span className="label">{isEndless ? 'Бесконечный режим' : 'Кампания'}</span>
+          <span className="label">{modeName}</span>
           <b className="game-title">
             {isEndless ? `Высота ${state.score}` : `Уровень ${run.level}`}
           </b>
@@ -678,7 +685,21 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       <div className="game-status">
         <span className="status-item">Ход {state.moves + 1}</span>
         <span className="status-sep" aria-hidden="true">/</span>
-        <span className="status-item">{isEndless ? `Волна ${state.tier}` : `Поле ${styles}×${styles}`}</span>
+        <span className="status-item">{isEndless ? `Волна ${state.tier}` : `Поле ${run.initial.width}×${run.initial.height}`}</span>
+        {rules.captureQuota > 0 && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className={cn('status-item', captures === 0 && 'off')}>
+              взятий {captures === Number.POSITIVE_INFINITY ? '∞' : captures}
+            </span>
+          </>
+        )}
+        {rules.skipQuota > 0 && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item">пропусков {skipsLeftNow}</span>
+          </>
+        )}
         {state.shield > 0 && (
           <>
             <span className="status-sep" aria-hidden="true">/</span>
@@ -695,7 +716,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
       <div className="board-area">
         <div className="goal-line">
-          <span>{isEndless ? 'Поднимайтесь выше, поле растёт' : 'Дойти до верхнего ряда'}</span>
+          <span>
+            {isEndless
+              ? 'Поднимайтесь выше, поле растёт'
+              : mode === 'jam'
+                ? 'Дорога прочищается взятиями: фигуры стоят'
+                : mode === 'race'
+                  ? 'Фигуры идут вниз, разойдитесь с ними и дойдите до верха'
+                  : 'Дойти до верхнего ряда'}
+          </span>
           <span className="num">{state.score > 0 ? `${state.score} кл.` : ''}</span>
         </div>
         <Board
@@ -798,29 +827,43 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         </div>
         <p className="control-hint">
           {!playerAlive
-            ? 'Пешка поймана.'
+            ? mode === 'jam'
+              ? 'Тупик: ходов нет, взятия кончились.'
+              : 'Пешка поймана.'
             : settling
-              ? 'Ход фигур.'
-              : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
+              ? mode === 'jam'
+                ? 'Фигуры стоят.'
+                : 'Ход фигур.'
+              : mode === 'jam'
+                ? 'Пешка ходит вперёд и бьёт по диагонали: взятие снимает фигуру и открывает клетку.'
+                : mode === 'race'
+                  ? 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'
+                  : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
 
       {preOpen && (
         <Modal dismissible={false} onClose={() => undefined} labelledBy="pre-title">
-          <span className="label">{isEndless ? 'Забег' : `Поле ${styles} на ${styles}`}</span>
+          <span className="label">
+            {isEndless ? 'Забег' : `Поле ${run.initial.width} на ${run.initial.height}`}
+          </span>
           <h2 className="modal-title" id="pre-title">
-            {isEndless ? 'Бесконечный режим' : `Уровень ${run.level}`}
+            {isEndless ? 'Бесконечный режим' : `${modeName}, уровень ${run.level}`}
           </h2>
           <p className="modal-text">
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
-              : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
+              : mode === 'jam'
+                ? `Дойти до верхнего ряда. Фигуры стоят и не ходят: дорогу прочищают взятия, их ${rules.captureQuota} на забег.`
+                : mode === 'race'
+                  ? 'Дойти до верхнего ряда. Фигуры едут вниз рядом с вами, ушедшие за край исчезают с доски.'
+                  : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
           <div className="pre-meta">
             <div>
               <span>Размер поля</span>
-              <b>{isEndless ? '6 на 9 и выше' : `${styles} на ${styles}`}</b>
+              <b>{isEndless ? '6 на 9 и выше' : `${run.initial.width} на ${run.initial.height}`}</b>
             </div>
             <div>
               <span>Фигур на поле</span>
@@ -909,6 +952,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       {result && phase === 'won' && (
         <WinModal
           result={result}
+          modeName={modeName}
           onNext={nextLevel}
           onShare={() => void shareResult('win')}
           onMenu={onExit}
@@ -919,6 +963,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       {result && phase === 'lost' && (
         <LoseModal
           result={result}
+          modeName={modeName}
           profile={profile}
           adFree={profile.adFree}
           adBusy={adBusy}
@@ -926,7 +971,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           isEndless={isEndless}
           onWatchLife={() => void watchLifeAd()}
           onRetry={nextLevel}
-          onRetrySame={mode === 'campaign' ? () => restart(true) : undefined}
+          onRetrySame={isLevelMode(mode) ? () => restart(true) : undefined}
           onShare={() => void shareResult('lose')}
           onMenu={onExit}
           onShop={goShopStars}
@@ -1002,12 +1047,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
 function WinModal({
   result,
+  modeName,
   onNext,
   onShare,
   onMenu,
   isEndless,
 }: {
   result: FinishResult;
+  /** Название режима в шапке: «Парковка, уровень 7» звучит иначе, чем «Кампания». */
+  modeName: string;
   onNext: () => void;
   onShare: () => void;
   onMenu: () => void;
@@ -1017,7 +1065,7 @@ function WinModal({
     <Modal dismissible={false} onClose={() => undefined} className="result-modal" labelledBy="win-title">
       <div className="result-hero">
         <div className="result-mark" aria-hidden="true">♔</div>
-        <span className="label label-accent">{isEndless ? 'Бесконечный режим' : `Уровень ${result.level}`}</span>
+        <span className="label label-accent">{isEndless ? 'Бесконечный режим' : `${modeName}, уровень ${result.level}`}</span>
         <h2 className="modal-title" id="win-title">Пешка дошла</h2>
         <p className="modal-text">Верхний ряд взят, пешка цела.</p>
       </div>
@@ -1063,6 +1111,7 @@ function WinModal({
 
 function LoseModal({
   result,
+  modeName,
   profile,
   adFree,
   adBusy,
@@ -1077,6 +1126,7 @@ function LoseModal({
   onRefresh,
 }: {
   result: FinishResult;
+  modeName: string;
   profile: Profile;
   adFree: boolean;
   adBusy: boolean;
@@ -1105,7 +1155,7 @@ function LoseModal({
         <div className="result-mark danger" aria-hidden="true">
           <span className="result-glyph">{captured ? PIECE_GLYPH[captured] : '♟'}</span>
         </div>
-        <span className="label">{isEndless ? `Высота ${result.score}` : `Уровень ${result.level}`}</span>
+        <span className="label">{isEndless ? `Высота ${result.score}` : `${modeName}, уровень ${result.level}`}</span>
         <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : 'Пешка поймана'}</h2>
         <p className="modal-text">
           {stuck

@@ -1,4 +1,10 @@
 import type { ReactNode } from 'react';
+import { isModeId, modeDef } from '../engine';
+
+/** id режима в имя из движка: админка нигде не показывает сырые `jam` и `race`. */
+export function modeTitle(mode: string): string {
+  return isModeId(mode) ? modeDef(mode).name : mode;
+}
 
 export function Panel({
   title,

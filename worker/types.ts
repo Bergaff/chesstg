@@ -1,3 +1,5 @@
+import type { GameMode } from '../src/engine/types';
+
 export interface WorkerEnv {
   DB: D1Database;
   ASSETS: Fetcher;
@@ -53,6 +55,11 @@ export interface UserRow {
   inv_undo: number;
   invite_code: string;
   referred_by: string | null;
+  /**
+   * Прогресс режимов с уровнем, кроме кампании: JSON вида
+   * {"jam":{"level":4,"maxLevel":6}}. Кампания живёт в `level` и `max_level`.
+   */
+  mode_levels: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -60,7 +67,8 @@ export interface UserRow {
 export interface RunRow {
   id: string;
   user_id: string;
-  mode: 'campaign' | 'endless';
+  /** id режима из движка: campaign, jam, race, endless. CHECK-ограничения на колонке нет. */
+  mode: GameMode;
   level: number;
   seed: number;
   initial_state: string;

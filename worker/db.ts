@@ -1,13 +1,18 @@
 import {
   BONUSES,
-  MAX_LIVES,
-  PAID_SKINS,
-  SKINS,
+  isLevelMode,
   isSkinId,
   materializeLives,
+  MAX_LIVES,
+  modeGate,
+  modeUnlocked,
   msUntilNextLife,
-  shortCode,
+  PAID_SKINS,
+  PLAYABLE_MODES,
   randomSeed,
+  shortCode,
+  SKINS,
+  type GameMode,
   type SkinId,
 } from '../src/engine';
 import { fail } from './http';
@@ -79,6 +84,32 @@ export function toProfile(user: UserRow, now = Date.now()) {
     inviteCode: user.invite_code,
     createdAt: user.created_at,
     prices: Object.fromEntries(Object.values(BONUSES).map((b) => [b.id, b.price])),
+    modes: profileModes(user),
+  };
+}
+
+/**
+ * Прогресс по всем четырём режимам одним объектом, чтобы меню рисовало карточки
+ * без отдельных запросов: уровень, лучший уровень, открыт ли режим и на каком.
+ */
+export function profileModes(user: UserRow) {
+  const levels = parseModeLevels(user.mode_levels);
+  const entry = (mode: GameMode) => {
+    const gate = modeGate(mode);
+    const progress = mode === 'campaign' ? { level: user.level, maxLevel: user.max_level } : levels[mode] ?? { level: 1, maxLevel: 1 };
+    return {
+      level: progress.level,
+      maxLevel: progress.maxLevel,
+      unlocked: modeUnlocked(mode, user.max_level),
+      unlockAtLevel: gate,
+    };
+  };
+  return {
+    campaign: entry('campaign'),
+    jam: entry('jam'),
+    race: entry('race'),
+    // У бесконечного режима уровня нет, там счёт это рекорд: он в profile.endlessBest.
+    endless: { level: 0, maxLevel: 0, unlocked: modeUnlocked('endless', user.max_level), unlockAtLevel: modeGate('endless') },
   };
 }
 
@@ -205,6 +236,55 @@ export function serializeRun(run: RunRow) {
     createdAt: run.created_at,
     updatedAt: run.updated_at,
   };
+}
+
+/** Прогресс режима с уровнем: текущий и лучший. */
+export interface ModeProgress {
+  level: number;
+  maxLevel: number;
+}
+
+/**
+ * Прогресс «Парковки» и «Гонок» живёт в одном текстовом поле `users.mode_levels`
+ * как JSON вида {"jam":{"level":4,"maxLevel":6}}. Отдельные колонки под каждый
+ * режим означали бы миграцию на каждый новый режим, а их число в лаборатории
+ * растёт. Кампания по-прежнему в `level` и `max_level`: она была там до появления
+ * остальных режимов, и трогать её смысла нет.
+ */
+/** Режимы, чей уровень хранится в JSON-колонке: кампания и бесконечный живут в своих. */
+const STORED_MODES: readonly GameMode[] = PLAYABLE_MODES.filter((mode) => isLevelMode(mode) && mode !== 'campaign');
+
+export function parseModeLevels(raw: unknown): Record<string, ModeProgress> {
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Partial<ModeProgress>>;
+    const out: Record<string, ModeProgress> = {};
+    for (const mode of STORED_MODES) {
+      const value = parsed?.[mode];
+      if (!value) continue;
+      const level = Number(value.level);
+      const maxLevel = Number(value.maxLevel);
+      const current = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
+      const best = Number.isFinite(maxLevel) && maxLevel > 0 ? Math.floor(maxLevel) : current;
+      // Пройденный уровень не может быть меньше текущего: иначе админка покажет
+      // «открыто 2, играешь 7», а генератор возьмёт уровень из maxLevel.
+      out[mode] = { level: current, maxLevel: Math.max(current, best) };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function serializeModeLevels(map: Record<string, ModeProgress>): string {
+  return JSON.stringify(map);
+}
+
+export function modeProgress(user: UserRow, mode: GameMode): ModeProgress {
+  if (mode === 'campaign') return { level: user.level, maxLevel: user.max_level };
+  // В бесконечном режиме уровня нет: там счёт это высота, она в endless_best.
+  if (mode === 'endless') return { level: 0, maxLevel: 0 };
+  return parseModeLevels(user.mode_levels)[mode] ?? { level: 1, maxLevel: 1 };
 }
 
 export async function activeRuns(env: WorkerEnv, userId: string) {

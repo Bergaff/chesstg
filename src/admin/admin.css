@@ -421,6 +421,39 @@ body {
   line-height: 1.4;
 }
 
+.adm-note.is-warn {
+  color: #c98a3c;
+}
+
+/* Подписи второстепенные: «из 12», id зерна, «нет данных». */
+.adm-muted {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.adm-metric small {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.adm-stats-note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.adm-stats-note b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.adm-row-flag {
+  color: #c98a3c;
+}
+
 .adm-metric-value.is-accent {
   color: var(--accent);
 }

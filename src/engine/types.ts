@@ -2,13 +2,11 @@
 
 export type PieceType = 'pawn' | 'rook' | 'bishop' | 'knight' | 'queen';
 
-export type GameMode = 'campaign' | 'endless';
+/** Боевые режимы: их принимает `POST /api/run/start` и выбирает игрок в меню. */
+export type GameMode = 'campaign' | 'jam' | 'race' | 'endless';
 
-/** Режимы лаборатории: «Парковка» и «Гонки» описаны в `modes.ts`. */
+/** Варианты правил: считаются тем же движком, но живут только в лаборатории. */
 export type LabMode =
-  | 'jam'
-  | 'race'
-  // Варианты для прогонов в лаборатории: тот же движок, другие переключатели.
   | 'jamExit2'
   | 'jamExit4'
   | 'raceDodge'
@@ -39,7 +37,7 @@ export interface PlayerCell {
 
 export interface GameState {
   version: 1;
-  /** Режим лаборатории может быть `jam` или `race`, боевой API принимает только два первых. */
+  /** Боевой API принимает режимы из `PLAYABLE_MODES`, остальные приходят только из лаборатории. */
   mode: AnyMode;
   width: number;
   height: number;

@@ -227,8 +227,12 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 
 Что нужно сделать:
 
-1. Миграция 0003: в Cloudflare dashboard → Workers & Pages → D1 → твоя база → SQL Console вставь содержимое
-   `migrations/0003_auth_link.sql` и выполни. Появится таблица `auth_links`.
+1. Миграции 0003 и 0004: в Cloudflare dashboard → Workers & Pages → D1 → твоя база → SQL Console вставь
+   содержимое `migrations/0003_auth_link.sql`, выполни, затем то же с `migrations/0004_mode_levels.sql`.
+   Первая добавляет таблицу `auth_links` для входа через бота, вторая колонку `users.mode_levels`
+   (прогресс «Парковки» и «Гонок») и индекс `idx_runs_level_mode` для статистики прохождений. Без второй
+   игра запускается, но финал забега в режиме с уровнем упрётся в `db_not_ready`, а вкладка «Игроки»
+   покажет «нет данных» вместо уровней режимов.
 2. Секрет подписи сеансов. Достаточно уже настроенного `ADMIN_SECRET`; `SESSION_SECRET` нужен, только если
    их хочется менять независимо (Workers → chesstg → Settings → Variables and Secrets → Add → Secret).
 3. `BOT_USERNAME` должен быть заполнен: из него собирается ссылка `https://t.me/<бот>?start=auth_<код>`.
@@ -293,7 +297,7 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 
 ## 7. Продакшен-чек-лист
 
-- [ ] `database_id` заменён, миграции применены.
+- [ ] `database_id` заменён, миграции применены (последняя `0004_mode_levels.sql`).
 - [ ] `BOT_TOKEN` и `WEBHOOK_SECRET` заданы как секреты.
 - [ ] `DEV_MODE: "false"`, `WEBAPP_URL` HTTPS, `BOT_USERNAME` заполнен.
 - [ ] `getWebhookInfo` без ошибок.

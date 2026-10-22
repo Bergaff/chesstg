@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { AdminError, fetchOverview } from '../api';
 import type { OverviewResponse } from '../types';
-import { Bars, Metric, Panel, StatusLine, Table, formatDateTime, formatNumber, formatPercent } from '../ui';
+import { Bars, Metric, Panel, StatusLine, Table, formatDateTime, formatNumber, formatPercent, modeTitle } from '../ui';
 
 const RANGES = [7, 14, 30, 90];
 
@@ -140,6 +140,26 @@ export function OverviewView({ onUnauthorized }: { onUnauthorized: (message: str
               </p>
             </Panel>
           </div>
+
+          <Panel title="Режимы за период" note="Кто во что играет: забегов, игроков и доля побед">
+            <Table head={['Режим', 'Игроков', 'Забегов', 'Побед', 'Проигрышей', 'Доля побед', 'Ходов в среднем']} empty="Забегов пока нет">
+              {(data.modes ?? []).map((row) => (
+                <tr key={row.mode}>
+                  <td>{modeTitle(row.mode)}</td>
+                  <td>{formatNumber(row.players)}</td>
+                  <td>{formatNumber(row.n)}</td>
+                  <td>{formatNumber(row.won)}</td>
+                  <td>{formatNumber(row.lost)}</td>
+                  <td>{formatPercent(row.winRate, 1)}</td>
+                  <td>{row.avgMoves.toFixed(1)}</td>
+                </tr>
+              ))}
+            </Table>
+            <p className="adm-note">
+              Прогресс каждого игрока по уровням и прохождения по конкретному уровню во вкладках
+              «Игроки» и «Прохождения».
+            </p>
+          </Panel>
 
           <Panel title="Воронка по уровням" note="Сколько игроков дошли до уровня">
             <Table head={['Уровень', 'Игроков', 'Доля']} empty="Данных пока нет">

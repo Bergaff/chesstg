@@ -3,6 +3,7 @@ import type {
   BotSetupResponse,
   BotStatusResponse, DiagResponse,
   HealthResponse,
+  LevelStatsResponse,
   LevelsResponse,
   LevelCheckReport,
   OverviewResponse,
@@ -138,6 +139,12 @@ export function fetchUsers(query: string, page: number, sort: string): Promise<U
 
 export function fetchUser(id: string): Promise<UserDetailResponse> {
   return request<UserDetailResponse>(`/users/${encodeURIComponent(id)}`);
+}
+
+/** Прохождения по уровням режима: где игроки встают и сколько пробуют. */
+export function fetchLevelStats(mode: 'campaign' | 'jam' | 'race', days: number): Promise<LevelStatsResponse> {
+  const params = new URLSearchParams({ mode, days: String(days) });
+  return request<LevelStatsResponse>(`/levels/stats?${params.toString()}`);
 }
 
 export function fetchPayments(days: number): Promise<PaymentsResponse> {

@@ -320,6 +320,11 @@ npm run deploy</pre>
                      проверяет initData только по BOT_TOKEN, а подпись Ed25519 проверить нечем.`}
                 {!diag.authDebug && ' Переменная AUTH_DEBUG в запущенной версии не активна, на сборку это не влияет.'}
               </p>
+              <p className={`adm-note${diag.schema && !diag.schema.modeLevels ? ' is-warn' : ''}`}>
+                {diag.schema
+                  ? `Схема базы v${diag.schema.version}: ${diag.schema.note}.`
+                  : 'Схему базы проверить не удалось: SQL консоль D1 не ответила.'}
+              </p>
               {diag.enabled && diag.entries.length === 0 && (
                 <p className="adm-note">Пока пусто: откройте игру из бота, и отказ проверки появится здесь.</p>
               )}

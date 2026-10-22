@@ -34,6 +34,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
 
   const campaignRun = active.campaign;
   const endlessRun = active.endless;
+  const modes = profile.modes;
 
   async function claimCoins() {
     if (adLoading || cooldownLeft > 0 || profile.adFree) return;
@@ -68,6 +69,36 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       return;
     }
     onPlay('endless');
+  }
+
+  /**
+   * Одна строка на режим с уровнем: «Парковка», «Гонки». Замок не прячет row,
+   * а показывает, где он откроется: игроку видно, куда расти.
+   */
+  function modeRow(mode: 'jam' | 'race', title: string, description: string) {
+    const progress = modes?.[mode];
+    const run = active[mode];
+    const unlocked = progress?.unlocked ?? true;
+    return (
+      <button
+        type="button"
+        className={cn('menu-row', !unlocked && 'locked')}
+        onClick={() => onPlay(mode)}
+        aria-disabled={!unlocked}
+      >
+        <span className="menu-row-main">
+          <span className="menu-row-title">{title}</span>
+          <span className="menu-row-desc">
+            {!unlocked
+              ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
+              : run
+                ? `Незаконченная партия, уровень ${run.level}, ход ${run.moves + 1}`
+                : `${description} Уровень ${progress?.level ?? 1}, пройдено ${Math.max(0, (progress?.maxLevel ?? 1) - 1)}`}
+          </span>
+        </span>
+        <span className="menu-row-end">{unlocked ? '→' : 'закрыт'}</span>
+      </button>
+    );
   }
 
   return (
@@ -116,6 +147,14 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         <div className="stat-row">
           <dt>Достигнутый уровень</dt>
           <dd className="serif">{profile.maxLevel}</dd>
+        </div>
+        <div className="stat-row">
+          <dt>Уровень в «Парковке»</dt>
+          <dd className="serif">{modes?.jam?.level ?? 1}</dd>
+        </div>
+        <div className="stat-row">
+          <dt>Уровень в «Гонках»</dt>
+          <dd className="serif">{modes?.race?.level ?? 1}</dd>
         </div>
         <div className="stat-row">
           <dt>Рекорд в бесконечном режиме</dt>
@@ -178,6 +217,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="menu-list">
+        {modeRow('jam', 'Парковка', 'Фигуры стоят стеной, дорога прочищается взятиями.')}
+        {modeRow('race', 'Гонки', 'Фигуры едут вниз навстречу, разойдитесь с ними.')}
         <button
           type="button"
           className={cn('menu-row', !profile.endlessUnlocked && 'locked')}

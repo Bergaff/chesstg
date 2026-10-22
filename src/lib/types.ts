@@ -1,5 +1,14 @@
 import type { BonusId, GameAction, GameMode, GameState, PieceType, SkinId } from '../engine';
 
+export interface ModeProgress {
+  /** Текущий уровень режима; для бесконечного всегда 0. */
+  level: number;
+  maxLevel: number;
+  unlocked: boolean;
+  /** На каком уровне кампании открывается режим. */
+  unlockAtLevel: number;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -21,6 +30,11 @@ export interface Profile {
   skins: SkinId[];
   skin: SkinId;
   inventory: Record<'hint' | 'freeze' | 'undo', number>;
+  /**
+   * Прогресс по всем режимам сразу: меню рисует карточки и замки из этого,
+   * отдельного запроса на режим нет. У бесконечного режима уровня нет.
+   */
+  modes: Record<GameMode, ModeProgress>;
   inviteCode: string;
   createdAt: number;
   prices: Record<BonusId, number>;
@@ -50,10 +64,8 @@ export interface RunSummary {
   updatedAt: number;
 }
 
-export interface ActiveRuns {
-  campaign?: RunSummary;
-  endless?: RunSummary;
-}
+/** Активные забеги по режимам: один на режим, поэтому ключ это id режима. */
+export type ActiveRuns = Partial<Record<GameMode, RunSummary>>;
 
 export interface RunPayload {
   id: string;
@@ -119,10 +131,12 @@ export interface LeaderboardRow {
   endlessBest: number;
   maxLevel: number;
   level: number;
+  /** Уровень в том режиме, по которому сейчас сортируется таблица. */
+  modeLevel: number;
 }
 
 export interface LeaderboardResponse {
-  metric: 'endless' | 'campaign';
+  metric: 'endless' | 'campaign' | 'jam' | 'race';
   scope: 'global' | 'friends';
   rows: LeaderboardRow[];
   myRank: number;

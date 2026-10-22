@@ -13,9 +13,13 @@ import {
   difficultyBand,
   enumeratePlacements,
   heightForLevel,
+  isLevelMode,
   legalMoves,
   modeDef,
   modeFamily,
+  modeGate,
+  modeUnlocked,
+  PLAYABLE_MODES,
   piecesFor,
   placementSpace,
   sizeForLevel,
@@ -363,8 +367,26 @@ describe('пространство расстановок по режимам', 
   });
 
   it('описания режимов готовы к показу в админке', () => {
-    expect(modeDef('jam').playable).toBe(false);
+    expect(modeDef('jam').playable).toBe(true);
     expect(modeDef('campaign').playable).toBe(true);
     expect(modeDef('race').note.length).toBeGreaterThan(10);
+  });
+
+  it('боевые режимы открываются по уровням кампании', () => {
+    expect([...PLAYABLE_MODES]).toEqual(['campaign', 'jam', 'race', 'endless']);
+    expect(modeGate('campaign')).toBe(1);
+    expect(modeGate('jam')).toBe(3);
+    expect(modeGate('race')).toBe(5);
+    expect(modeGate('endless')).toBe(11);
+    expect(modeUnlocked('jam', 2)).toBe(false);
+    expect(modeUnlocked('jam', 3)).toBe(true);
+    expect(modeUnlocked('race', 4)).toBe(false);
+    expect(modeUnlocked('race', 5)).toBe(true);
+    expect(modeUnlocked('endless', 10)).toBe(false);
+    // Лабораторные варианты не играются: их нет в списке боевых режимов,
+    // а старт на сервере отсекает их до проверки гейта.
+    expect(PLAYABLE_MODES).not.toContain('jamDiag');
+    expect(isLevelMode('race')).toBe(true);
+    expect(isLevelMode('endless')).toBe(false);
   });
 });

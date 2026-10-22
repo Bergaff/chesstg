@@ -61,7 +61,7 @@ describe('health', () => {
     expect(body.ok).toBe(false);
     expect(body.error).toBe('db_not_ready');
     expect(body.missing).toEqual([...GAME_TABLES]);
-    expect(body.schemaVersion).toBe(3);
+    expect(body.schemaVersion).toBe(4);
   });
 
   it('отличает недоступную базу от пустой', async () => {

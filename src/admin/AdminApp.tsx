@@ -4,17 +4,19 @@ import { AdminError, fetchHealth, fetchStatus, login, logout } from './api';
 import type { HealthResponse } from './types';
 import { OverviewView } from './views/OverviewView';
 import { LevelsView } from './views/LevelsView';
+import { LevelStatsView } from './views/LevelStatsView';
 import { LabView } from './views/LabView';
 import { BotView } from './views/BotView';
 import { UsersView } from './views/UsersView';
 import { PaymentsView } from './views/PaymentsView';
 import { StatusLine, formatDateTime } from './ui';
 
-type Tab = 'overview' | 'levels' | 'lab' | 'users' | 'payments' | 'bot';
+type Tab = 'overview' | 'levels' | 'levelstats' | 'lab' | 'users' | 'payments' | 'bot';
 
 const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'overview', title: 'Обзор' },
   { id: 'levels', title: 'Уровни' },
+  { id: 'levelstats', title: 'Прохождения' },
   { id: 'lab', title: 'Лаборатория' },
   { id: 'users', title: 'Игроки' },
   { id: 'payments', title: 'Платежи' },
@@ -167,6 +169,7 @@ npx wrangler secret put ADMIN_SECRET</pre>
         )}
         {tab === 'overview' && <OverviewView onUnauthorized={onUnauthorized} />}
         {tab === 'levels' && <LevelsView onUnauthorized={onUnauthorized} />}
+        {tab === 'levelstats' && <LevelStatsView onUnauthorized={onUnauthorized} />}
         {tab === 'lab' && <LabView onUnauthorized={onUnauthorized} />}
         {tab === 'users' && <UsersView onUnauthorized={onUnauthorized} />}
         {tab === 'payments' && <PaymentsView onUnauthorized={onUnauthorized} />}

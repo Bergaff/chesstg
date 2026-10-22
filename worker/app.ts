@@ -10,6 +10,12 @@ import {
   campaignCoinReward,
   createCampaignLevel,
   createEndlessRun,
+  createSpecialLevel,
+  isLevelMode,
+  modeDef,
+  modeGate,
+  modeUnlocked,
+  rulesFor,
   endlessCoinReward,
   isBonusId,
   isSkinId,
@@ -43,6 +49,9 @@ import {
   activeRuns,
   getOrCreateUser,
   getRun,
+  modeProgress,
+  parseModeLevels,
+  serializeModeLevels,
   getUserById,
   grantsForRun,
   ownedSkins,
@@ -53,7 +62,7 @@ import {
   toProfile,
   REFERRAL_BONUS,
 } from './db';
-import { fail, HttpError, isPrefix, parseActions, parseStartOptions, readJson, nowMs } from './http';
+import { fail, HttpError, isPrefix, parseActions, parseRunMode, parseStartOptions, readJson, nowMs } from './http';
 import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment } from './payments';
 import {
   answerCallbackQuery,
@@ -476,14 +485,19 @@ app.get('/api/session', async (c) => {
 app.post('/api/run/start', async (c) => {
   const authCtx = auth(c);
   const body = await readJson(c);
-  const mode = body.mode === 'endless' ? 'endless' : body.mode === 'campaign' ? 'campaign' : null;
+  const mode = parseRunMode(body.mode);
   if (!mode) fail(400, 'bad_mode', 'Неизвестный режим');
 
   const user = await refreshLives(c.env, authCtx.user);
-  if (mode === 'endless' && user.max_level <= 10) {
-    fail(403, 'endless_locked', 'Бесконечный режим откроется после 10 уровня', {
-      unlockAtLevel: 10,
-    });
+  if (!modeUnlocked(mode, user.max_level)) {
+    // Код для бесконечного режима исторический: на него смотрит и клиент, и
+    // интеграционный тест. Остальные режимы получают общий `mode_locked`.
+    fail(
+      403,
+      mode === 'endless' ? 'endless_locked' : 'mode_locked',
+      `Режим «${modeDef(mode).name}» откроется на ${modeGate(mode)} уровне кампании`,
+      { mode, unlockAtLevel: modeGate(mode) },
+    );
   }
 
   const existing = await c.env.DB.prepare(
@@ -505,20 +519,28 @@ app.post('/api/run/start', async (c) => {
   }
 
   const { repeat } = parseStartOptions(body);
+  const level = isLevelMode(mode) ? modeProgress(user, mode).level : 0;
   let seed = randomSeed();
   // «Переиграть» просит то же поле, что было в последнем забеге на этом уровне.
   // Зерно храним в runs, поэтому повтор дешёвый и честный: сервер сам решает,
   // какую расстановку выдать, клиент не может выбрать лёгкую.
-  if (repeat && mode === 'campaign') {
+  if (repeat && isLevelMode(mode)) {
     const previous = await c.env.DB.prepare(
-      "SELECT seed FROM runs WHERE user_id = ? AND mode = 'campaign' AND level = ? ORDER BY created_at DESC LIMIT 1",
+      'SELECT seed FROM runs WHERE user_id = ? AND mode = ? AND level = ? ORDER BY created_at DESC LIMIT 1',
     )
-      .bind(user.id, user.level)
+      .bind(user.id, mode, level)
       .first<{ seed: number | string | null }>();
     const stored = Number(previous?.seed);
     if (Number.isFinite(stored) && stored >= 0) seed = Math.floor(stored) >>> 0;
   }
-  const initial = mode === 'campaign' ? createCampaignLevel(user.level, seed) : createEndlessRun(seed);
+  // Кампания и режимы с уровнем генерируются по-разному: у «Парковки» и «Гонок»
+  // свой генератор с отбором расстановки по полосе сложности режима.
+  const initial =
+    mode === 'campaign'
+      ? createCampaignLevel(level, seed)
+      : mode === 'endless'
+        ? createEndlessRun(seed)
+        : createSpecialLevel(mode, level, seed);
   const id = crypto.randomUUID();
   const now = nowMs();
 
@@ -526,7 +548,7 @@ app.post('/api/run/start', async (c) => {
     `INSERT INTO runs (id, user_id, mode, level, seed, initial_state, actions, moves, score, status, result, finish_id, created_at, updated_at, finished_at)
      VALUES (?, ?, ?, ?, ?, ?, '[]', 0, 0, 'active', NULL, NULL, ?, ?, NULL)`,
   )
-    .bind(id, user.id, mode, mode === 'campaign' ? user.level : 0, seed, JSON.stringify(initial), now, now)
+    .bind(id, user.id, mode, level, seed, JSON.stringify(initial), now, now)
     .run();
 
   const run = await getRun(c.env, id);
@@ -631,17 +653,32 @@ app.post('/api/run/:id/finish', async (c) => {
   let bestTierAfter = user.endless_best_tier;
   let bestMovesAfter = user.endless_best_moves;
   let newBest = false;
+  let modeLevelsAfter = user.mode_levels;
+  let modeLevelsChanged = false;
 
-  if (run.mode === 'campaign') {
+  // Режимы с уровнем (кампания, «Парковка», «Гонки») продвигаются одинаково:
+  // победа на своём уровне даёт награду и следующий уровень, поражение стоит
+  // жизнь и оставляет уровень тот же. Разница только в том, где лежит прогресс:
+  // у кампании в колонках профиля, у остальных в JSON `mode_levels`.
+  const mode = run.mode;
+  if (isLevelMode(mode)) {
+    const progress = modeProgress(user, mode);
     if (outcome === 'won') {
-      if (run.level > user.level) {
+      if (run.level > progress.level) {
         fail(409, 'level_out_of_sync', 'Уровень забега опережает профиль');
       }
-      if (run.level === user.level) {
+      if (run.level === progress.level) {
         reward = campaignCoinReward(run.level);
         levelUp = true;
-        levelAfter = user.level + 1;
-        maxLevelAfter = Math.max(user.max_level, levelAfter);
+        levelAfter = progress.level + 1;
+        if (mode === 'campaign') {
+          maxLevelAfter = Math.max(user.max_level, levelAfter);
+        } else {
+          const levels = parseModeLevels(user.mode_levels);
+          levels[mode] = { level: levelAfter, maxLevel: Math.max(progress.maxLevel, levelAfter) };
+          modeLevelsAfter = serializeModeLevels(levels);
+          modeLevelsChanged = true;
+        }
       }
     } else if (outcome === 'lost') {
       const next = loseLife(user.lives, user.lives_at, now);
@@ -663,8 +700,8 @@ app.post('/api/run/:id/finish', async (c) => {
     }
   }
 
-  const wasUnlocked = user.max_level > 10;
-  const endlessUnlockedNow = !wasUnlocked && maxLevelAfter > 10;
+  const wasUnlocked = modeUnlocked('endless', user.max_level);
+  const endlessUnlockedNow = !wasUnlocked && modeUnlocked('endless', maxLevelAfter);
   const finishId = crypto.randomUUID();
   const newStatus = outcome === 'won' ? 'won' : outcome === 'lost' ? 'lost' : 'quit';
 
@@ -709,8 +746,15 @@ app.post('/api/run/:id/finish', async (c) => {
     binds.push(reward);
   }
   if (levelUp) {
-    set.push('level = ?', 'max_level = MAX(max_level, ?)');
-    binds.push(levelAfter, levelAfter);
+    if (mode === 'campaign') {
+      set.push('level = ?', 'max_level = MAX(max_level, ?)');
+      binds.push(levelAfter, levelAfter);
+    } else {
+      // У «Парковки» и «Гонок» кампанийный максимум не растёт: режимы открываются
+      // по кампании, а свой прогресс хранят в отдельном поле.
+      set.push('mode_levels = ?');
+      binds.push(modeLevelsAfter);
+    }
   }
   if (outcome === 'lost') {
     set.push('lives = ?', 'lives_at = ?');
@@ -1010,12 +1054,23 @@ app.get('/api/pay/status', async (c) => {
 app.get('/api/leaderboard', async (c) => {
   const authCtx = auth(c);
   const user = authCtx.user;
-  const metric = c.req.query('metric') === 'campaign' ? 'campaign' : 'endless';
+  const metricRaw = c.req.query('metric');
+  const metric: 'campaign' | 'endless' | 'jam' | 'race' =
+    metricRaw === 'campaign' || metricRaw === 'jam' || metricRaw === 'race' ? metricRaw : 'endless';
   const friends = c.req.query('scope') === 'friends';
+  // Прогресс «Парковки» и «Гонок» лежит в JSON-колонке: сравнивать его приходится
+  // json_extract'ом. Если миграции не применены, запрос упадёт и onError отдаст
+  // понятный db_not_ready вместо пустой таблицы.
+  const modeColumn = (mode: 'jam' | 'race') =>
+    `COALESCE(CAST(json_extract(mode_levels, '$.${mode}.level') AS INTEGER), 0)`;
+  const rankColumn =
+    metric === 'campaign' ? 'max_level' : metric === 'endless' ? 'endless_best' : modeColumn(metric);
   const order =
     metric === 'campaign'
       ? 'max_level DESC, endless_best DESC, updated_at ASC'
-      : 'endless_best DESC, max_level DESC, updated_at ASC';
+      : metric === 'endless'
+        ? 'endless_best DESC, max_level DESC, updated_at ASC'
+        : `${rankColumn} DESC, max_level DESC, updated_at ASC`;
 
   const where = friends
     ? '(id = ? OR referred_by = ?)'
@@ -1023,7 +1078,7 @@ app.get('/api/leaderboard', async (c) => {
   const bindings = friends ? [user.id, user.id] : [];
 
   const { results } = await c.env.DB.prepare(
-    `SELECT id, first_name, endless_best, endless_best_tier, max_level, level FROM users
+    `SELECT id, first_name, endless_best, endless_best_tier, max_level, level, mode_levels FROM users
      WHERE ${where} ORDER BY ${order} LIMIT 50`,
   )
     .bind(...bindings)
@@ -1034,6 +1089,7 @@ app.get('/api/leaderboard', async (c) => {
       endless_best_tier: number;
       max_level: number;
       level: number;
+      mode_levels: string | null;
     }>();
 
   const rows = results.map((row, index) => ({
@@ -1043,13 +1099,19 @@ app.get('/api/leaderboard', async (c) => {
     endlessBest: row.endless_best,
     maxLevel: row.max_level,
     level: row.level,
+    modeLevel:
+      metric === 'jam' || metric === 'race' ? modeProgress(row as unknown as UserRow, metric).level : 0,
   }));
 
   const rankWhere = friends
     ? `(id = ? OR referred_by = ?) AND `
     : `is_guest = 0 AND `;
-  const rankColumn = metric === 'campaign' ? 'max_level' : 'endless_best';
-  const myValue = metric === 'campaign' ? user.max_level : user.endless_best;
+  const myValue =
+    metric === 'campaign'
+      ? user.max_level
+      : metric === 'endless'
+        ? user.endless_best
+        : modeProgress(user, metric).level;
   const rankBindings = friends ? [user.id, user.id, myValue] : [myValue];
   const rankRow = await c.env.DB.prepare(
     `SELECT COUNT(*) + 1 AS rank FROM users WHERE ${rankWhere}${rankColumn} > ?`,

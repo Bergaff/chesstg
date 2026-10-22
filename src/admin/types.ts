@@ -50,8 +50,12 @@ export interface OverviewResponse {
     won: number;
     winRate: number;
     campaign: RunGroup[];
+    jam?: RunGroup[];
+    race?: RunGroup[];
     endless: RunGroup[];
   };
+  /** Сводка по каждому режиму за период: кто во что играет и с каким итогом. */
+  modes?: Array<{ mode: string; n: number; players: number; won: number; lost: number; avgMoves: number; winRate: number }>;
   economy: {
     coinsEarned: number;
     coinsSpent: number;
@@ -109,6 +113,14 @@ export interface UserRow {
   skin: string;
   runs: number;
   purchases: number;
+  /**
+   * Прогресс «Парковки» и «Гонок». Null, если колонка mode_levels ещё не
+   * применена: тогда это «нет данных», а не «первый уровень».
+   */
+  jamLevel: number | null;
+  jamMax: number | null;
+  raceLevel: number | null;
+  raceMax: number | null;
 }
 
 export interface UsersResponse {
@@ -116,13 +128,95 @@ export interface UsersResponse {
   page: number;
   pageSize: number;
   rows: UserRow[];
+  /** Список пришёл без прогресса режимов: в базе нет колонки mode_levels. */
+  degraded?: boolean;
+}
+
+/** Прогресс одного режима вместе с условием открытия. */
+export interface ModeProgressEntry {
+  level: number;
+  maxLevel: number;
+  unlocked: boolean;
+  unlockAtLevel: number;
+}
+
+export interface UserRunRow {
+  id: string;
+  mode: string;
+  level: number;
+  seed: number;
+  moves: number;
+  score: number;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+  outcome: string;
+  capturedBy: string | null;
+  stuck: boolean;
+  coinsEarned: number;
+  levelUp: boolean;
+  modeLevel: number;
+}
+
+export interface UserHistoryRow {
+  mode: string;
+  level: number;
+  played: number;
+  won: number;
+  lost: number;
+  quit: number;
+  avgMoves: number;
+  firstAt: number;
+  lastAt: number;
+}
+
+export interface UserGrantRow {
+  kind: string;
+  source: string;
+  n: number;
+  firstAt: number;
+  lastAt: number;
 }
 
 export interface UserDetailResponse {
   user: Record<string, unknown>;
-  runs: Array<Record<string, unknown>>;
+  /** Прогресс по всем четырём режимам: текущий уровень, лучший, открыт ли. */
+  progress?: Record<'campaign' | 'jam' | 'race' | 'endless', ModeProgressEntry>;
+  runs: UserRunRow[];
+  /** Сколько раз игрок запускал каждый уровень какого режима. */
+  history?: UserHistoryRow[];
+  grants?: UserGrantRow[];
+  ads?: Array<{ kind: string; n: number }>;
+  byMode?: Array<{ mode: string; n: number }>;
   payments: Array<Record<string, unknown>>;
   events: Array<Record<string, unknown>>;
+}
+
+export interface LevelStatRow {
+  level: number;
+  played: number;
+  players: number;
+  won: number;
+  lost: number;
+  quit: number;
+  active: number;
+  /** Поражения в тупике: поле, где сходить некуда, то есть брак генератора. */
+  stuck: number;
+  winRate: number;
+  attemptsPerPlayer: number;
+  avgMoves: number;
+  avgScore: number;
+  hints: number;
+  freezes: number;
+  undos: number;
+  firstAt: number;
+  lastAt: number;
+}
+
+export interface LevelStatsResponse {
+  mode: 'campaign' | 'jam' | 'race';
+  days: number;
+  rows: LevelStatRow[];
 }
 
 export interface PaymentsResponse {
@@ -233,6 +327,8 @@ export interface DiagResponse {
   authDebug?: boolean;
   /** Ключ подписи initData, который Telegram отдаёт по getWebAppAttachInfo. */
   webApp?: { present: boolean; note: string; checkedAt: number };
+  /** Состояние схемы: хватает ли колонки прогресса режимов. */
+  schema?: { version: number; usersColumns: string[]; modeLevels: boolean; note: string };
   entries: DiagEntry[];
 }
 
