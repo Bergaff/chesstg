@@ -325,12 +325,48 @@ body {
   flex: 0 0 auto;
 }
 
+.adm-variant-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
 .adm-variant-group {
-  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 10px 12px 2px;
+  background: var(--bg-soft);
 }
 
 .adm-variant-group .adm-note {
-  margin-top: 0;
+  margin-top: 6px;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.adm-variant-group .adm-checks {
+  margin: 6px 0 10px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.adm-check.is-group {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.adm-check.is-variant {
+  padding-left: 14px;
+}
+
+.adm-code.adm-copyable {
+  white-space: pre;
+  max-height: 320px;
+  overflow: auto;
+  cursor: text;
+  user-select: all;
 }
 
 .adm-subtitle {

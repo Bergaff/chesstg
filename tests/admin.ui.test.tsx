@@ -180,9 +180,30 @@ describe('админка', () => {
     expect(await screen.findByText('Лаборатория расстановок')).toBeTruthy();
     expect(screen.getByText('Запустить разбор')).toBeTruthy();
     expect(screen.getByText('Сохранённые отчёты')).toBeTruthy();
-    // Прогон вариантов это часть лаборатории: панели и таблица сравнения.
+    // Прогон вариантов это часть лаборатории: выбор режимов, кнопка и текст для копирования.
     expect(screen.getByText('Прогон сравнений')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Сравнить варианты' })).toBeTruthy();
-    expect(screen.getByText('«Парковка»: стоят фигуры или уходят с площадки')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Сравнить (7)' })).toBeTruthy();
+    expect(screen.getByText('«Парковка» и уход фигур')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Гонки на уклонение' })).toBeTruthy();
+  });
+
+  it('считает отмеченные варианты и отдаёт текст одним блоком', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+    // Оставляем одну группу, чтобы прогон оставался быстрым: базовая «Парковка»
+    // и три её варианта.
+    fireEvent.click(screen.getByRole('button', { name: 'Снять все' }));
+    expect(screen.getByRole('button', { name: 'Сравнить (0)' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: '«Парковка» и уход фигур' }));
+    expect(screen.getByRole('button', { name: 'Сравнить (4)' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Сравнить (4)' }));
+
+    expect(await screen.findByText(/^Готово: 4 из 4 вариантов/)).toBeTruthy();
+    const text = await screen.findByText(/^Прогон сравнений, уровень/);
+    expect(text.textContent).toContain('| Режим | Поле | С решением |');
+    expect(text.textContent).toContain('Парковка + уход вбок');
+    expect(text.textContent).toContain('Индекс реиграбельности');
   });
 });
