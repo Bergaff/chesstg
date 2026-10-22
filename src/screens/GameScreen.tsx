@@ -1078,6 +1078,8 @@ function LoseModal({
     void onRefresh();
   });
   const captured = result.capturedBy;
+  // В тупике фигуры не ходят и не бьют, поэтому победителя у поражения нет.
+  const stuck = captured === undefined;
   const canRetry = profile.lives > 0;
 
   return (
@@ -1087,9 +1089,13 @@ function LoseModal({
           <span className="result-glyph">{captured ? PIECE_GLYPH[captured] : '♟'}</span>
         </div>
         <span className="label">{isEndless ? `Высота ${result.score}` : `Уровень ${result.level}`}</span>
-        <h2 className="modal-title" id="lose-title">Пешка поймана</h2>
+        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : 'Пешка поймана'}</h2>
         <p className="modal-text">
-          {captured ? `${PIECE_NAME[captured]} добрался до вашей пешки.` : 'Фигура добралась до вашей пешки.'}{' '}
+          {stuck
+            ? 'Дорога закрыта: ходить некуда, взятия кончились.'
+            : captured
+              ? `${PIECE_NAME[captured]} добрался до вашей пешки.`
+              : 'Фигура добралась до вашей пешки.'}{' '}
           Минус одна жизнь.
         </p>
       </div>

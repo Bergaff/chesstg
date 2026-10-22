@@ -20,6 +20,7 @@ import {
   type GameState,
   type PieceType,
 } from './index';
+import { RuleError } from './types';
 
 function base(partial: Partial<GameState>): GameState {
   return {
@@ -158,6 +159,67 @@ describe('квота взятий', () => {
       const state = wall(mode);
       expect(capturesLeft(base({ mode, captures: 40 }))).toBe(Number.POSITIVE_INFINITY);
       expect(legalMoves(state).some((move) => Boolean(move.takes))).toBe(true);
+    }
+  });
+});
+
+describe('тупик в «Парковке»', () => {
+  it('закрытая дорога это поражение, а не вечное ожидание', () => {
+    // Карман: единственный ход ведёт в клетку, из которой дальше некуда,
+    // а взятий не осталось. Фигуры стоят, позиция не изменится сама.
+    const pocket = base({
+      mode: 'jam',
+      width: 3,
+      height: 5,
+      player: { x: 0, y: 0 },
+      captures: 3,
+      enemies: [
+        { id: 'e1', type: 'pawn', x: 1, y: 1 },
+        { id: 'e2', type: 'pawn', x: 0, y: 2 },
+        { id: 'e3', type: 'pawn', x: 1, y: 2 },
+      ],
+    });
+    expect(legalMoves(pocket).length).toBe(1);
+    const stuckState = applyAction(pocket, { type: 'move', dx: 0, dy: 1 });
+    expect(stuckState.status).toBe('lost');
+    expect(stuckState.lastEvent).toBe('stuck');
+    expect(() => applyAction(stuckState, { type: 'skip' })).toThrow(RuleError);
+  });
+
+  it('пропуск в статичном режиме не считается вынужденным', () => {
+    const blocked = base({
+      mode: 'jam',
+      width: 3,
+      height: 5,
+      player: { x: 0, y: 0 },
+      captures: 3,
+      enemies: [
+        { id: 'e1', type: 'pawn', x: 0, y: 1 },
+        { id: 'e2', type: 'pawn', x: 1, y: 1 },
+      ],
+    });
+    expect(legalMoves(blocked).length).toBe(0);
+    expect(() => applyAction(blocked, { type: 'skip' })).toThrow(RuleError);
+  });
+
+  it('в кампании и «Гонках» вынужденный пропуск остаётся бесплатным', () => {
+    for (const mode of ['campaign', 'race'] as const) {
+      const state = base({
+        mode,
+        width: 3,
+        height: 4,
+        player: { x: 1, y: 0 },
+        skips: 0,
+        captures: 0,
+        enemies: [
+          { id: 'e1', type: 'rook', x: 0, y: 1 },
+          { id: 'e2', type: 'rook', x: 1, y: 1 },
+          { id: 'e3', type: 'rook', x: 2, y: 1 },
+        ],
+      });
+      if (legalMoves(state).length > 0) continue;
+      const after = applyAction(state, { type: 'skip' });
+      expect(after.skips ?? 0).toBe(0);
     }
   });
 });

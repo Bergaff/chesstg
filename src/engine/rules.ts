@@ -24,7 +24,7 @@ function enemyPhase(state: GameState): void {
 
   const escaped: string[] = [];
   for (const enemy of state.enemies) {
-    const target = rules.motion === 'greedy' ? enemyTarget(state, enemy) : enemyTarget(state, enemy);
+    const target = enemyTarget(state, enemy);
     if (target === 'escape') {
       // В «Гонках» фигура, ушедшая за нижний край, покидает поле.
       escaped.push(enemy.id);
@@ -74,7 +74,8 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   const state = cloneState(previous);
 
   if (action.type === 'skip') {
-    const forced = legalMoves(state).length === 0;
+    // Вынужденный пропуск бесплатен, но только там, где ход противника что-то меняет.
+    const forced = legalMoves(state).length === 0 && rulesFor(state.mode).motion !== 'static';
     if (!forced) {
       // Добровольный пропуск тратит квоту режима: иначе забег превращается
       // в ожидание, пока фигуры разойдутся сами.
@@ -126,6 +127,16 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   if (state.mode === 'endless') {
     state.tier = 1 + Math.floor(state.moves / 5);
     ensureEndlessSpace(state);
+  }
+
+  // Тупик режима с стоячими фигурами («Парковка»): там нечего ждать, позиция
+  // не изменится ни через один пропуск, поэтому закрытая дорога это поражение,
+  // а не вечное ожидание. В остальных режимах ход противника ещё может открыть
+  // проход, и право пропустить ход остаётся.
+  if (rulesFor(state.mode).motion === 'static' && state.status === 'playing' && legalMoves(state).length === 0) {
+    state.status = 'lost';
+    state.lastEvent = 'stuck';
+    return state;
   }
 
   enemyPhase(state);
