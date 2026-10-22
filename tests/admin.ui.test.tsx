@@ -373,4 +373,25 @@ describe('админка', () => {
     expect(text.textContent).toContain('Парковка + уход вбок');
     expect(text.textContent).toContain('Индекс реиграбельности');
   });
+
+  it('меряет боевую «Парковку» длиной плана решателя', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    // У боевого режима своя метрика: не доля побед, а длина плана и запас бюджета.
+    expect(screen.getByText('Уровни «Парковки»')).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Сверх бюджета' })).toBeTruthy();
+    // Два уровня и минимум досок: прогон обязан закончиться внутри теста, иначе
+    // панель допишет состояние уже после разборки окружения.
+    fireEvent.change(screen.getByLabelText('Уровни «Парковки»'), { target: { value: '1,6' } });
+    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Замерить генератор (2)' }));
+
+    expect(await screen.findByRole('button', { name: 'Скопировать таблицу' }, { timeout: 30_000 })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
+    // Решаемость у генератора обязана быть полной: план ищет решатель, а не удача.
+    expect(screen.getAllByText('100.0%').length).toBe(2);
+  }, 60_000);
 });

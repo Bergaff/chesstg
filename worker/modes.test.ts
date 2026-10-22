@@ -8,7 +8,7 @@ import {
   modeProgress,
   toProfile,
 } from './db';
-import { RACE_PIN_ROW, RACE_ROWS, RACE_WIDTH } from '../src/engine';
+import { RACE_KING_ROW, RACE_ROWS, RACE_WIDTH } from '../src/engine';
 import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
 import type { UserRow } from './types';
 
@@ -140,18 +140,20 @@ describe('прогресс режимов в JSON-колонке', () => {
 });
 
 describe('активная партия и поле прежней сборки', () => {
-  /** Головоломка «Парковки»: фигуры и линия парковки, пешки нет. */
+  /** Головоломка «Парковки»: фигуры и счёт уведённых, пешки нет. */
   const puzzle = {
     mode: 'jam',
+    version: 2,
     width: 5,
     height: 7,
-    mid: 3,
     pieces: [{ id: 'w1', type: 'rook', x: 0, y: 0, side: 'white' }],
     moves: 0,
     budget: 20,
+    total: 1,
+    removed: 0,
     status: 'playing',
   };
-  /** Прежняя песочница того же режима: пешка, враги, ни фигур, ни линии. */
+  /** Прежняя песочница того же режима: пешка, враги, ни фигур, ни счёта. */
   const sandbox = {
     mode: 'jam',
     width: 5,
@@ -168,7 +170,7 @@ describe('активная партия и поле прежней сборки'
     shield: 0,
     status: 'playing',
   };
-  const pawn = { ...sandbox, mode: 'race', player: { x: 3, y: RACE_PIN_ROW } };
+  const king = { ...sandbox, mode: 'race', player: { x: 3, y: RACE_KING_ROW } };
   const runRow = (patch: Partial<{ mode: string; initial_state: string; actions: string }> = {}) => ({
     mode: 'jam',
     initial_state: JSON.stringify(puzzle),
@@ -181,11 +183,11 @@ describe('активная партия и поле прежней сборки'
     expect(runShapeMatchesMode(runRow({ initial_state: JSON.stringify(sandbox) }))).toBe(false);
   });
 
-  it('у конвейера требует приколотый ряд', () => {
-    expect(runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify(pawn) }))).toBe(true);
+  it('у гонок требует короля в стартовом ряду', () => {
+    expect(runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify(king) }))).toBe(true);
     expect(
       runShapeMatchesMode(
-        runRow({ mode: 'race', initial_state: JSON.stringify({ ...pawn, player: { x: 3, y: 0 } }) }),
+        runRow({ mode: 'race', initial_state: JSON.stringify({ ...king, player: { x: 3, y: 0 } }) }),
       ),
     ).toBe(false);
     expect(RACE_WIDTH).toBeGreaterThan(0);
@@ -195,6 +197,14 @@ describe('активная партия и поле прежней сборки'
   it('журнал чужого режима партию не продолжает', () => {
     expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'move', dx: 1 }]) }))).toBe(false);
     expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 1, y: 1 } }]) }))).toBe(true);
+  });
+
+  it('уход за край попадает в журнал и партию не ломает', () => {
+    // Клетка y = -1 вне поля: валидатор обязан её пропускать, иначе ход
+    // «увести фигуру» сервер посчитал бы битым журналом и партию закрыл.
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: -1 } }]) }))).toBe(true);
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: 7 } }]) }))).toBe(true);
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: -1, y: 0 } }]) }))).toBe(false);
   });
 
   it('битое поле и пустая строка не продолжаются, но и не падают', () => {

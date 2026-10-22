@@ -116,7 +116,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             уровней с провалами <b>{stuckLevels}</b>
           </span>
           <span>
-            {recordMode ? 'уровней со средним рядом ниже 10' : 'уровней с долей побед ниже 25%'} <b>{hardLevels}</b>
+            {recordMode ? 'уровней со средним забегом короче 10 ходов' : 'уровней с долей побед ниже 25%'} <b>{hardLevels}</b>
           </span>
           {edge && (
             <span>
@@ -130,7 +130,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             'Уровень',
             'Игроков',
             'Забегов',
-            ...(recordMode ? ['Лучший ряд', 'Средний ряд'] : ['Побед', 'Доля']),
+            ...(recordMode ? ['Лучший забег', 'Средний забег'] : ['Побед', 'Доля']),
             'Проигрышей',
             stuckLabel,
             'Брошено',

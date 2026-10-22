@@ -5,6 +5,7 @@ import {
   RACE_VARIANTS,
   analyzeVariant,
   compareVariants,
+  measureJamLevels,
 } from './replay';
 import { SURVIVAL_DEPTH, auditState, survivalTargetFor } from './audit';
 import { MODE_RULES, rulesFor } from './modes';
@@ -80,18 +81,37 @@ describe('прогон сравнений', () => {
     expect(dodge.survival!.max).toBeLessThan(SURVIVAL_DEPTH);
   });
 
-  // Разбор двух режимов без финиша самый дорогой в файле: перебор по глубине
-  // идёт по всем трём ходам пешки, поэтому тесту нужен свой потолок времени.
-  it('отчёт по уклонению и отчёт по конвейеру измеряют жизнь', () => {
+  // Разбор двух режимов без финиша самый дорогой в файле: у пешки перебор идёт
+  // по трём ходам на глубину, у короля длину считает прогон, поэтому тесту нужен
+  // свой потолок времени.
+  it('отчёт по уклонению и отчёт по королю измеряют жизнь', () => {
     const dodge = analyzeVariant({ mode: 'raceDodge', level: 6, samples: 2, seed: 500, maxDepth: 8 });
     expect(dodge.survival).toBeDefined();
     expect(dodge.survival!.avg).toBeGreaterThan(0);
     expect(dodge.survival!.min).toBeGreaterThan(0);
-    const race = analyzeVariant({ mode: 'race', level: 6, samples: 2, seed: 500, maxDepth: 6 });
+
+    const race = analyzeVariant({ mode: 'race', level: 6, samples: 4, seed: 500 });
     expect(race.survival).toBeDefined();
-    expect(race.survival!.avg).toBeGreaterThan(0);
+    // Длина забега короля измеряется прогоном: бот живёт десятки ходов, а не
+    // один-два, и в потолок прогона забег упираться не должен.
+    expect(race.survival!.avg).toBeGreaterThan(5);
+    expect(race.survival!.capped).toBe(0);
+    expect(race.survival!.max).toBeLessThan(240);
     expect(race.inBandShare).toBeGreaterThanOrEqual(0);
-  }, 30_000);
+  }, 60_000);
+
+  it('замер генератора парковки считает план, а не долю побед', () => {
+    const rows = measureJamLevels([1, 12], 6, 909);
+    expect(rows.map((row) => row.level)).toEqual([1, 12]);
+    for (const row of rows) {
+      expect(row.solvedShare).toBe(1);
+      expect(row.overBudget).toBe(0);
+      expect(row.avgPieces).toBeGreaterThanOrEqual(4);
+      expect(row.avgCost).toBeGreaterThan(0);
+    }
+    // Пробка обязана усложняться: план на 12-м уровне длиннее, чем на первом.
+    expect(rows[1].avgCost).toBeGreaterThan(rows[0].avgCost);
+  }, 60_000);
 
   it('сравнение возвращает отчёты по порядку и без расхождений на равных правилах', () => {
     const reports = compareVariants(['jam', 'campaignFreeDiag'], 6, 4, 909);

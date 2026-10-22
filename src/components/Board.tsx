@@ -3,10 +3,12 @@ import {
   PIECE_GLYPH,
   SKINS,
   endlessViewport,
+  enemyAttacksCell,
   rulesFor,
   type Cell,
   type GameState,
   type MoveDx,
+  type MoveDy,
   type MoveOption,
   type SkinId,
 } from '../engine';
@@ -24,7 +26,7 @@ interface BoardProps {
   hint: Cell[];
   skin: SkinId;
   interactive: boolean;
-  onMove: (dx: MoveDx, dy?: 0 | 1 | 2) => void;
+  onMove: (dx: MoveDx, dy?: MoveDy) => void;
   turn: number;
   /** Куда переставились фигуры последним ходом: нужно для показа хода врага. */
   moved?: MovedPiece[];
@@ -34,6 +36,17 @@ interface BoardProps {
 
 const FRAME_PAD = 8;
 const MOVE_GLYPH: Record<MoveDx, string> = { [-1]: '↖', [0]: '↑', [1]: '↗' };
+/** Король ходит во все стороны, поэтому знак зависит и от ряда, и от колонки. */
+const KING_GLYPH: Record<string, string> = {
+  '-1:1': '↖',
+  '0:1': '↑',
+  '1:1': '↗',
+  '-1:0': '←',
+  '1:0': '→',
+  '-1:-1': '↙',
+  '0:-1': '↓',
+  '1:-1': '↘',
+};
 
 export function Board({ state, moves, hint, skin, interactive, onMove, turn, moved = [], settling = false }: BoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -54,24 +67,24 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
     () => (state.mode === 'endless' ? endlessViewport(state) : { from: 0, to: state.height }),
     [state],
   );
-  // Приколотый ряд «Гонок»: его подсвечиваем, а верхний ряд тогда не финиш.
-  const pinned = rulesFor(state.mode).pinned === true;
-  // Такт конвейера: за один ход сдвигаются сразу все фигуры, одиночный ход это
-  // ход одной фигуры (конь, диагональ, рубка ряда). По этому отличию и
-  // поднимаем анимацию «ряд поехал».
-  const shifting = pinned && moved.some((m) => m.to.x === m.from.x && m.to.y === m.from.y - 1);
+  const rules = rulesFor(state.mode);
+  /** Игрок королём: вокруг него восемь направлений, и риск считается по клеткам. */
+  const king = rules.player === 'king';
+  /** Приток есть: новые фигуры должны въезжать на поле, а не проступать. */
+  const spawning = rules.spawnPerTurn > 0 || rules.spawnRate !== undefined;
   const seenRef = useRef<Set<string>>(new Set());
   const seen = seenRef.current;
-  // Прежнее положение пешки нужно, чтобы боковой ход читался как перестановка
-  // в своём ряду, а не как перескок.
+  // Прежнее положение игрока: ход должен читаться как перестановка, а не
+  // перескок, иначе на быстром темпе непонятно, откуда ты ушёл.
   const playerBeforeRef = useRef<Cell | null>(null);
   const playerBefore = playerBeforeRef.current;
   useEffect(() => {
-    playerBeforeRef.current = { ...state.player };
-  }, [state.player]);
-  useEffect(() => {
     seenRef.current = new Set(state.enemies.map((enemy) => enemy.id));
   }, [state.enemies]);
+  useEffect(() => {
+    playerBeforeRef.current = { ...state.player };
+  }, [state.player]);
+
   const cols = state.width;
   const rows = viewport.to - viewport.from;
   const gap = 2;
@@ -89,7 +102,11 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
   const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
   const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
 
-  const playerGlyph = SKINS[skin]?.pawn ?? '♟';
+  const playerGlyph = king ? '♚' : (SKINS[skin]?.pawn ?? '♟');
+  const playerSlide =
+    playerBefore !== null && (playerBefore.x !== state.player.x || playerBefore.y !== state.player.y)
+      ? playerBefore
+      : null;
 
   return (
     <div className="board-measure" ref={wrapRef}>
@@ -102,37 +119,18 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
         }}
       >
         <div
-          className={cn('board', pinned && 'board-conveyor', shifting && 'board-shift')}
-          style={
-            {
-              width: boardWidth || undefined,
-              height: boardHeight || undefined,
-              gap,
-              fontSize: cell ? Math.round(cell * 0.56) : undefined,
-              gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
-              gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
-              // Без этой переменной анимация ряда не знает шага клетки, а шаг
-              // считается из размера поля, а не из вёрстки.
-              '--race-cell': cell ? `${cell + gap}px` : undefined,
-            } as CSSProperties
-          }
+          className="board"
+          style={{
+            width: boardWidth || undefined,
+            height: boardHeight || undefined,
+            gap,
+            fontSize: cell ? Math.round(cell * 0.56) : undefined,
+            gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
+            gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
+          }}
           role="grid"
           aria-label="Игровое поле"
         >
-          {/* Ряд, к которому приколота пешка: обводим его целиком, чтобы было
-              видно, что на такте поле уезжает, а эта линия стоит. */}
-          {pinned && cell > 0 && (
-            <span
-              className={cn('pin-row-mark', shifting && 'is-shift')}
-              aria-hidden="true"
-              style={
-                {
-                  top: (viewport.to - 1 - state.player.y) * (cell + gap),
-                  height: cell,
-                } as CSSProperties
-              }
-            />
-          )}
           {Array.from({ length: rows }).map((_, rowIndex) =>
             Array.from({ length: cols }).map((__, colIndex) => {
               const y = viewport.to - 1 - rowIndex;
@@ -145,9 +143,14 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
               const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
               const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
-              const isFinish = !pinned && state.mode !== 'endless' && y === state.height - 1;
-              const pinRow = pinned && y === state.player.y;
-              const lane = pinned && !isPlayer && state.enemies.some((enemy) => enemy.x === x && enemy.y > y);
+              const isFinish = state.mode !== 'endless' && rules.goal === 'top' && y === state.height - 1;
+              // Клетка, куда король встанет под бой: подсветка нужна, потому что
+              // «безопасно ли» игрок по одним только фигурам не сосчитает.
+              const risk =
+                king &&
+                Boolean(move) &&
+                !move?.takes &&
+                state.enemies.some((other) => enemyAttacksCell(state, other, x, y));
               const captured = state.status === 'lost' && isPlayer;
 
               return (
@@ -159,10 +162,9 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                     'cell',
                     dark ? 'cell-dark' : 'cell-light',
                     isFinish && 'cell-finish',
-                    pinRow && 'cell-pin',
-                    lane && 'cell-lane',
                     move && interactive && 'cell-move',
                     move?.takes && 'cell-take',
+                    risk && 'cell-risk',
                     flash && 'cell-flash',
                     leftCell && 'cell-left',
                     hintIndex >= 0 && 'cell-hint',
@@ -180,14 +182,16 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                         ? `Клетка ${x + 1}, ${y + 1}: взять вражескую фигуру`
                         : `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
                       : isPlayer
-                        ? `Клетка ${x + 1}, ${y + 1}: ваша пешка`
-                        : `Клетка ${x + 1}, ${y + 1}`
+                        ? `Клетка ${x + 1}, ${y + 1}: ваш король`
+                        : move
+                          ? `Клетка ${x + 1}, ${y + 1}: ход${risk ? ', под боем' : ''}`
+                          : `Клетка ${x + 1}, ${y + 1}`
                   }
                 >
                   {hintIndex >= 0 && <span className="hint-no">{hintIndex + 1}</span>}
                   {move && interactive && (
                     <span className="move-glyph" aria-hidden="true">
-                      {MOVE_GLYPH[move.dx]}
+                      {king ? (KING_GLYPH[`${move.dx}:${move.dy ?? 1}`] ?? MOVE_GLYPH[move.dx]) : MOVE_GLYPH[move.dx]}
                     </span>
                   )}
                   {enemy && (
@@ -198,7 +202,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                         `enemy-${enemy.type}`,
                         state.freeze > 0 && 'enemy-iced',
                         arrived && 'enemy-moved',
-                        pinned && state.moves > 0 && !seen.has(enemy.id) && 'piece-spawn',
+                        spawning && state.moves > 0 && !seen.has(enemy.id) && 'piece-spawn',
                       )}
                       style={
                         arrived
@@ -220,17 +224,12 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                   {isPlayer && (
                     <span
                       key={`player-${x}-${y}`}
-                      className={cn(
-                        'piece player-piece',
-                        `skin-${skin}`,
-                        shifting && 'piece-hold',
-                        pinned && playerBefore && (playerBefore.x !== x || playerBefore.y !== y) && 'player-slide',
-                      )}
+                      className={cn('piece player-piece', `skin-${skin}`, playerSlide && 'player-slide')}
                       style={
-                        pinned && playerBefore && (playerBefore.x !== x || playerBefore.y !== y)
+                        playerSlide
                           ? ({
-                              '--from-x': `${(playerBefore.x - x) * (cell + gap)}px`,
-                              '--from-y': `${(playerBefore.y - y) * (cell + gap)}px`,
+                              '--from-x': `${(playerSlide.x - state.player.x) * (cell + gap)}px`,
+                              '--from-y': `${(playerSlide.y - state.player.y) * (cell + gap)}px`,
                             } as CSSProperties)
                           : undefined
                       }
@@ -251,7 +250,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
           )}
         </div>
       </div>
-      {settling && <div className="board-turn-flag">{pinned ? 'ряд едет' : 'ход фигур'}</div>}
+      {settling && <div className="board-turn-flag">{king ? 'фигуры идут' : 'ход фигур'}</div>}
       {cell === 0 && <div className="board-placeholder" />}
     </div>
   );

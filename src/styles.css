@@ -2400,8 +2400,8 @@ a {
   background: var(--accent);
 }
 
-/* Верхняя половина - цель белых, нижняя - цель чёрных. Половина подкрашена
-   латунным отливом, чтобы направление читалось без подписи. */
+/* Половины поля красятся по направлению ухода: верхняя - чёрные фигуры,
+   нижняя - белые. Латунный отлив читается без подписи. */
 .jam-board .cell-half-top {
   background: #242117;
 }
@@ -2418,9 +2418,38 @@ a {
   background: #252319;
 }
 
-.jam-board .cell-parked.cell-light,
-.jam-board .cell-parked.cell-dark {
+/* Полосы ухода. Клетки полосы существуют всегда: иначе поле прыгало бы, когда
+   игрок выбирает фигуру. Открытая клетка подсвечивается - в неё можно уйти. */
+.jam-lane {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.jam-lane-cell {
+  position: relative;
+  padding: 0;
+  border: 1px dashed #3a352a;
+  border-radius: var(--radius);
+  background: #16150f;
+  color: #554e40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.jam-lane-cell.is-open {
+  border-style: solid;
+  border-color: var(--accent);
   background: var(--accent-wash);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.jam-lane-mark {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .jam-piece .piece-glyph {
@@ -2431,7 +2460,8 @@ a {
   color: #f0e7d4;
 }
 
-.jam-parked::after {
+/* Фигура, готовая уйти: точка под глифом, чтобы не искать глазами полосу. */
+.jam-ready::after {
   content: '';
   position: absolute;
   left: 18%;
@@ -2461,94 +2491,72 @@ a {
 }
 
 /* =========================================================
-   Гонки: конвейер с приколотым рядом пешки
+   Гонки: король против фигур, приходящих сверху
    ========================================================= */
 
-/* Свой ряд подсвечен: игрок должен видеть полосу, по которой едет, а не
-   искать пешку глазами на тёмном поле. */
-.board .cell-pin.cell-light,
-.board .cell-pin.cell-dark {
-  background: #2b2517;
+/* Клетка, с которой фигура бьёт: без отметки игрок обязан был бы считать
+   линию атаки глазами, а на темном поле это работа не для пальца. */
+.cell-risk {
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
 }
 
-/* Контур ряда рисует `.pin-row-mark`, поэтому клетке достался
-   только фон и латунная линия сверху. */
-
-/* Колонка под прицелом: сверху в этом столбце кто-то едет. */
-.cell-lane::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 50%;
-  width: 2px;
-  height: 26%;
-  margin-left: -1px;
-  background: var(--danger);
-  opacity: 0.45;
+/* Девять кнопок хода короля. Размер фиксирован и для доступных, и для
+   выключенных: поле не должно менять геометрию между ходами. */
+.move-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
 }
 
-.race-best {
+.pad-btn {
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2);
+}
+
+.pad-btn .move-glyph-lg {
+  font-size: 19px;
+}
+
+.pad-btn.is-on {
+  border-color: var(--accent);
+}
+
+.pad-btn.is-on .move-glyph-lg {
   color: var(--accent);
 }
 
-/* Такт конвейера. Каждая клетка несёт тонкую верхнюю насечку ряда, и на такте
-   все насечки приезжают сверху: поле выглядит едущим, а не мигающим. Ряд
-   пешки той же линией выделен в латунь и не едет, потому что ряд зафиксирован
-   правилом, а не анимацией. */
-.board-conveyor .cell::after {
-  content: '';
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  top: -1px;
-  height: 1px;
-  background: var(--line-strong);
-  opacity: 0.3;
-  pointer-events: none;
+.pad-btn.move-take {
+  background: var(--danger-wash);
+  border-color: var(--danger);
 }
 
-.board-conveyor.board-shift .cell::after {
-  animation: conveyor-rule 420ms cubic-bezier(0.3, 0.72, 0.22, 1) 1;
+.pad-btn.off {
+  border-color: var(--line);
+  background: var(--panel);
 }
 
-@keyframes conveyor-rule {
-  from {
-    opacity: 0.1;
-    transform: translateY(calc(-1 * var(--race-cell, 24px)));
-  }
-  60% {
-    opacity: 0.55;
-  }
-  to {
-    opacity: 0.3;
-    transform: translateY(0);
-  }
+.pad-btn.off .move-glyph-lg,
+.pad-btn.off .move-label {
+  color: #5a5446;
 }
 
-/* Боковой ход пешки в своём ряду: та же механика, что у хода фигур, только короче,
-   чтобы ряд остался главным движением кадра. */
+.pad-center {
+  border-style: dashed;
+}
+
+/* Ход игрока и въезд новой фигуры. Оба читаются движением, а не сменой кадра:
+   фигура приезжает сверху, король едет по клетке, а не перескакивает. */
 .player-slide {
   animation: enemy-slide 240ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
 }
 
-.piece-hold {
-  animation: conveyor-hold 420ms ease-out 1;
-}
-
-@keyframes conveyor-hold {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  35% {
-    transform: translateY(2px);
-  }
-  70% {
-    transform: translateY(-1px);
-  }
-}
-
-/* Новая фигура въезжает сверху, а не проступает на пустой клетке. */
 .piece-spawn {
   animation: piece-enter 320ms ease-out 1;
 }
@@ -2556,7 +2564,7 @@ a {
 @keyframes piece-enter {
   from {
     opacity: 0;
-    transform: translateY(calc(-0.6 * var(--race-cell, 24px)));
+    transform: translateY(-60%);
   }
   to {
     opacity: 1;
@@ -2564,57 +2572,11 @@ a {
   }
 }
 
-.pin-row-mark {
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  border: 1px solid var(--accent-dim);
-  pointer-events: none;
+.race-best {
+  color: var(--accent);
 }
 
-/* Латунный рельс ряда: одна линия на всю ширину, иначе её рвут зазоры сетки. */
-.pin-row-mark::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -2px;
-  height: 2px;
-  background: var(--accent);
-  opacity: 0.75;
-}
-
-.pin-row-mark.is-shift {
-  animation: conveyor-frame 420ms ease-out 1;
-}
-
-/* Пешку ряд тянет за собой, но держит: рельс вспыхивает и гаснет, сама клетка
-   не смещается, геометрия поля не дрогает. */
-.pin-row-mark.is-shift::after {
-  animation: conveyor-pin 420ms ease-out 1;
-}
-
-@keyframes conveyor-pin {
-  0%,
-  100% {
-    opacity: 0.75;
-  }
-  45% {
-    opacity: 0.3;
-  }
-}
-
-@keyframes conveyor-frame {
-  0%,
-  100% {
-    border-color: var(--accent-dim);
-  }
-  45% {
-    border-color: var(--accent);
-  }
-}
-
-/* Индикатор такта в HUD: столько клеток, через сколько ряд уйдёт вниз. */
+/* Индикатор такта притока: столько клеток, через сколько ходов придёт волна. */
 .race-ticks {
   display: inline-flex;
   gap: 2px;

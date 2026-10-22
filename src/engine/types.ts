@@ -20,6 +20,8 @@ export type GameStatus = 'playing' | 'won' | 'lost';
 
 /** -1, влево-вперёд, 0, вперёд, 1, вправо-вперёд. */
 export type MoveDx = -1 | 0 | 1;
+/** Рядов, пройденных за ход: -1 отступление короля, 1 обычный ход, 2 двойной шаг. */
+export type MoveDy = -1 | 0 | 1 | 2;
 
 export type BuffKind = 'freeze' | 'shield';
 
@@ -72,7 +74,7 @@ export interface GameState {
 }
 
 export type GameAction =
-  | { type: 'move'; dx: MoveDx; dy?: 0 | 1 | 2 }
+  | { type: 'move'; dx: MoveDx; dy?: MoveDy }
   | { type: 'skip' }
   | { type: 'buff'; buff: BuffKind };
 
@@ -83,8 +85,8 @@ export interface Cell {
 
 export interface MoveOption extends Cell {
   dx: MoveDx;
-  /** Рядов, пройденных за ход: 1, либо 2 при двойном шаге, 0 в приколотом ряду. */
-  dy?: 0 | 1 | 2;
+  /** Рядов, пройденных за ход: 1, 2 при двойном шаге, 0 и -1 у короля. */
+  dy?: MoveDy;
   /** Тип фигуры, которую пешка бьёт на этой клетке. */
   takes?: PieceType;
 }

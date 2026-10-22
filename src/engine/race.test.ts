@@ -1,138 +1,191 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RACE_PIN_ROW,
+  RACE_KING_ROW,
+  RACE_MOVES_PER_LEVEL,
   RACE_ROWS,
+  RACE_SPAWN_ROWS,
   RACE_WIDTH,
   applyAction,
   createRaceLevel,
   legalMoves,
   raceCoinReward,
-  raceLevelForRows,
+  raceLevelForMoves,
+  raceSpawnEvery,
   rulesFor,
   type GameState,
+  type MoveDx,
+  type MoveDy,
 } from '../engine';
 
-function move(state: GameState, dx: -1 | 0 | 1): GameState {
-  return applyAction(state, { type: 'move', dx, dy: 0 });
+function move(state: GameState, dx: MoveDx, dy: MoveDy = 0): GameState {
+  return applyAction(state, { type: 'move', dx, dy });
 }
 
-describe('Гонки: конвейер', () => {
-  it('режим собран на приколотом ряду и постоянном поле', () => {
+/**
+ * Жадный бот: выжить, снять фигуру, не вставать под линию и не прижиматься к
+ * краю. Нужен не «идеальной игрой», а тем же критерием, которым мерили напряжение
+ * притока: если даже такой бот живёт десятки ходов, приток никого не убивает на
+ * ровном месте.
+ */
+function nearest(state: GameState): number {
+  let best = 99;
+  for (const enemy of state.enemies) {
+    const distance = Math.max(Math.abs(enemy.x - state.player.x), Math.abs(enemy.y - state.player.y));
+    if (distance < best) best = distance;
+  }
+  return best;
+}
+
+function bestReply(state: GameState): GameState | null {
+  let best: GameState | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  for (const option of legalMoves(state)) {
+    const next = move(state, option.dx, option.dy ?? 1);
+    if (next.status !== 'playing') continue;
+    const rank =
+      next.enemies.length * 6 -
+      legalMoves(next).length * 1.5 -
+      nearest(next) * 2 +
+      (next.player.y <= 1 ? 0.5 : 0) +
+      (next.player.y >= next.height - 3 ? 1.5 : 0);
+    if (rank < bestRank) {
+      bestRank = rank;
+      best = next;
+    }
+  }
+  return best;
+}
+
+describe('Гонки: король против фигур сверху', () => {
+  it('режим собран на короле и постоянном поле', () => {
     const rules = rulesFor('race');
-    expect(rules).toMatchObject({ motion: 'conveyor', goal: 'scroll', pinned: true, ram: true });
+    expect(rules).toMatchObject({
+      motion: 'greedy',
+      goal: 'survive',
+      player: 'king',
+      wrapOnTop: false,
+      spawnRows: RACE_SPAWN_ROWS,
+    });
     const state = createRaceLevel(1, 12345);
     expect(state.width).toBe(RACE_WIDTH);
     expect(state.height).toBe(RACE_ROWS);
-    expect(state.player.y).toBe(RACE_PIN_ROW);
+    expect(state.player.y).toBe(RACE_KING_ROW);
     expect(state.status).toBe('playing');
-    // Стартовая пробка не должна съедать пешку до первого хода.
+    // Стартовая пробка не должна снимать короля до первого хода.
     expect(state.enemies.length).toBeGreaterThan(0);
     for (const enemy of state.enemies) {
-      expect(enemy.x === state.player.x && enemy.y <= state.player.y + 1).toBe(false);
+      expect(enemy.y).toBeGreaterThanOrEqual(RACE_ROWS - RACE_SPAWN_ROWS);
     }
   });
 
-  it('пешка ходит только в своём ряду, вперёд нельзя', () => {
-    const state = createRaceLevel(1, 999);
-    const options = legalMoves(state);
-    expect(options.every((option) => option.dy === 0)).toBe(true);
-    expect(() => applyAction(state, { type: 'move', dx: 0, dy: 1 })).toThrow(/Некорректная длина хода/);
+  it('король ходит на клетку в любую сторону, назад включительно', () => {
+    const open: GameState = { ...createRaceLevel(1, 999), enemies: [] };
+    const options = legalMoves(open);
+    // В центре поля у короля восемь ходов, у края меньше.
+    expect(options.length).toBeGreaterThanOrEqual(3);
+    expect(options.some((option) => option.dy === 1)).toBe(true);
+    expect(options.some((option) => option.dy === -1)).toBe(open.player.y > 0);
+    expect(options.every((option) => Math.abs(option.dx) <= 1 && Math.abs(option.dy ?? 1) <= 1)).toBe(true);
   });
 
-  it('фигуры падают рядом, а ушедшие за нижний край исчезают', () => {
-    const state = createRaceLevel(1, 4242);
-    const lone: GameState = { ...state, enemies: [{ id: 'x1', type: 'pawn', x: state.player.x + 2, y: state.player.y + 3 }] };
-    const after = move(lone, 0);
-    expect(after.enemies[0]?.y).toBe(lone.enemies[0].y - 1);
+  it('взятие короля работает и вперёд, и назад, фигура уходит с поля', () => {
+    const base: GameState = { ...createRaceLevel(1, 4242), player: { x: 3, y: 2 }, enemies: [] };
+    const forward = move({ ...base, enemies: [{ id: 'r', type: 'rook', x: 4, y: 3 }] }, 1, 1);
+    expect(forward.enemies.length).toBe(0);
+    expect(forward.player).toEqual({ x: 4, y: 3 });
+    expect(forward.captures).toBe(1);
 
-    const edge: GameState = { ...state, enemies: [{ id: 'x1', type: 'pawn', x: state.player.x + 2, y: 0 }] };
-    expect(move(edge, 0).enemies.length).toBe(0);
+    const backward = move({ ...base, enemies: [{ id: 'b', type: 'bishop', x: 2, y: 1 }] }, -1, -1);
+    expect(backward.enemies.length).toBe(0);
+    expect(backward.player).toEqual({ x: 2, y: 1 });
   });
 
-  it('ладья бьёт вдоль ряда пешки, слон и конь нет', () => {
-    const base = createRaceLevel(1, 777);
-    const row = base.player.y;
-    const rookInRow: GameState = {
-      ...base,
-      enemies: [{ id: 'r', type: 'rook', x: Math.max(0, base.player.x - 2), y: row }],
+  it('фигура, вставшая на клетку короля, заканчивает забег', () => {
+    // Ладья на той же линии, что и король, и путь свободен: король остаётся на
+    // линии - его снимают за ход, ничего другого движку не остаётся.
+    const lined: GameState = {
+      ...createRaceLevel(1, 777),
+      player: { x: 3, y: 4 },
+      enemies: [{ id: 'r', type: 'rook', x: 0, y: 4 }],
     };
-    const caught = move(rookInRow, 0);
-    expect(caught.status).toBe('lost');
-    expect(caught.capturedBy).toBe('rook');
-
-    const pawnInRow: GameState = {
-      ...base,
-      enemies: [{ id: 'p', type: 'pawn', x: Math.max(0, base.player.x - 2), y: row }],
-    };
-    expect(move(pawnInRow, 0).status).toBe('playing');
+    const stuck = move(lined, 1, 0);
+    expect(stuck.status).toBe('lost');
+    expect(stuck.capturedBy).toBe('rook');
+    // Тот же шаг с линии спасает: ладье нужен ход, чтобы перестроиться.
+    expect(move(lined, 1, 1).status).toBe('playing');
   });
 
-  it('щит переживает ряд ладьи, рубка снимает фигуру своего ряда', () => {
-    const base = { ...createRaceLevel(1, 31337), player: { x: 3, y: RACE_PIN_ROW } };
-    const rookInRow: GameState = {
-      ...base,
-      enemies: [{ id: 'r', type: 'rook', x: 1, y: base.player.y }],
-    };
-    const shielded = move({ ...rookInRow, shield: 1 }, 0);
-    expect(shielded.status).toBe('playing');
-
-    // Встать на фигуру своего ряда можно: это единственный способ расчистить колонку.
-    const adjacent: GameState = { ...base, enemies: [{ id: 'r', type: 'rook', x: 4, y: base.player.y }] };
-    const ram = applyAction(adjacent, { type: 'move', dx: 1, dy: 0 });
-    expect(ram.enemies.length).toBe(0);
-    expect(ram.player.x).toBe(4);
-    expect(ram.captures).toBe(1);
+  it('приток приходит в верхние ряды, по такту и не подставляет фигуру королю под ногу', () => {
+    const state: GameState = { ...createRaceLevel(1, 2024), player: { x: 0, y: 0 }, enemies: [] };
+    const every = raceSpawnEvery(state.tier);
+    let current = state;
+    for (let turn = 0; turn < every; turn++) {
+      current = move(current, 0, 1);
+    }
+    expect(current.enemies.length).toBeGreaterThan(0);
+    for (const enemy of current.enemies) {
+      expect(enemy.y).toBeGreaterThanOrEqual(RACE_ROWS - RACE_SPAWN_ROWS);
+    }
   });
 
-  it('выживающий бот не умирает в первые ряды и доживает до среднего забега', () => {
-    // Смысл проверки притока: конвейер не имеет права складываться раньше, чем
-    // игрок успел сделать три хода. Дальше смерть честная - приток только
-    // сужает поле, но не решает за игрока.
+  it('выживающий бот не умирает в первые ходы и доживает до среднего забега', () => {
     const lives: number[] = [];
     for (let seed = 0; seed < 40; seed++) {
       let state = createRaceLevel(1, 1000 + seed * 7919);
-      let turns = 0;
-      while (state.status === 'playing' && turns < 200) {
-        const option = legalMoves(state).find((entry) => move(state, entry.dx).status !== 'lost');
-        if (!option) break;
-        state = move(state, option.dx);
-        turns += 1;
+      let guard = 0;
+      while (state.status === 'playing' && guard++ < 300) {
+        const next = bestReply(state);
+        if (!next) break;
+        state = next;
       }
-      expect(state.moves).toBeGreaterThan(3);
+      // Первые два хода смерть означает, что приток встал королю под ногу.
+      expect(state.moves).toBeGreaterThanOrEqual(3);
       lives.push(state.score);
     }
     const median = [...lives].sort((a, b) => a - b)[20];
-    expect(median).toBeGreaterThanOrEqual(12);
+    expect(median).toBeGreaterThanOrEqual(15);
   });
 
   it('один и тот же журнал воспроизводится байт в байт', () => {
     const first = createRaceLevel(2, 4242);
     let a = first;
     let b = first;
-    const journal = [-1, 1, 1, 0, -1, 0, 1, -1, -1, 0, 1, 0];
-    for (const dx of journal) {
+    const journal: Array<[MoveDx, MoveDy]> = [
+      [0, 1],
+      [1, 0],
+      [-1, -1],
+      [0, 1],
+      [1, 1],
+      [0, 0],
+      [-1, 0],
+      [1, 0],
+      [0, 1],
+      [-1, 1],
+    ];
+    for (const [dx, dy] of journal) {
       if (a.status !== 'playing' || b.status !== 'playing') break;
-      a = move(a, dx as -1 | 0 | 1);
-      b = move(b, dx as -1 | 0 | 1);
+      a = move(a, dx, dy);
+      b = move(b, dx, dy);
     }
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-    expect(a.tier).toBe(raceLevelForRows(a.score));
+    expect(a.tier).toBe(raceLevelForMoves(a.score));
   });
 
-  it('уровень режима растёт от рядов, награда ограничена сверху', () => {
-    expect(raceLevelForRows(0)).toBe(1);
-    expect(raceLevelForRows(9)).toBe(1);
-    expect(raceLevelForRows(10)).toBe(2);
-    expect(raceLevelForRows(45)).toBe(5);
+  it('уровень режима растёт от пережитых ходов, награда ограничена сверху', () => {
+    expect(raceLevelForMoves(0)).toBe(1);
+    expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL - 1)).toBe(1);
+    expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL)).toBe(2);
+    expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL * 4)).toBe(5);
     expect(raceCoinReward(0)).toBeLessThanOrEqual(50);
-    expect(raceCoinReward(10)).toBeLessThan(raceCoinReward(40));
+    expect(raceCoinReward(8)).toBeLessThan(raceCoinReward(32));
     expect(raceCoinReward(1000)).toBe(50);
   });
 
-  it('счёт это прокрученные ряды, а не высота пешки', () => {
+  it('счёт это пережитые ходы, а не высота короля', () => {
     let state = createRaceLevel(1, 555);
-    for (let turn = 0; turn < 5 && state.status === 'playing'; turn++) state = move(state, 0);
+    for (let turn = 0; turn < 5 && state.status === 'playing'; turn++) {
+      state = bestReply(state) ?? state;
+    }
     expect(state.score).toBe(state.moves);
-    expect(state.player.y).toBe(RACE_PIN_ROW);
   });
 });

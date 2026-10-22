@@ -1,4 +1,4 @@
-import { analyzeVariant, type ModeId, type VariantReport } from '../engine';
+import { analyzeVariant, measureJamLevels, type JamMeasure, type ModeId, type VariantReport } from '../engine';
 
 export interface VariantSuiteRequest {
   modes: ModeId[];
@@ -17,6 +17,93 @@ export interface VariantSuiteHandlers {
 export interface VariantSuite {
   done: Promise<void>;
   cancel: () => void;
+}
+
+export interface JamSuiteRequest {
+  levels: number[];
+  samples: number;
+  seed: number;
+}
+
+export interface JamSuiteHandlers {
+  /** Один уровень замерен. */
+  onRow?: (row: JamMeasure, done: number, total: number) => void;
+}
+
+/**
+ * Замер генератора «Парковки». Отчёт не похож на сравнение вариантов: у
+ * головоломки нет финиша и нет дерева поиска, есть длина плана решателя и доля
+ * расстановок, которые решатель взял. Считаем в том же воркере: на 250 полях
+ * замер идёт минуты, и на главном потоке вкладка бы встала.
+ */
+export function runJamSuite(request: JamSuiteRequest, handlers: JamSuiteHandlers = {}): VariantSuite {
+  let cancelled = false;
+  let worker: Worker | null = null;
+
+  const done = new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      worker?.terminate();
+      worker = null;
+      resolve();
+    };
+
+    if (typeof Worker === 'undefined') {
+      (async () => {
+        const total = request.levels.length;
+        for (let index = 0; index < total; index++) {
+          if (cancelled) break;
+          await new Promise((tick) => window.setTimeout(tick, 0));
+          try {
+            const [row] = measureJamLevels([request.levels[index]], request.samples, request.seed);
+            handlers.onRow?.(row, index + 1, total);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('jam_measure_failed'));
+            return;
+          }
+        }
+        resolve();
+      })();
+      return;
+    }
+
+    worker = new Worker(new URL('../workers/variants.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (event: MessageEvent) => {
+      const data = event.data as { type: string; row?: JamMeasure; done?: number; total?: number; message?: string };
+      if (data.type === 'jamrow' && data.row) {
+        if (cancelled) {
+          finish();
+          return;
+        }
+        handlers.onRow?.(data.row, data.done ?? 0, data.total ?? request.levels.length);
+        return;
+      }
+      if (data.type === 'jamdone') {
+        finish();
+        return;
+      }
+      if (data.message === 'cancelled' || cancelled) {
+        finish();
+        return;
+      }
+      worker?.terminate();
+      worker = null;
+      reject(new Error(data.message ?? 'jam_measure_failed'));
+    };
+    worker.onerror = () => {
+      worker?.terminate();
+      worker = null;
+      reject(new Error('worker_failed'));
+    };
+    worker.postMessage({ type: 'jam', levels: request.levels, samples: request.samples, seed: request.seed });
+  });
+
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+      worker?.postMessage({ type: 'cancel' });
+    },
+  };
 }
 
 type WorkerMessage =

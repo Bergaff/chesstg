@@ -1,4 +1,4 @@
-import { analyzeVariant, type ModeId, type VariantReport } from '../engine';
+import { analyzeVariant, measureJamLevels, type JamMeasure, type ModeId, type VariantReport } from '../engine';
 
 /**
  * Прогон вариантов правил в отдельном потоке.
@@ -19,6 +19,8 @@ interface WorkerScope {
 
 type WorkerRequest =
   | { type: 'run'; index: number; mode: ModeId; level: number; samples: number; seed: number }
+  /** Замер генератора «Парковки»: уровни по списку, прогресс по уровням. */
+  | { type: 'jam'; levels: number[]; samples: number; seed: number }
   | { type: 'cancel' };
 
 const scope = self as unknown as WorkerScope;
@@ -28,6 +30,22 @@ scope.addEventListener('message', (event) => {
   const request = event.data;
   if (request.type === 'cancel') {
     cancelled = true;
+    return;
+  }
+
+  if (request.type === 'jam') {
+    cancelled = false;
+    try {
+      for (let position = 0; position < request.levels.length; position++) {
+        if (cancelled) throw new Error('cancelled');
+        const [row] = measureJamLevels([request.levels[position]], request.samples, request.seed);
+        scope.postMessage({ type: 'jamrow', row: row as JamMeasure, done: position + 1, total: request.levels.length });
+      }
+      scope.postMessage({ type: 'jamdone' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'jam_measure_failed';
+      scope.postMessage({ type: 'jamerror', message });
+    }
     return;
   }
 

@@ -72,7 +72,10 @@ export function parseActions(value: unknown, mode: GameMode): RunAction[] {
       const to = action.to as Record<string, unknown> | undefined;
       const x = Number(to?.x);
       const y = Number(to?.y);
-      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x > 40 || y < 0 || y > 40) {
+      // y = -1 и y = height - клетки ухода за край: они вне поля по определению,
+      // поэтому рамка проверки на единицу шире с каждой стороны. Легальность
+      // всё равно считает движок.
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x > 40 || y < -1 || y > 41) {
         fail(400, 'bad_request', 'Некорректная клетка');
       }
       actions.push({ type: 'piece', id, to: { x, y } } as JamAction);
@@ -82,16 +85,14 @@ export function parseActions(value: unknown, mode: GameMode): RunAction[] {
       const dx = action.dx;
       if (dx !== -1 && dx !== 0 && dx !== 1) fail(400, 'bad_request', 'Некорректный dx');
       // dy: 1 обычный ход, 2 двойной шаг с начальной позиции, 0 шаг в своём ряду
-      // («Гонки»). Остальное сервер всё равно отвергнет правилами, но лучше
-      // отказать сразу.
+      // и -1 ход назад (король в «Гонках»). Остальное сервер всё равно отвергнет
+      // правилами, но лучше отказать сразу.
       const dy =
         action.dy === undefined || action.dy === 1
           ? 1
-          : action.dy === 0
-            ? 0
-            : action.dy === 2
-              ? 2
-              : fail(400, 'bad_request', 'Некорректный dy');
+          : action.dy === -1 || action.dy === 0 || action.dy === 2
+            ? action.dy
+            : fail(400, 'bad_request', 'Некорректный dy');
       actions.push(dy === 1 ? { type: 'move', dx } : { type: 'move', dx, dy });
     } else if (action.type === 'skip') {
       actions.push({ type: 'skip' });

@@ -1,12 +1,15 @@
-// «Парковка»: поле забито припаркованными фигурами двух цветов. Взятий нет,
-// фигуры не ходят сами. Ходит игрок: берёт любую фигуру и перегоняет её по
-// её же правилу на свободную клетку. Цель - разойтись половинами: все белые
-// фигуры на верхнюю (чёрную) половину, все чёрные на нижнюю (белую).
+// «Парковка»: поле забито фигурами двух цветов, и их нужно увести.
 //
-// Такая постановка даёт две вещи. Во-первых, задача гарантированно решаема:
-// расстановка собирается из решённой позиции обратными ходами, поэтому решение
-// длиной не больше числа перестановок существует всегда. Во-вторых, разбор не
-// нужен для проверки решаемости, он нужен только для подсказок и замеров.
+// Ходит игрок: берёт любую фигуру и гонит её по её правилу. Шаг за край поля
+// фигуру снимает навсегда, и тогда к этому краю можно подвести другую. Белые
+// уходят за нижний край, чёрные за верхний: обе стороны едут от чужой половины,
+// поэтому пробка расходится с двух сторон и не превращается в гонку к одному
+// ряду. Взятий нет: чужую фигуру нельзя съесть, можно только обойти.
+//
+// Решаемость здесь не «собирается из решённой позиции обратными ходами», как
+// это было у задачи «разойтись половинами»: уход с поля необратим, поэтому
+// обратный след построить нельзя. Вместо него генератор ищет план самим
+// решателем (`solveJamExits`), и от него же считаются бюджет ходов и подсказка.
 
 import { mix32, Rng } from './rng';
 import type { Cell } from './types';
@@ -29,17 +32,19 @@ export interface JamAction {
 }
 
 export interface JamState {
-  version: 1;
+  version: 2;
   mode: 'jam';
   width: number;
   height: number;
-  /** Ряд, с которого начинается верхняя половина: туда идут белые. */
-  mid: number;
   pieces: JamPiece[];
   moves: number;
   /** Сколько перестановок дано: кончилось - партия проиграна. */
   budget: number;
-  /** Сколько фигур уже на чужой половине: это прогресс-бар и счёт забега. */
+  /** Сколько фигур было на поле. */
+  total: number;
+  /** Сколько фигур уже увело с поля: это счёт забега. */
+  removed: number;
+  /** То же, что `removed`: поле нужно общим местам, где счёт читают по `score`. */
   score: number;
   status: 'playing' | 'won' | 'lost';
   level: number;
@@ -47,12 +52,10 @@ export interface JamState {
   lastMove?: { id: string; from: Cell; to: Cell };
   lastEvent?: string;
   /**
-   * След перемешивания: чем именно расставляли решённое поле. Из него по
-   * обратной ссылке собирается гарантированное решение (jamSolution), поэтому
-   * решаемость не нужно искать перебором. Клиенту не отдаётся: serializeRun
-   * вырезает поле, иначе подсказка бесплатно решала бы уровень.
+   * План, найденный генератором: им же строится подсказка. Клиенту не
+   * отдаётся (`serializeRun` вырезает поле), иначе подсказка была бы бесплатной.
    */
-  scramble?: Array<{ id: string; from: Cell; to: Cell }>;
+  plan?: JamAction[];
 }
 
 export const JAM_PIECE_NAME: Record<JamPieceType, string> = {
@@ -80,53 +83,69 @@ export function jamBoard(level: number): { width: number; height: number } {
   return { width, height };
 }
 
-/** Доля занятых клеток. Выше 0.66 пробка становится нерешаемой по-человечески. */
+/** Доля занятых клеток. Выше 0.66 пробка не расходится по-человечески. */
 export function jamDensity(level: number): number {
   return Math.min(0.66, 0.4 + level * 0.012);
 }
 
-/** Число перестановок, которыми перемешано решённое поле. */
-export function jamScramble(level: number): number {
-  return Math.min(60, 7 + Math.round(level * 1.6));
+/** Сколько фигур нужно увести с поля на данном уровне. */
+export function jamPieces(level: number): number {
+  const { width, height } = jamBoard(level);
+  return Math.max(4, Math.round(width * height * jamDensity(level)));
 }
 
 /**
- * Ходов дано. Запас тает с уровнем: на первых уровнях можно ходить наугад, к
- * тридцатому приходится считать. Основа - длина перемешивания, но игрок обычно
- * решает короче, чем перемешивали, поэтому запас сверху небольшой.
+ * Целевая длина решения в ходах: генератор ищет расстановку, которая решается
+ * примерно за столько. Числа сняты с замера решателя (40 полей на уровень),
+ * линейка - 1.6 хода на фигуру плюс один ход на уровень как натяжение пробки.
  */
-export function jamBudget(level: number): number {
-  const factor = Math.max(1.15, 1.9 - level * 0.03);
-  const slack = Math.max(2, 6 - Math.floor(level / 6));
-  return Math.round(jamScramble(level) * factor) + slack;
+export function jamTargetCost(level: number): number {
+  return Math.round(jamPieces(level) * 1.6 + level * 0.6);
+}
+
+/**
+ * Ходов дано с запасом: на первых уровнях можно ходить наугад, к тридцатому
+ * приходится считать. Основа - длина плана решателя, но игрок обычно решает
+ * короче, чем искал жадный перебор, поэтому запас сверху небольшой: 1.9 плана на
+ * первом уровне и 1.35 на сороковом. Ниже 1.35 опускаться некуда: сам план жадный,
+ * он уже длиннее человеческого, и запас считается от заведомо плохой оценки.
+ */
+export function jamBudget(level: number, cost = jamTargetCost(level)): number {
+  const factor = Math.max(1.35, 1.9 - level * 0.02);
+  const slack = Math.max(3, 6 - Math.floor(level / 6));
+  return Math.round(cost * factor) + slack;
 }
 
 /**
  * Форма состояния-головоломки. Проверяем не только `mode`: у старой песочницы
- * (`createJamLevel`) состояние тоже помечено как `jam`, но фигур `pieces` у него
- * нет, и ложное срабатывание роняет экран.
+ * состояние тоже помечено как `jam`, а у прежней «разойдись половинами» нет
+ * счётчика уведённых фигур. Ложное срабатывание роняет экран, поэтому версия
+ * входит в проверку.
  */
 export function isJamState(state: unknown): state is JamState {
   if (!state || typeof state !== 'object') return false;
-  const candidate = state as { mode?: unknown; pieces?: unknown; mid?: unknown };
-  return candidate.mode === 'jam' && Array.isArray(candidate.pieces) && typeof candidate.mid === 'number';
+  const candidate = state as { mode?: unknown; pieces?: unknown; removed?: unknown; version?: unknown };
+  return (
+    candidate.mode === 'jam' &&
+    candidate.version === 2 &&
+    Array.isArray(candidate.pieces) &&
+    typeof candidate.removed === 'number'
+  );
 }
 
-/** Половина, куда должна попасть фигура: белые вверх, чёрные вниз. */
-export function jamTargetRow(state: Pick<JamState, 'mid'>, side: JamSide): (y: number) => boolean {
-  return side === 'white' ? (y: number) => y >= state.mid : (y: number) => y < state.mid;
+/** За какой край уходит фигура: белые за нижний, чёрные за верхний. */
+export function jamExitRow(state: Pick<JamState, 'height'>, side: JamSide): number {
+  return side === 'white' ? -1 : state.height;
 }
 
-export function jamIsParked(piece: JamPiece, mid: number): boolean {
-  return piece.side === 'white' ? piece.y >= mid : piece.y < mid;
+/** Ряд, где фигура уже у края и может сойти с поля прямым шагом. */
+export function jamAtEdge(state: Pick<JamState, 'height'>, piece: JamPiece): boolean {
+  const edge = jamExitRow(state, piece.side);
+  return piece.side === 'white' ? piece.y <= 1 : piece.y >= state.height - 2;
 }
 
-export function jamParkedCount(pieces: JamPiece[], mid: number): number {
-  return pieces.reduce((sum, piece) => sum + (jamIsParked(piece, mid) ? 1 : 0), 0);
-}
-
-export function jamSolved(state: Pick<JamState, 'pieces' | 'mid'>): boolean {
-  return state.pieces.length > 0 && jamParkedCount(state.pieces, state.mid) === state.pieces.length;
+export function jamSolved(state: Pick<JamState, 'pieces'>): boolean {
+  return state.pieces.length === 0;
 }
 
 function pieceAt(pieces: JamPiece[], x: number, y: number, exceptId?: string): JamPiece | undefined {
@@ -137,74 +156,137 @@ export function jamPieceById(state: JamState, id: string): JamPiece | undefined 
   return state.pieces.find((piece) => piece.id === id);
 }
 
+interface Board {
+  width: number;
+  height: number;
+  pieces: JamPiece[];
+}
+
+function linesFor(type: JamPieceType): Array<[number, number]> {
+  if (type === 'rook') {
+    return [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+  }
+  if (type === 'bishop') {
+    return [
+      [1, 1],
+      [-1, 1],
+      [1, -1],
+      [-1, -1],
+    ];
+  }
+  return [];
+}
+
+const KNIGHT_OFFSETS: Array<[number, number]> = [
+  [1, 2],
+  [2, 1],
+  [-1, 2],
+  [-2, 1],
+  [1, -2],
+  [2, -1],
+  [-1, -2],
+  [-2, -1],
+];
+
 /**
  * Куда может уехать фигура. Ладья и слон скользят до первой занятой клетки,
- * конь перепрыгивает. Все три хода обратимы, поэтому перемешивание из решённой
- * позиции всегда оставляет путь обратно: это и есть гарантия решаемости.
+ * конь перепрыгивает. Все ходы внутри поля, уход за край считается отдельно
+ * (`jamExitCells`), чтобы у клетки выхода был свой адрес в журнале.
  */
-export function jamPieceMoves(state: Pick<JamState, 'width' | 'height' | 'pieces'>, piece: JamPiece): Cell[] {
+export function jamPieceMoves(board: Board, piece: JamPiece, at?: Cell): Cell[] {
+  const from = at ?? piece;
   const out: Cell[] = [];
-  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < state.width && y < state.height;
-  const free = (x: number, y: number) => inside(x, y) && pieceAt(state.pieces, x, y, piece.id) === undefined;
-
-  const lines: Array<[number, number]> =
-    piece.type === 'rook'
-      ? [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ]
-      : piece.type === 'bishop'
-        ? [
-            [1, 1],
-            [-1, 1],
-            [1, -1],
-            [-1, -1],
-          ]
-        : [];
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < board.width && y < board.height;
+  const free = (x: number, y: number) => inside(x, y) && pieceAt(board.pieces, x, y, piece.id) === undefined;
 
   if (piece.type === 'knight') {
-    for (const [dx, dy] of [
-      [1, 2],
-      [2, 1],
-      [-1, 2],
-      [-2, 1],
-      [1, -2],
-      [2, -1],
-      [-1, -2],
-      [-2, -1],
-    ]) {
-      if (free(piece.x + dx, piece.y + dy)) out.push({ x: piece.x + dx, y: piece.y + dy });
+    for (const [dx, dy] of KNIGHT_OFFSETS) {
+      if (free(from.x + dx, from.y + dy)) out.push({ x: from.x + dx, y: from.y + dy });
     }
     return out;
   }
 
-  const reach = Math.max(state.width, state.height);
-  for (const [dx, dy] of lines) {
+  const reach = Math.max(board.width, board.height);
+  for (const [dx, dy] of linesFor(piece.type)) {
     for (let step = 1; step < reach; step++) {
-      const x = piece.x + dx * step;
-      const y = piece.y + dy * step;
+      const x = from.x + dx * step;
+      const y = from.y + dy * step;
       if (!inside(x, y)) break;
-      if (pieceAt(state.pieces, x, y, piece.id)) break;
+      if (pieceAt(board.pieces, x, y, piece.id)) break;
       out.push({ x, y });
     }
   }
   return out;
 }
 
+/**
+ * Клетки ухода: куда фигура staje, чтобы покинуть поле. Считаем по тому же
+ * правилу движения, что и обычные ходы, но стоп-клеткой считаем выход за
+ * горизонталь края. Угол поля слон проходит по диагонали, конь перепрыгивает
+ * строку, ладья съезжает по колонке.
+ */
+export function jamExitCells(board: Board, piece: JamPiece, at?: Cell): Cell[] {
+  const from = at ?? piece;
+  const edge = jamExitRow(board, piece.side);
+  const toward = piece.side === 'white' ? -1 : 1;
+  const insideColumn = (x: number) => x >= 0 && x < board.width;
+  const blocked = (x: number, y: number) => pieceAt(board.pieces, x, y, piece.id) !== undefined;
+  const out: Cell[] = [];
+
+  if (piece.type === 'knight') {
+    for (const [dx, dy] of KNIGHT_OFFSETS) {
+      if (Math.sign(dy) !== toward) continue;
+      const x = from.x + dx;
+      const y = from.y + dy;
+      // Прыжок считается уходом, только если конь пересекает горизонталь края,
+      // а не сваливается за боковую стенку.
+      if (!insideColumn(x)) continue;
+      if (toward < 0 ? y > edge : y < edge) continue;
+      out.push({ x, y: edge });
+    }
+    return out;
+  }
+
+  for (const [dx, dy] of linesFor(piece.type)) {
+    if (Math.sign(dy) !== toward) continue;
+    const reach = Math.max(board.width, board.height) + 2;
+    for (let step = 1; step < reach; step++) {
+      const x = from.x + dx * step;
+      const y = from.y + dy * step;
+      // За боковую стенку уходить нельзя: край для нас горизонталь.
+      if (!insideColumn(x)) break;
+      if (y === edge) {
+        out.push({ x, y: edge });
+        break;
+      }
+      if (blocked(x, y)) break;
+    }
+  }
+  return out;
+}
+
+/** Все клетки, доступные фигуре за один ход: и внутрь поля, и на выход. */
+export function jamPieceTargets(board: Board, piece: JamPiece): Cell[] {
+  return [...jamPieceMoves(board, piece), ...jamExitCells(board, piece)];
+}
+
 export function jamLegalActions(state: JamState): JamAction[] {
   if (state.status !== 'playing') return [];
   const actions: JamAction[] = [];
   for (const piece of state.pieces) {
-    for (const cell of jamPieceMoves(state, piece)) actions.push({ type: 'piece', id: piece.id, to: cell });
+    for (const cell of jamPieceTargets(state, piece)) actions.push({ type: 'piece', id: piece.id, to: cell });
   }
   return actions;
 }
 
 /** Все ходы фигур: нужен списку подсказок и таблице ходов. */
-export function jamMoveTable(state: Pick<JamState, 'width' | 'height' | 'pieces'>): Array<{ id: string; moves: Cell[] }> {
-  return state.pieces.map((piece) => ({ id: piece.id, moves: jamPieceMoves(state, piece) }));
+export function jamMoveTable(board: Board): Array<{ id: string; moves: Cell[] }> {
+  return board.pieces.map((piece) => ({ id: piece.id, moves: jamPieceTargets(board, piece) }));
 }
 
 function weightedType(rng: Rng): JamPieceType {
@@ -217,180 +299,222 @@ function weightedType(rng: Rng): JamPieceType {
   return 'rook';
 }
 
-function layout(state: Omit<JamState, 'score' | 'status'>): JamState {
-  return { ...state, score: jamParkedCount(state.pieces, state.mid), status: 'playing' };
+/**
+ * Решатель: порядок, в котором фигуры уходят с поля, и число ходов на это.
+ *
+ * Жадность здесь честная: для каждой оставшейся фигуры ищем кратчайший путь к
+ * её краю по тем же правилам, что и игра (остальные фигуры - стены), и берём
+ * фигуру с минимальной ценой. Так поле не «решается» потому, что мы его так
+ * собрали: если план найден, он план именно для этой расстановки. Если не найден,
+ * расстановка в уровень не идёт.
+ */
+export interface JamPlan {
+  ok: boolean;
+  moves: JamAction[];
+  /** Сколько ходов ушло на каждую фигуру, в порядке ухода. */
+  costs: number[];
+}
+
+interface PathNode {
+  x: number;
+  y: number;
+  parent: PathNode | null;
+}
+
+/** Кратчайший путь фигуры к клетке ухода. Возвращает список ходов, включая сам уход. */
+function jamPathToExit(board: Board, piece: JamPiece, maxNodes = 4000): JamAction[] | null {
+  const start: PathNode = { x: piece.x, y: piece.y, parent: null };
+  const queue: PathNode[] = [start];
+  const seen = new Set<string>([`${piece.x},${piece.y}`]);
+  let nodes = 0;
+
+  while (queue.length > 0 && nodes++ < maxNodes) {
+    const node = queue.shift() as PathNode;
+    const exits = jamExitCells(board, piece, node);
+    if (exits.length > 0) {
+      const moves: JamAction[] = [{ type: 'piece', id: piece.id, to: exits[0] }];
+      for (let step = node; step.parent; step = step.parent) {
+        moves.push({ type: 'piece', id: piece.id, to: { x: step.x, y: step.y } });
+      }
+      return moves.reverse();
+    }
+    for (const cell of jamPieceMoves(board, piece, node)) {
+      const key = `${cell.x},${cell.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push({ x: cell.x, y: cell.y, parent: node });
+    }
+  }
+  return null;
+}
+
+/** Цена фигуры в ходах: путь до края плюс сам уход, либо null, если не дойти. */
+function jamPieceCost(board: Board, piece: JamPiece): JamAction[] | null {
+  return jamPathToExit(board, piece);
+}
+
+export function solveJamExits(
+  state: Pick<JamState, 'width' | 'height' | 'pieces'>,
+  options: { rng?: Rng } = {},
+): JamPlan {
+  const pieces = state.pieces.map((piece) => ({ ...piece }));
+  const board: Board = { width: state.width, height: state.height, pieces };
+  const moves: JamAction[] = [];
+  const costs: number[] = [];
+  const rng = options.rng;
+
+  while (pieces.length > 0) {
+    const paths: Array<{ id: string; path: JamAction[] }> = [];
+    for (const piece of pieces) {
+      const path = jamPieceCost(board, piece);
+      if (path) paths.push({ id: piece.id, path });
+    }
+    if (paths.length === 0) return { ok: false, moves: [], costs };
+    // Среди одинаково дешёвых фигуру выбираем случайно: иначе генератор каждый
+    // раз снимал бы одну и ту же, и расстановки отличались бы только на глаз.
+    paths.sort((a, b) => a.path.length - b.path.length || (a.id < b.id ? -1 : 1));
+    const floor = paths.filter((entry) => entry.path.length === paths[0].path.length);
+    const chosen = rng && floor.length > 1 ? floor[rng.int(floor.length)] : floor[0];
+
+    for (const move of chosen.path) moves.push(move);
+    costs.push(chosen.path.length);
+    const index = pieces.findIndex((piece) => piece.id === chosen.id);
+    const last = chosen.path[chosen.path.length - 1];
+    // Последняя клетка пути за краем: фигуру снимаем, она больше не стена.
+    if (last.to.y < 0 || last.to.y >= state.height) pieces.splice(index, 1);
+    else {
+      pieces[index] = { ...pieces[index], x: last.to.x, y: last.to.y };
+    }
+  }
+  return { ok: true, moves, costs };
+}
+
+function cloneJamBoard(state: Pick<JamState, 'width' | 'height' | 'pieces'>): Board {
+  return { width: state.width, height: state.height, pieces: state.pieces.map((piece) => ({ ...piece })) };
 }
 
 /**
- * Собрать решённую позицию и перемешать её обратимыми ходами.
- * `attempts` - сколько расстановок перебрать, пока перемешивание не даст
- * неготовую пробку с ходом хотя бы у одной фигуры.
+ * Расстановка: плотное поле, половина фигур белые, половина чёрные. Цвета не
+ * перемешиваем порядам: иначе на первых уровнях обе стороны стоят вперемешку и
+ * уходить мешает сосед, а не пробка.
  */
-export function createJamPuzzle(level: number, seed: number, attempts = 12): JamState {
-  const { width, height } = jamBoard(level);
-  const mid = Math.ceil(height / 2);
-  const scramble = jamScramble(level);
-  const budget = jamBudget(level);
-  const density = jamDensity(level);
-
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const rng = new Rng(mix32(seed, attempt, 0x1a9c0de5));
-    const base = buildSolved({ width, height, mid, density, level, seed });
-    const mixed = scrambleState({ width, height, mid, pieces: base.pieces, rng, steps: scramble });
-    // Короткое перемешивание значит, что пробка слишком тесная и фигуры стоят
-    // друг у друга: берём другую расстановку, иначе уровень решается за ход.
-    if (mixed.moves.length < Math.max(3, Math.round(scramble * 0.5))) continue;
-    const result = layout({ ...base, pieces: mixed.pieces, scramble: mixed.moves, budget });
-    if (jamSolved(result)) continue;
-    if (jamLegalActions(result).length === 0) continue;
-    return result;
-  }
-
-  // Фолбэк: минимальная пробка в три хода. Помечается последним событием, чтобы
-  // админка видела, на каких уровнях генератор откатился.
-  const rng = new Rng(mix32(seed, attempts, 0x1a9c0de5));
-  const base = buildSolved({ width, height, mid, density: 0.42, level, seed });
-  const mixed = scrambleState({ width, height, mid, pieces: base.pieces, rng, steps: 3 });
-  return { ...layout({ ...base, pieces: mixed.pieces, scramble: mixed.moves, budget }), lastEvent: 'fallback' };
-}
-
-function buildSolved(args: {
-  width: number;
-  height: number;
-  mid: number;
-  density: number;
-  level: number;
-  seed: number;
-}): Omit<JamState, 'score' | 'status'> {
-  const { width, height, mid, density } = args;
-  const rng = new Rng(mix32(args.seed, args.level, 0x51ed270b));
-  const total = Math.max(4, Math.round(width * height * density));
-  // Половины могут быть разного размера (нечётное число рядов), поэтому считаем
-  // не «пополам от total», а заполняем каждую долю своим числом.
-  const bottomCells = width * mid;
-  const topCells = width * (height - mid);
-  const bottomCount = Math.max(2, Math.min(bottomCells - 1, Math.round((total * bottomCells) / (bottomCells + topCells))));
-  const topCount = Math.max(2, Math.min(topCells - 1, total - bottomCount));
-
-  const pick = (rows: number[], count: number) => {
-    const cells: Array<{ x: number; y: number }> = [];
-    for (const y of rows) for (let x = 0; x < width; x++) cells.push({ x, y });
-    rng.shuffle(cells);
-    return cells.slice(0, count);
-  };
-
-  const bottomRows: number[] = [];
-  for (let y = 0; y < mid; y++) bottomRows.push(y);
-  const topRows: number[] = [];
-  for (let y = mid; y < height; y++) topRows.push(y);
-
-  // В решённой позиции белые сверху, чёрные снизу: отсюда и перемешиваем.
-  const whites = pick(topRows, topCount);
-  const blacks = pick(bottomRows, bottomCount);
-
+function buildLayout(args: { width: number; height: number; total: number; rng: Rng }): JamPiece[] {
+  const { width, height, total, rng } = args;
+  const cells: Array<{ x: number; y: number }> = [];
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) cells.push({ x, y });
+  rng.shuffle(cells);
+  const taken = cells.slice(0, Math.min(total, cells.length));
   const pieces: JamPiece[] = [];
   let id = 0;
-  for (const cell of whites) pieces.push({ id: `p${id++}`, type: weightedType(rng), side: 'white', x: cell.x, y: cell.y });
-  for (const cell of blacks) pieces.push({ id: `p${id++}`, type: weightedType(rng), side: 'black', x: cell.x, y: cell.y });
+  for (const cell of taken) {
+    // Белые занимают нижнюю половину, чёрные верхнюю: уходить каждой стороне
+    // нужно к своему краю, и пробка расходится с двух сторон.
+    const side: JamSide = cell.y < height / 2 ? 'black' : 'white';
+    pieces.push({ id: `p${id++}`, type: weightedType(rng), side, x: cell.x, y: cell.y });
+  }
+  return pieces;
+}
 
+/**
+ * Генератор уровня: перебираем расстановки, берём ту, чьё решение ближе всего
+ * к целевой длине уровня. Слишком короткие отбрасываем: поле, которое
+ * расходится за три хода, не задача, а загрузка.
+ */
+export function createJamPuzzle(level: number, seed: number, attempts = 24): JamState {
+  const { width, height } = jamBoard(level);
+  const total = Math.min(jamPieces(level), width * height - 2);
+  const target = jamTargetCost(level);
+  let best: { pieces: JamPiece[]; plan: JamPlan } | null = null;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const rng = new Rng(mix32(seed, attempt, 0x1a9c0de5, level, width, height));
+    const pieces = buildLayout({ width, height, total, rng });
+    const plan = solveJamExits({ width, height, pieces }, { rng });
+    if (!plan.ok || plan.moves.length < 3) continue;
+    const quality = -Math.abs(plan.moves.length - target);
+    if (!best || quality > -Math.abs(best.plan.moves.length - target)) best = { pieces, plan };
+    // Попали в полосу - дальше не ищем: генератор вызывается на каждый старт.
+    if (Math.abs(plan.moves.length - target) <= 2) break;
+  }
+
+  if (!best) {
+    // Ни одна расстановка не решилась: отдаём последнюю просмотренную и просим
+    // 3 хода запаса, а админке по `lastEvent` видно, на каких уровнях генератор
+    // откатился.
+    const rng = new Rng(mix32(seed, attempts, 0x1a9c0de5, level, width, height));
+    const pieces = buildLayout({ width, height, total, rng });
+    const plan = solveJamExits({ width, height, pieces }, { rng });
+    return {
+      version: 2,
+      mode: 'jam',
+      width,
+      height,
+      pieces,
+      moves: 0,
+      budget: jamBudget(level, Math.max(4, plan.moves.length)),
+      total: pieces.length,
+      removed: 0,
+      score: 0,
+      status: 'playing',
+      level,
+      seed,
+      lastEvent: 'fallback',
+      plan: plan.ok ? plan.moves : undefined,
+    };
+  }
+
+  const cost = best.plan.moves.length;
   return {
-    version: 1,
+    version: 2,
     mode: 'jam',
     width,
     height,
-    mid,
-    pieces,
+    pieces: best.pieces,
     moves: 0,
-    budget: 0,
-    level: args.level,
-    seed: args.seed,
+    budget: jamBudget(level, cost),
+    total: best.pieces.length,
+    removed: 0,
+    score: 0,
+    status: 'playing',
+    level,
+    seed,
+    lastEvent: 'level',
+    plan: best.plan.moves,
   };
 }
 
 /**
- * Перемешивание: случайные легальные ходы без немедленного отката назад
- * (иначе половина перестановок расходится впустую). Все ходы обратимы, поэтому
- * получившаяся пробка решаема за то же число ходов: отсюда гарантия решаемости.
+ * Подсказка: первый шаг плана, если он сейчас легален. Игрок мог сходить не по
+ * плану, тогда план пересобираем на текущей позиции: решатель дешёвый, и
+ * пересборка стоит меньше, чем держать игрока в тупике.
  */
-function scrambleState(args: {
-  width: number;
-  height: number;
-  mid: number;
-  pieces: JamPiece[];
-  rng: Rng;
-  steps: number;
-}): { pieces: JamPiece[]; moves: Array<{ id: string; from: Cell; to: Cell }> } {
-  const pieces = args.pieces.map((piece) => ({ ...piece }));
-  const board = { width: args.width, height: args.height, pieces };
-  const moves: Array<{ id: string; from: Cell; to: Cell }> = [];
+export function jamHint(state: JamState): JamAction | null {
+  if (state.status !== 'playing') return null;
+  const board = cloneJamBoard(state);
+  const positions = new Map(state.pieces.map((piece) => [piece.id, piece]));
 
-  for (let step = 0; step < args.steps; step++) {
-    const candidates: Array<{ id: string; to: Cell }> = [];
-    for (const piece of pieces) {
-      for (const cell of jamPieceMoves(board, piece)) candidates.push({ id: piece.id, to: cell });
-    }
-    if (candidates.length === 0) break;
-
-    const prev = moves[moves.length - 1];
-    const isUndo = (candidate: { id: string; to: Cell }) =>
-      Boolean(prev) && candidate.id === prev.id && sameCell(candidate.to, prev.from);
-
-    let chosen = candidates[args.rng.int(candidates.length)];
-    if (candidates.length > 1) {
-      for (let attempt = 0; attempt < 8 && isUndo(chosen); attempt++) {
-        chosen = candidates[args.rng.int(candidates.length)];
-      }
-    }
-
-    const piece = pieces.find((entry) => entry.id === chosen.id);
-    if (!piece || isUndo(chosen)) break;
-    const from = { x: piece.x, y: piece.y };
-    piece.x = chosen.to.x;
-    piece.y = chosen.to.y;
-    moves.push({ id: chosen.id, from, to: chosen.to });
+  for (const move of state.plan ?? []) {
+    const piece = positions.get(move.id);
+    if (!piece) continue;
+    const targets = jamPieceTargets(board, piece);
+    if (targets.some((cell) => cell.x === move.to.x && cell.y === move.to.y)) return move;
+    // План разошёлся с позицией: дальше пробуем пересобрать, а не угадывать.
+    break;
   }
 
-  return { pieces, moves };
+  const plan = solveJamExits(board);
+  if (plan.ok && plan.moves.length > 0) return plan.moves[0];
+  const actions = jamLegalActions(state);
+  return actions.length > 0 ? actions[0] : null;
 }
 
-function sameCell(a: Cell, b: Cell): boolean {
-  return a.x === b.x && a.y === b.y;
-}
-
-/**
- * Гарантированное решение: отменять перемешивание строго в обратном порядке.
- * Каждый откат легален, потому что в этот момент поле ровно такое, каким оно
- * было сразу после хода - больше никто между этими ходами не двигался.
- */
-export function jamSolution(state: JamState): JamAction[] {
-  const steps = state.scramble ?? [];
-  // Позиции обновляем по ходу разбора: пропускать можно только те шаги, где
-  // фигура уже стоит нужным местом, иначе следующий откат упрётся в чужую клетку.
-  const positions = new Map(state.pieces.map((piece) => [piece.id, { x: piece.x, y: piece.y }]));
-  const out: JamAction[] = [];
-  for (let index = steps.length - 1; index >= 0; index--) {
-    const step = steps[index];
-    const at = positions.get(step.id);
-    if (!at) continue;
-    if (at.x === step.from.x && at.y === step.from.y) continue;
-    out.push({ type: 'piece', id: step.id, to: { x: step.from.x, y: step.from.y } });
-    positions.set(step.id, { x: step.from.x, y: step.from.y });
-  }
-  return out;
-}
-
-/** Подсказка: первый шаг обратного пути, если он сейчас легален. */
-export function jamSolutionHint(state: JamState): JamAction | null {
-  const [first] = jamSolution(state);
-  if (!first) return null;
-  const piece = state.pieces.find((entry) => entry.id === first.id);
-  if (!piece) return null;
-  const legal = jamPieceMoves(state, piece).some((cell) => cell.x === first.to.x && cell.y === first.to.y);
-  return legal ? first : null;
+/** Сколько фигур уже уведено: нужно и экрану, и счёт. */
+export function jamRemovedCount(state: Pick<JamState, 'total' | 'pieces'>): number {
+  return Math.max(0, state.total - state.pieces.length);
 }
 
 export function cloneJamState(state: JamState): JamState {
-  return { ...state, pieces: state.pieces.map((piece) => ({ ...piece })), scramble: state.scramble ? [...state.scramble] : undefined };
+  return { ...state, pieces: state.pieces.map((piece) => ({ ...piece })), plan: state.plan ? [...state.plan] : undefined };
 }
 
 /** Применить действие. Ошибки правил - то же RuleError, что и у пешечных режимов. */
@@ -400,20 +524,28 @@ export function applyJamAction(previous: JamState, action: JamAction, RuleErrorC
   const state = cloneJamState(previous);
   const piece = state.pieces.find((entry) => entry.id === action.id);
   if (!piece) throw new RuleErrorCtor('Фигуры с таким id нет');
-  if (action.to.x < 0 || action.to.y < 0 || action.to.x >= state.width || action.to.y >= state.height) {
-    throw new RuleErrorCtor('За границей поля');
-  }
-  if (pieceAt(state.pieces, action.to.x, action.to.y, piece.id)) throw new RuleErrorCtor('Клетка занята');
-  const legal = jamPieceMoves(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y);
-  if (!legal) throw new RuleErrorCtor('Фигура так не ходит');
+
+  const exiting = action.to.y < 0 || action.to.y >= state.height;
+  if (action.to.x < 0 || action.to.x >= state.width) throw new RuleErrorCtor('За границей поля');
+  const legal = exiting
+    ? jamExitCells(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y)
+    : jamPieceMoves(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y);
+  if (!legal) throw new RuleErrorCtor(exiting ? 'Фигура не может уйти с этого поля' : 'Фигура так не ходит');
 
   const from = { x: piece.x, y: piece.y };
-  piece.x = action.to.x;
-  piece.y = action.to.y;
+  if (exiting) {
+    state.pieces = state.pieces.filter((entry) => entry.id !== piece.id);
+    state.removed += 1;
+    state.lastEvent = 'exit';
+  } else {
+    if (pieceAt(state.pieces, action.to.x, action.to.y, piece.id)) throw new RuleErrorCtor('Клетка занята');
+    piece.x = action.to.x;
+    piece.y = action.to.y;
+    state.lastEvent = 'move';
+  }
   state.moves += 1;
-  state.score = jamParkedCount(state.pieces, state.mid);
+  state.score = jamRemovedCount(state);
   state.lastMove = { id: piece.id, from, to: { ...action.to } };
-  state.lastEvent = 'move';
 
   if (jamSolved(state)) {
     state.status = 'won';
@@ -431,36 +563,4 @@ export function applyJamActions(initial: JamState, actions: JamAction[], RuleErr
   let state = initial;
   for (const action of actions) state = applyJamAction(state, action, RuleErrorCtor);
   return state;
-}
-
-/**
- * Подсказка: жадный выбор. Берём фигуру, которой ближе всего встать на чужую
- * половину, и ход, который увеличивает число расставленных фигур либо
- * освобождает проход. Полный перебор здесь не нужен: он экспоненциален по
- * числу фигур, а игроку достаточно одного разумного хода.
- */
-export function jamHint(state: JamState): JamAction | null {
-  if (state.status !== 'playing') return null;
-  // След перемешивания есть не всегда (игрок мог отменить ходы), поэтому сначала
-  // пробуем его, а уже потом жадный перебор.
-  const fromPath = jamSolutionHint(state);
-  if (fromPath) return fromPath;
-  let best: { action: JamAction; value: number } | null = null;
-  for (const piece of state.pieces) {
-    const parkedBefore = jamIsParked(piece, state.mid);
-    for (const cell of jamPieceMoves(state, piece)) {
-      const after: JamPiece = { ...piece, x: cell.x, y: cell.y };
-      const gain = jamIsParked(after, state.mid) && !parkedBefore ? 3 : 0;
-      // Линия к цели важнее случайного съезда вбок.
-      const toward = Math.abs(cell.y - (piece.side === 'white' ? state.mid : state.mid - 1)) <
-        Math.abs(piece.y - (piece.side === 'white' ? state.mid : state.mid - 1))
-        ? 2
-        : 0;
-      const undo = state.lastMove && state.lastMove.id === piece.id && sameCell(cell, state.lastMove.from) ? -4 : 0;
-      const openCells = jamPieceMoves(state, after).length;
-      const value = gain + toward + undo + Math.min(1, openCells * 0.05);
-      if (!best || value > best.value) best = { action: { type: 'piece', id: piece.id, to: cell }, value };
-    }
-  }
-  return best?.action ?? null;
 }

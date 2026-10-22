@@ -1,4 +1,4 @@
-import { RACE_PREFILL, RACE_ROWS, RACE_WIDTH, raceSpawnEvery, raceSpawnPerTurn } from './race';
+import { RACE_PREFILL, RACE_ROWS, RACE_SPAWN_ROWS, RACE_WIDTH, raceSpawnEvery, raceSpawnPerTurn } from './race';
 import type { AnyMode, GameMode } from './types';
 
 /**
@@ -16,27 +16,29 @@ export interface ModeRules {
   /** Сколько раз за забег игрок вправе пропустить ход сам. Вынужденный пропуск не считается. */
   skipQuota: number;
   /**
-   * Как ходят фигуры: `greedy` идут на пешку, `down` конвейером рядом вниз,
-   * `static` стоят, `exit` уходят с поля в боковые или все четыре стороны,
-   * `conveyor` падают рядом и бьют только по своей линии.
+   * Как ходят фигуры: `greedy` идут на игрока по своим шахматным правилам,
+   * `down` сдвиг на ряд вниз, `static` стоят, `exit` уходят с поля в боковые
+   * или все четыре стороны.
    */
-  motion: 'greedy' | 'down' | 'static' | 'exit' | 'conveyor';
+  motion: 'greedy' | 'down' | 'static' | 'exit';
   /** Для `motion: 'exit'`: 2 значит только влево-вправо, 4 во все стороны. */
   exitDirections: 2 | 4;
   /** Можно ли вставать на свободную диагональ. false: диагональ только для взятия. */
   freeDiagonal: boolean;
-  /** `top` цель побега вверх, `survive` цели нет, `scroll` - счёт в прокрученных рядах. */
-  goal: 'top' | 'survive' | 'scroll';
+  /** `top` цель побега вверх, `survive` цели нет: считается длина забега. */
+  goal: 'top' | 'survive';
   /** Сколько фигур появляется на верхнем ряду за ход (0 значит без притока). */
   spawnPerTurn: number;
-  /** Приток как функция уровня режима: конвейер ускоряется, а не растягивается. */
+  /** Приток как функция волны: фигуры приходят чаще, а не растягиваются по полю. */
   spawnRate?: (level: number) => number;
   /** Такт притока: волна раз в столько-то ходов. */
   spawnEvery?: (level: number) => number;
-  /** Пешка приколота к своему ряду: ходит влево-вправо, вперёд нельзя. */
-  pinned?: boolean;
-  /** В приколотом ряду можно убрать фигуру, встав на её клетку. */
-  ram?: boolean;
+  /** Кем ходит игрок: `pawn` пешка (три направления вперёд), `king` король (восемь сторон и взятие назад). */
+  player: 'pawn' | 'king';
+  /** Верхний ряд переливает в нижний: режим без финиша, где побег всё-таки есть. */
+  wrapOnTop: boolean;
+  /** Сколько верхних рядов занимает приток. */
+  spawnRows: number;
   /** Плотная стена фигур вместо разреженной доски: режим «Парковка». */
   wall: boolean;
   /** Сколько фигур за забег можно взять. 0 значит без ограничения. */
@@ -71,7 +73,9 @@ const CORE: ModeRules = {
   freeDiagonal: true,
   goal: 'top',
   spawnPerTurn: 0,
-  pinned: false,
+  player: 'pawn',
+  wrapOnTop: false,
+  spawnRows: 1,
   rows: (level) => (level <= 5 ? 4 : level <= 15 ? 6 : level <= 30 ? 8 : 9),
   pieces: (level) => (level <= 1 ? 1 : level <= 4 ? 2 : level <= 7 ? 3 : level <= 12 ? 4 : level <= 18 ? 5 : level <= 25 ? 6 : 7),
 };
@@ -87,7 +91,9 @@ const JAM: ModeRules = {
   freeDiagonal: true,
   goal: 'top',
   spawnPerTurn: 0,
-  pinned: false,
+  player: 'pawn',
+  wrapOnTop: false,
+  spawnRows: 1,
   // Без лимита «Парковка» решается в лоб: фигуры стоят, идёшь и ешь всех подряд.
   // Квота превращает поле в задачу: выбирать, кого снять, а кого обойти.
   captureQuota: 3,
@@ -96,23 +102,26 @@ const JAM: ModeRules = {
 };
 
 const RACE: ModeRules = {
-  // «Гонки»: бесконечный конвейер. Пешка приколота к своему ряду, фигуры падают
-  // сверху рядом, ушедшие за нижний край исчезают. Взятие - не способ пройти
-  // стену, а способ расчистить свой ряд.
+  // «Гонки»: король против фигур, приходящих сверху. Игрок ходит и бьёт на
+  // клетку в любую сторону, поэтому взятий не ограничиваем: снимать фигуры это
+  // единственный способ дышать. Верхний ряд не финиш, а линия рождения фигур.
   captures: false,
   doubleStep: false,
+  // Пропуск не нужен: король всегда может отступить, а ждать смысла нет,
+  // приток идёт по своему такту.
   skipQuota: 0,
-  motion: 'conveyor',
+  motion: 'greedy',
   wall: false,
   captureQuota: 0,
   exitDirections: 2,
-  freeDiagonal: false,
-  goal: 'scroll',
+  freeDiagonal: true,
+  goal: 'survive',
   spawnPerTurn: 1,
   spawnRate: raceSpawnPerTurn,
   spawnEvery: raceSpawnEvery,
-  pinned: true,
-  ram: true,
+  spawnRows: RACE_SPAWN_ROWS,
+  player: 'king',
+  wrapOnTop: false,
   rows: () => RACE_ROWS,
   pieces: () => RACE_PREFILL,
 };
@@ -133,16 +142,15 @@ const VARIANTS: Partial<Record<ModeId, ModeRules>> = {
   // своим правилам. Доходить до верха не нужно, считается только проигрыш.
   raceDodge: {
     ...RACE,
-    motion: 'greedy',
-    // Вариант мерялся до конвейера: оставляем ему прежний набор переключателей,
-    // иначе сравнение в лаборатории идёт с другим движком.
+    // Прежняя погоня пешкой: считается та же длина забега, но игрок бегает
+    // пешкой, а не королём, и верхний ряд для него переливается в нижний.
     goal: 'survive',
-    pinned: false,
-    ram: false,
     captures: true,
     doubleStep: true,
     freeDiagonal: true,
     skipQuota: 1,
+    player: 'pawn',
+    wrapOnTop: true,
     spawnRate: undefined,
     // Один бесплатный пропуск оставляем как в базе: без него пешка обязана
     // ходить в любую сторону, и уклонение вырождается в «первый ход решает».
@@ -211,7 +219,7 @@ export function isLevelMode(mode: GameMode): boolean {
 
 /**
  * Режимы, где уровень двигает победа: дошёл до верха - получил следующий.
- * «Гонки» не из них: там конца нет, уровень растёт от прокрученных рядов.
+ * «Гонки» не из них: там конца нет, уровень растёт от пережитых ходов.
  */
 export function isWinLadder(mode: GameMode): boolean {
   return mode === 'campaign' || mode === 'jam';
@@ -251,13 +259,11 @@ export function rulesFor(mode: AnyMode | undefined): ModeRules {
 }
 
 /**
- * Режим без финиша: исход решает только длина жизни. У «Гонок» тот же смысл,
- * но жизнь измеряется прокрученными рядами, поэтому разбор и генератор для них
- * работают вместе.
+ * Режим без финиша: исход решает только длина забега. Разбор и генератор в нём
+ * меряют не решаемость, а то, сколько игрок продержался.
  */
 export function isSurvivalGoal(mode: AnyMode | undefined): boolean {
-  const goal = rulesFor(mode).goal;
-  return goal === 'survive' || goal === 'scroll';
+  return rulesFor(mode).goal === 'survive';
 }
 
 export function modeDef(mode: ModeId): ModeDef {
@@ -275,12 +281,12 @@ export function modeDef(mode: ModeId): ModeDef {
     },
     jam: {
       name: 'Парковка',
-      note: 'Пробка из белых и чёрных фигур: перегоняйте каждую по её правилу на чужую половину, бить нельзя.',
+      note: 'Пробка из белых и чёрных фигур: каждую нужно увести с поля. Белые уходят за нижний край, чёрные за верхний, бить нельзя.',
       playable: true,
     },
     race: {
       name: 'Гонки',
-      note: 'Конвейер: пешка в своём ряду, фигуры падают сверху. Счёт это ряды, каждые десять рядов режим поднимает уровень.',
+      note: 'Король против фигур, которые приходят с верхних рядов и ходят по своим правилам. Счёт это пережитые ходы, каждые восемь режим поднимает уровень.',
       playable: true,
     },
     jamExit2: {

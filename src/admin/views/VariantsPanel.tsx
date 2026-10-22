@@ -5,19 +5,24 @@ import {
   boardForMode,
   modeDef,
   modeFamily,
+  type JamMeasure,
   type ModeId,
   type VariantReport,
 } from '../../engine';
 import { Panel, StatusLine, Table, formatPercent } from '../ui';
-import { runVariantSuite } from '../variantsClient';
+import { runJamSuite, runVariantSuite } from '../variantsClient';
 
 /**
  * Сравнение вариантов правил одним прогоном.
  *
- * Отвечает на вопросы, которые нельзя задать одиночным расстановкой: что даёт
- * уход фигур с площадки, сколько держится пешка в режиме на уклонение и что
- * меняет запрет свободной диагонали. Отмечаете режимы, считаете, забираете
- * текст таблицы целиком.
+ * Отвечает на вопросы, которые нельзя задать одиночным расстановкой: сколько
+ * держится король под притоком фигур, что даёт уход фигур с площадки и что меняет
+ * запрет свободной диагонали. Отмечаете режимы, считаете, забираете текст таблицы
+ * целиком.
+ *
+ * «Парковка» в этом списке гостит на правах отдельного замера: боевой режим это
+ * головоломка из `jam.ts`, и её метрика длина плана решателя, а не доля побед.
+ * Для неё внизу свой блок, он считает те же зерна, что и игра.
  */
 
 const DEFAULT_SAMPLES = 16;
@@ -26,6 +31,8 @@ const SAMPLE_PRESETS = [16, 64, 100, 250, 1000];
 const MIN_SAMPLES = 4;
 const MAX_SAMPLES = 2000;
 const DEFAULT_PICKS: ModeId[] = ['jam', 'jamExit2', 'jamExit4', 'race', 'raceDodge', 'campaign', 'campaignStrictDiag'];
+/** Лестница уровней для замера «Парковки»: те же срезы, что и в `docs/modes.md`. */
+const JAM_LADDER = '1,3,8,12,20,30,40';
 
 interface Group {
   id: string;
@@ -45,13 +52,13 @@ const GROUPS: Group[] = [
   {
     id: 'jam',
     title: '«Парковка» и уход фигур',
-    note: 'Стоит ли задача задачи, когда стена редеет сама: цена прохода, нужные взятия и доля досок с выбором.',
+    note: 'Пешечный движок на тех же флагах: стена фигур, право уходить с площадки в два или четыре направления, запрет свободной диагонали. Боевая «Парковка» считается в блоке внизу.',
     modes: ['jam', 'jamExit2', 'jamExit4', 'jamStrictDiag'],
   },
   {
     id: 'race',
     title: '«Гонки» и уклонение',
-    note: 'Боевые «Гонки» это конвейер: ряды идут вниз, пешка приколота к своему ряду, счёт это ряды. Во втором варианте фигуры приходят с верхнего края и ходят по своим правилам, верхний ряд переливает пешку вниз. Метрика длина жизни в ходах.',
+    note: 'Боевые «Гонки» это король против фигур, приходящих с двух верхних рядов: счёт в пережитых ходах, длина забега меряется прогоном жадного бота. Во втором варианте бегает пешка, верхний ряд переливает её в нижний.',
     modes: ['race', 'raceDodge'],
   },
   {
@@ -92,7 +99,14 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   const [stopped, setStopped] = useState(false);
+  const [jamLevels, setJamLevels] = useState(JAM_LADDER);
+  const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
+  const [jamRunning, setJamRunning] = useState(false);
+  const [jamDone, setJamDone] = useState({ done: 0, total: 0 });
+  const [jamError, setJamError] = useState('');
   const busyRef = useRef(false);
+  const jamBusyRef = useRef(false);
+  const jamSuiteRef = useRef<{ cancel: () => void } | null>(null);
   const stopRef = useRef(false);
   const suiteRef = useRef<{ cancel: () => void } | null>(null);
 
@@ -148,6 +162,47 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       });
   };
 
+  const parsedLevels = useMemo(
+    () =>
+      jamLevels
+        .split(',')
+        .map((value) => Math.max(1, Math.min(120, Number(value.trim()) || 0)))
+        .filter((value) => value > 0)
+        .slice(0, 12),
+    [jamLevels],
+  );
+
+  const runJam = () => {
+    if (jamBusyRef.current || parsedLevels.length === 0) return;
+    jamBusyRef.current = true;
+    setJamRunning(true);
+    setJamError('');
+    setJamRows([]);
+    setJamDone({ done: 0, total: parsedLevels.length });
+    const suite = runJamSuite(
+      { levels: parsedLevels, samples, seed },
+      { onRow: (row, doneRows, totalRows) => {
+          setJamRows((current) => [...current, row]);
+          setJamDone({ done: doneRows, total: totalRows });
+        } },
+    );
+    jamSuiteRef.current = suite;
+    suite.done
+      .catch((error: unknown) => {
+        if (!stopRef.current) setJamError(error instanceof Error ? error.message : 'Замер не удался');
+      })
+      .finally(() => {
+        setJamRunning(false);
+        jamBusyRef.current = false;
+        jamSuiteRef.current = null;
+      });
+  };
+
+  const stopJam = () => {
+    stopRef.current = true;
+    jamSuiteRef.current?.cancel();
+  };
+
   const stop = () => {
     stopRef.current = true;
     setStopped(true);
@@ -159,6 +214,11 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const copy = async () => {
     const ok = await writeClipboard(report);
     setCopied(ok ? 'Скопировано. Вставляй прямо в чат.' : 'Буфер обмена недоступен, выдели текст и скопируй вручную.');
+  };
+
+  const copyJam = async () => {
+    const ok = await writeClipboard(jamText(jamRows, { samples, seed }));
+    setCopied(ok ? 'Таблица парковки скопирована.' : 'Буфер обмена недоступен, выдели текст и скопируй вручную.');
   };
 
   return (
@@ -325,11 +385,74 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         </>
       )}
 
+      <div className="adm-variant-jam">
+        <div className="adm-row-actions">
+          <label className="adm-field is-inline">
+            <span className="adm-label">Уровни «Парковки»</span>
+            <input
+              type="text"
+              value={jamLevels}
+              onChange={(event) => setJamLevels(event.target.value)}
+              disabled={jamRunning}
+              placeholder={JAM_LADDER}
+            />
+          </label>
+          <button type="button" className="btn btn-outline" onClick={runJam} disabled={jamRunning || parsedLevels.length === 0}>
+            {jamRunning ? `Уровень ${jamDone.done} из ${jamDone.total || parsedLevels.length}` : `Замерить генератор (${parsedLevels.length})`}
+          </button>
+          {jamRunning && (
+            <button type="button" className="btn btn-quiet" onClick={stopJam}>
+              Остановить
+            </button>
+          )}
+          {jamRows.length > 0 && (
+            <button type="button" className="btn btn-quiet" onClick={() => void copyJam()}>
+              Скопировать таблицу
+            </button>
+          )}
+        </div>
+        {jamError && <StatusLine kind="error">{jamError}</StatusLine>}
+        <Table
+          head={['Уровень', 'Поле', 'Фигур', 'План, ходы', 'Разброс', 'Решаемых', 'Сверх бюджета']}
+          empty="Замер считает расстановки тем же генератором, что выдаёт бою: длина плана решателя и доля полей, которые решатель взял"
+        >
+          {parsedLevels.map((value) => {
+            const item = jamRows.find((row) => row.level === value);
+            if (!item) {
+              return (
+                <tr key={value}>
+                  <td>{value}</td>
+                  <td colSpan={6} className="adm-muted">
+                    {jamRunning ? 'считаем' : 'нет данных'}
+                  </td>
+                </tr>
+              );
+            }
+            return (
+              <tr key={value}>
+                <td>{value}</td>
+                <td className="is-mono">
+                  {item.width}×{item.height}
+                </td>
+                <td>{item.avgPieces}</td>
+                <td className="is-mono">{item.avgCost}</td>
+                <td className="is-mono">
+                  {item.minCost}-{item.maxCost}
+                </td>
+                <td>{formatPercent(item.solvedShare, 1)}</td>
+                <td className={item.overBudget > 0 ? 'is-warn' : undefined}>{item.overBudget}</td>
+              </tr>
+            );
+          })}
+        </Table>
+      </div>
+
       <p className="adm-note">
         Индекс реиграбельности это 40% разнообразия генератора, 25% отличия соседних уровней, 25% шагов с
         выбором и 10% отсутствия безальтернативных ходов. «Ушло» это сколько фигур покинуло поле по пути
-        решения, «Жизнь» средняя длина уклонения в ходах, «С решением» для режима на уклонение означает, что
-        пешка дожила до конца глубины разбора, «откаты» сколько досок генератор сдал без отбора по полосе.
+        решения, «Жизнь» средняя длина забега в ходах: у короля её считает прогон жадного бота, потому что
+        деревом поиска восемь направлений на двенадцати рядах не перебираются,
+        «откаты» сколько досок генератор сдал без отбора по полосе.
       </p>
     </Panel>
   );
@@ -344,6 +467,21 @@ function GroupCheck({ group, picks, onToggle }: { group: Group; picks: ModeId[];
     if (ref.current) ref.current.indeterminate = !all && some;
   }, [all, some]);
   return <input ref={ref} type="checkbox" checked={all} onChange={onToggle} />;
+}
+
+/** Текст замера генератора: его же вставляем в `docs/modes.md`, поэтому формат markdown. */
+function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): string {
+  const head = ['Уровень', 'Поле', 'Фигур', 'План, ходы', 'Мин', 'Макс', 'Решаемых', 'Сверх бюджета'];
+  const lines = [`Замер генератора «Парковки», по ${meta.samples} полей на уровень, зерно ${meta.seed}`, ''];
+  lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
+  for (const row of rows) {
+    lines.push(
+      `| ${row.level} | ${row.width}x${row.height} | ${row.avgPieces} | ${row.avgCost} | ${row.minCost} | ${row.maxCost} | ${(row.solvedShare * 100).toFixed(1)}% | ${row.overBudget} |`,
+    );
+  }
+  lines.push('');
+  lines.push('«План, ходы» длина решения, которое нашёл решатель, «Сверх бюджета» поля, где план не влез в данный бюджет.');
+  return lines.join('\n');
 }
 
 function survivalText(report: VariantReport): string {

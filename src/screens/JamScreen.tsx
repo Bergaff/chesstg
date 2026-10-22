@@ -5,8 +5,6 @@ import {
   isJamState,
   jamBudget,
   jamLegalActions,
-  jamParkedCount,
-  jamSolution,
   modeDef,
   type Cell,
   type JamAction,
@@ -32,7 +30,7 @@ type Phase = 'loading' | 'pre' | 'playing' | 'finishing' | 'won' | 'lost';
 
 interface JamHintResponse {
   move: JamAction;
-  parked: number;
+  removed: number;
   total: number;
   movesLeft: number;
 }
@@ -267,8 +265,8 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     return () => window.removeEventListener('pagehide', onPageHide);
   }, [run]);
 
-  const parked = jam ? jamParkedCount(jam.pieces, jam.mid) : 0;
-  const total = jam?.pieces.length ?? 0;
+  const removed = jam?.removed ?? 0;
+  const total = jam?.total ?? 0;
   const movesUsed = jam?.moves ?? 0;
   const budget = jam?.budget ?? jamBudget(1);
   const movesLeft = Math.max(0, budget - movesUsed);
@@ -452,7 +450,6 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     return new Set(jamLegalActions(jam).map((action) => action.id));
   }, [canPlay, jam]);
 
-  const solutionPreview = useMemo(() => (jam ? jamSolution(jam).length : 0), [jam]);
 
   if (!jam || !run) {
     return (
@@ -521,19 +518,19 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
         <span className={cn('status-item', movesLeft <= 3 && 'warn')}>ходов {movesLeft}</span>
         <span className="status-sep" aria-hidden="true">/</span>
         <span className="status-item">
-          на месте {parked} из {total}
+          уведено {removed} из {total}
         </span>
         <span className="status-sep" aria-hidden="true">/</span>
         <span className="status-item">поле {jam.width}×{jam.height}</span>
       </div>
 
-      <div className="jam-progress" role="progressbar" aria-valuenow={parked} aria-valuemin={0} aria-valuemax={total}>
-        <span style={{ width: total ? `${Math.round((parked / total) * 100)}%` : 0 }} />
+      <div className="jam-progress" role="progressbar" aria-valuenow={removed} aria-valuemin={0} aria-valuemax={total}>
+        <span style={{ width: total ? `${Math.round((removed / total) * 100)}%` : 0 }} />
       </div>
 
       <div className="board-area">
         <div className="goal-line">
-          <span>белые наверх, чёрные вниз</span>
+          <span>белые за нижний край, чёрные за верхний</span>
           <span className="num">{selected ? 'выберите клетку' : 'троньте фигуру'}</span>
         </div>
         <JamBoard
@@ -594,14 +591,14 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       {phase === 'pre' && (
         <Modal dismissible={false} onClose={() => undefined} labelledBy="jam-pre-title">
-          <span className="label">Поле {jam.width}×{jam.height}, фигур {total}</span>
+          <span className="label">Поле {jam.width}×{jam.height}, фигур увести {total}</span>
           <h2 className="modal-title" id="jam-pre-title">
             {modeDef('jam').name}, уровень {run.level}
           </h2>
           <p className="modal-text">
             Пробка забита белыми и чёрными фигурами. Ходите любой: ладья ездит по прямым, слон по
-            диагоналям, конь перепрыгивает. Взятий нет, так что путь расчищать нечем - только объезжать.
-            Белые должны встать на верхнюю половину, чёрные на нижнюю.
+            диагоналям, конь перепрыгивает. Шаг за край фигуру с поля снимает: белые уходят за нижний
+            край, чёрные за верхний. Взятий нет, поэтому путь расчищать нечем - только объезжать.
           </p>
           <div className="pre-meta">
             <div>
@@ -609,8 +606,8 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
               <b>{budget}</b>
             </div>
             <div>
-              <span>Решение генератора</span>
-              <b>{solutionPreview > 0 ? solutionPreview : 'не найдено'}</b>
+              <span>Фигур на поле</span>
+              <b>{jam.pieces.length}</b>
             </div>
             <div>
               <span>Жизней в запасе</span>
@@ -684,7 +681,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
               Ходы кончились
             </h2>
             <p className="modal-text">
-              На месте {parked} из {total}. Жизнь списана, уровень тот же: попробуйте другой порядок
+              Уведено {removed} из {total}. Жизнь списана, уровень тот же: попробуйте другой порядок
               перестановок или получите то же поле ещё раз.
             </p>
           </div>

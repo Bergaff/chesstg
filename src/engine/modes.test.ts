@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { RACE_SPAWN_ROWS } from './race';
 import {
   MODE_RULES,
   analyzeVariant,
@@ -55,9 +56,11 @@ describe('правила режимов', () => {
     expect(MODE_RULES.campaign.doubleStep).toBe(true);
     expect(MODE_RULES.campaign.skipQuota).toBe(2);
     expect(MODE_RULES.jam.motion).toBe('static');
-    expect(MODE_RULES.race.motion).toBe('conveyor');
-    expect(MODE_RULES.race.pinned).toBe(true);
-    expect(MODE_RULES.race.goal).toBe('scroll');
+    expect(MODE_RULES.race.motion).toBe('greedy');
+    expect(MODE_RULES.race.player).toBe('king');
+    expect(MODE_RULES.race.goal).toBe('survive');
+    // Взятия королю не лимитируем: снимать фигуры это единственный способ дышать.
+    expect(MODE_RULES.race.captureQuota).toBe(0);
   });
 
   it('геометрия кампании идёт из режима', () => {
@@ -76,15 +79,18 @@ describe('правила режимов', () => {
     expect(next.enemies[0]).toMatchObject({ x: 1, y: 2 });
   });
 
-  it('в «Гонках» фигура падает рядом вниз и уходит за нижний край', () => {
-    const moving = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 3, y: 3 }] });
-    const after = applyAction(moving, { type: 'move', dx: 0, dy: 0 });
-    expect(after.enemies.some((e) => e.id === 'e0' && e.y === 2)).toBe(true);
+  it('в «Гонках» фигура бьёт по своей линии, а с линии можно уйти', () => {
+    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
+    // Шаг вдоль ряда: король остаётся на колонке ладьи, и его снимают.
+    expect(applyAction(lined, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
+    // Тот же ход в сторону с линии - ладье нужен ход на перестроение.
+    expect(applyAction(lined, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
 
-    const escaping = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 3, y: 0 }] });
-    const cleared = applyAction(escaping, { type: 'move', dx: 0, dy: 0 });
-    expect(cleared.enemies.some((e) => e.id === 'e0')).toBe(false);
-    expect(cleared.lastEvent).toBe('escaped');
+    // Никакого «рядового падения» нет: фигура тратит ходы по своему правилу.
+    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 0 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 4 }] });
+    const step = applyAction(far, { type: 'move', dx: 1, dy: 0 });
+    expect(step.enemies.find((e) => e.id === 'e0')).toMatchObject({ x: 3, y: 2 });
+    expect(step.status).toBe('playing');
   });
 
   it('двойной ход перекрывается фигурой в промежуточной клетке', () => {
@@ -110,11 +116,13 @@ describe('генераторы лабораторных режимов', () => {
     }
   });
 
-  it('«Гонки» стартуют без боя на старте и выше середины', () => {
+  it('«Гонки» стартуют без боя: фигуры занимают верхние ряды притока', () => {
     for (const level of [3, 9, 20]) {
       const state = createRaceLevel(level, 909 + level);
       expect(state.enemies.length).toBeGreaterThan(0);
-      for (const enemy of state.enemies) expect(enemy.y).toBeGreaterThanOrEqual(2);
+      for (const enemy of state.enemies) {
+        expect(enemy.y).toBeGreaterThanOrEqual(state.height - RACE_SPAWN_ROWS);
+      }
     }
   });
 
@@ -166,9 +174,9 @@ describe('квота взятий', () => {
     const state = wall('campaign');
     expect(capturesLeft(base({ mode: 'campaign', captures: 40 }))).toBe(Number.POSITIVE_INFINITY);
     expect(legalMoves(state).some((move) => Boolean(move.takes))).toBe(true);
-    // У конвейера пешка не бьёт по диагонали вперёд: у неё нет права вперёд.
-    const race = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 2, y: 2 }] });
-    expect(legalMoves(race).some((move) => move.dy === 1)).toBe(false);
+    // Король бьёт во все стороны и без квоты: иначе забег превращается в ожидание.
+    const race = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 2, y: 2 }] });
+    expect(legalMoves(race).some((move) => move.dy === 1 && Boolean(move.takes))).toBe(true);
     expect(capturesLeft(race)).toBe(Number.POSITIVE_INFINITY);
   });
 });
@@ -327,8 +335,10 @@ describe('переключатели вариантов', () => {
     expect(state.status).toBe('playing');
     expect(state.player.y).toBe(0);
     expect(state.lastEvent).toBe('wrap');
-    // Боевые «Гонки» на том же ходу даже не пустят пешку вперёд: ряд приколотов.
-    expect(() => applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 })).toThrow(/Некорректная длина хода/);
+    // Боевые «Гонки» перелива не дают: король ходит назад сам, ему это не нужно.
+    const kingTurn = applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 });
+    expect(kingTurn.player.y).toBe(5);
+    expect(kingTurn.lastEvent).not.toBe('wrap');
   });
 
   it('геометрия варианта совпадает с базовым режимом', () => {

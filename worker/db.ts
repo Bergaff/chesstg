@@ -9,7 +9,7 @@ import {
   msUntilNextLife,
   PAID_SKINS,
   PLAYABLE_MODES,
-  RACE_PIN_ROW,
+  RACE_KING_ROW,
   randomSeed,
   shortCode,
   SKINS,
@@ -280,8 +280,9 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
   if (!state || typeof state !== 'object') return false;
   const value = state as {
     mode?: unknown;
+    version?: unknown;
     pieces?: unknown;
-    mid?: unknown;
+    removed?: unknown;
     width?: unknown;
     height?: unknown;
     enemies?: unknown;
@@ -289,7 +290,9 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
   };
   if (value.mode !== mode) return false;
   if (mode === 'jam') {
-    return Array.isArray(value.pieces) && typeof value.mid === 'number';
+    // Версия входит в проверку: задача «разойтись половинами» тоже была
+    // `mode: 'jam'`, и на её состоянии новый экран падает на первом же шаге.
+    return value.version === 2 && Array.isArray(value.pieces) && typeof value.removed === 'number';
   }
   const shaped =
     typeof value.width === 'number' &&
@@ -298,9 +301,10 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
     typeof value.player?.x === 'number' &&
     typeof value.player?.y === 'number';
   if (!shaped) return false;
-  // Конвейерного игрока генератор ставит в закреплённый ряд; погоня начинала с
-  // нулевого, и такой забег новый клиент досчитает как победу.
-  if (mode === 'race') return value.player?.y === RACE_PIN_ROW;
+  // Гонки играют королём, и генератор ставит его в первый ряд от низа. Прежний
+  // конвейер начинал с другого ряда и считал ряды, а не ходы: такой забег новый
+  // клиент досчитал бы не тем правилом, поэтому ряд входит в проверку формы.
+  if (mode === 'race') return value.player?.y === RACE_KING_ROW;
   return true;
 }
 
@@ -315,11 +319,11 @@ export function serializeRun(run: RunRow) {
   } catch {
     fail(500, 'run_corrupt', 'Повреждённые данные забега');
   }
-  // След перемешивания «Парковки» решает уровень целиком: клиенту он не
-  // показываем, иначе подсказка становится бесплатной.
+  // План решателя решает уровень целиком: клиенту он не показываем, иначе
+  // подсказка становится бесплатной.
   if (initial && typeof initial === 'object' && 'mode' in initial && (initial as { mode?: string }).mode === 'jam') {
-    const { scramble: _scramble, ...jamPublic } = initial as Record<string, unknown>;
-    void _scramble;
+    const { plan: _plan, ...jamPublic } = initial as Record<string, unknown>;
+    void _plan;
     initial = jamPublic;
   }
 

@@ -30,7 +30,24 @@ import {
   type GameMode,
   type GameState,
   type MoveDx,
+  type MoveDy,
 } from '../engine';
+/**
+ * Порядок кнопок короля: верхняя строка это «вперёд», центр ничего не значит.
+ * Все девять кнопок рисуются всегда, недоступные выключены.
+ */
+const KING_DIRS: Array<{ dx: MoveDx; dy: MoveDy; glyph: string; label: string; short: string }> = [
+  { dx: -1, dy: 1, glyph: '↖', label: 'влево-вперёд', short: 'вперёд' },
+  { dx: 0, dy: 1, glyph: '↑', label: 'вперёд', short: 'вперёд' },
+  { dx: 1, dy: 1, glyph: '↗', label: 'вправо-вперёд', short: 'вперёд' },
+  { dx: -1, dy: 0, glyph: '←', label: 'влево', short: 'влево' },
+  { dx: 0, dy: 0, glyph: '·', label: 'на месте', short: '·' },
+  { dx: 1, dy: 0, glyph: '→', label: 'вправо', short: 'вправо' },
+  { dx: -1, dy: -1, glyph: '↙', label: 'влево-назад', short: 'назад' },
+  { dx: 0, dy: -1, glyph: '↓', label: 'назад', short: 'назад' },
+  { dx: 1, dy: -1, glyph: '↘', label: 'вправо-назад', short: 'назад' },
+];
+
 /** Темп хода фигур: столько игрок видит, куда встала каждая фигура. */
 const ENEMY_BEAT_MS = 700;
 
@@ -406,7 +423,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     }, next.status === 'lost' ? 700 : 450);
   }
 
-  function handleMove(dx: MoveDx, dy: 0 | 1 | 2 = 1) {
+  function handleMove(dx: MoveDx, dy: MoveDy = 1) {
     const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === dy);
     if (!option) return;
     performAction(dy === 1 ? { type: 'move', dx } : { type: 'move', dx, dy });
@@ -584,7 +601,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       return;
     }
     // Режимы без финиша (бесконечный и конвейерные «Гонки») при выходе надо
-    // закрывать забегом, иначе ряды останутся в активной партии и не попадут в
+    // закрывать забегом, иначе ходы останутся в активной партии и не попадут в
     // рекорд и в уровень режима.
     if (mode === 'endless' || mode === 'race') {
       if (!runRef.current || actionsRef.current.length === 0) {
@@ -672,13 +689,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   const isEndless = mode === 'endless';
   const isRace = mode === 'race';
   const rules = rulesFor(mode);
-  // Такт конвейера: сколько ходов осталось до следующего сдвига ряда. Полоса
-  // из клеток отвечает на вопрос «ряд уедет сейчас или через ход», и это же
-  // объясняет, почему фигуры на поле едут не каждый ход.
+  // Такт притока: сколько ходов до следующей волны. Полоса из клеток отвечает
+  // на вопрос «фигура придёт сейчас или через ход», и это же объясняет, почему
+  // поле заполняется не каждый ход.
   const raceEvery = isRace ? raceSpawnEvery(state.tier) : 0;
   const raceElapsed = isRace ? state.moves % raceEvery : 0;
-  // Приколотый ряд: у «Гонок» пешка не идёт вверх, поэтому и кнопки другие.
-  const pinned = rules.pinned === true;
+  // Король: у «Гонок» игрок ходит на клетку в любую сторону, поэтому кнопок
+  // девять, а не три.
+  const king = rules.player === 'king';
   const modeName = isEndless ? 'Бесконечный режим' : modeDef(mode).name;
   const captures = state ? capturesLeft(state) : Number.POSITIVE_INFINITY;
   const levelTypes = [...new Set(run.initial.enemies.map((enemy) => enemy.type))];
@@ -694,7 +712,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         <div className="game-heading">
           <span className="label">{modeName}</span>
           <b className="game-title">
-            {isEndless ? `Высота ${state.score}` : isRace ? `Ряды ${state.score}` : `Уровень ${run.level}`}
+            {isEndless ? `Высота ${state.score}` : isRace ? `Ходы ${state.score}` : `Уровень ${run.level}`}
           </b>
         </div>
         <div className="game-hud">
@@ -713,7 +731,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         <span className="status-item">Ход {state.moves + 1}</span>
         <span className="status-sep" aria-hidden="true">/</span>
         <span className="status-item">
-          {isEndless ? `Волна ${state.tier}` : isRace ? `Конвейер ${state.tier}` : `Поле ${run.initial.width}×${run.initial.height}`}
+          {isEndless || isRace ? `Волна ${state.tier}` : `Поле ${run.initial.width}×${run.initial.height}`}
         </span>
         {isRace && (
           <>
@@ -725,7 +743,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <>
             <span className="status-sep" aria-hidden="true">/</span>
             <span className="status-item">
-              ваш ряд {state.player.y + 1}, сдвиг через {raceEvery - raceElapsed}
+              волна через {raceEvery - raceElapsed}
               <span className="race-ticks" aria-hidden="true">
                 {Array.from({ length: raceEvery }).map((_, index) => (
                   <i key={index} className={index < raceElapsed ? 'on' : undefined} />
@@ -768,10 +786,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поднимайтесь выше, поле растёт'
               : isRace
-                ? 'Ряд пешки зафиксирован: фигуры едут вниз, уходите вбок, ладья и ферзь бьют вдоль ряда'
+                ? 'Король против фигур: они выходят сверху и ходят по своим правилам, бейте и уходите в любую сторону'
                 : 'Дойти до верхнего ряда'}
           </span>
-          <span className="num">{state.score > 0 ? (isRace ? `${state.score} ряд.` : `${state.score} кл.`) : ''}</span>
+          <span className="num">{state.score > 0 ? (isRace ? `${state.score} ход.` : `${state.score} кл.`) : ''}</span>
         </div>
         <Board
           state={state}
@@ -831,30 +849,52 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           </button>
         </div>
 
-        <div className="move-row">
-            {([-1, 0, 1] as MoveDx[]).map((dx) => {
-              // Подпись и знак берём из полных moves, а доступна кнопка только когда
-              // можно играть: ряд не должен менять состав кнопок, иначе поле дёргается.
-              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === (pinned ? 0 : 1));
+        {king ? (
+          <div className="move-pad" role="group" aria-label="Ход короля">
+            {KING_DIRS.map((dir) => {
+              const center = dir.dx === 0 && dir.dy === 0;
+              // Кнопки не появляются и не исчезают: недоступный ход только
+              // выключен, иначе поле прыгало бы на каждом ходу.
+              const option = center
+                ? undefined
+                : moves.find((move) => move.dx === dir.dx && (move.dy ?? 1) === dir.dy);
               const available = canPlay && option !== undefined;
-              const label = pinned
-                ? dx === -1
-                  ? 'влево'
-                  : dx === 0
-                    ? 'на месте'
-                    : 'вправо'
-                : dx === -1
-                  ? 'влево'
-                  : dx === 0
-                    ? 'вперёд'
-                    : 'вправо';
+              return (
+                <button
+                  key={`${dir.dx}:${dir.dy}`}
+                  type="button"
+                  className={cn('pad-btn', center && 'pad-center', available && 'is-on', option?.takes && 'move-take', !available && 'off')}
+                  disabled={!available}
+                  aria-label={
+                    option?.takes
+                      ? `${dir.label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
+                      : center
+                        ? 'на месте'
+                        : dir.label
+                  }
+                  onClick={() => handleMove(dir.dx, dir.dy)}
+                >
+                  <span className="move-glyph-lg" aria-hidden="true">
+                    {dir.glyph}
+                  </span>
+                  <span className="move-label">{option?.takes ? 'взять' : center ? '·' : dir.short}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="move-row">
+            {([-1, 0, 1] as MoveDx[]).map((dx) => {
+              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
+              const available = canPlay && option !== undefined;
+              const label = dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо';
               return (
                 <button
                   key={dx}
                   type="button"
                   className={cn('move-btn', dx === 0 && 'primary', !available && 'off', option?.takes && 'move-take')}
                   disabled={!available}
-                  onClick={() => handleMove(dx, pinned ? 0 : 1)}
+                  onClick={() => handleMove(dx, 1)}
                   aria-label={
                     option?.takes
                       ? `${label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
@@ -862,13 +902,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
                   }
                 >
                   <span className="move-glyph-lg" aria-hidden="true">
-                    {pinned ? (dx === -1 ? '←' : dx === 0 ? '·' : '→') : dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
+                    {dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
                   </span>
                   <span className="move-label">{option?.takes ? 'взять' : label}</span>
                 </button>
               );
             })}
-        </div>
+          </div>
+        )}
         <div className="side-row">
           {doubleStep && canPlay ? (
             <button type="button" className="skip-btn" onClick={() => handleMove(0, 2)}>
@@ -884,12 +925,12 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         <p className="control-hint">
           {!playerAlive
             ? isRace
-              ? 'Конвейер сомкнулся.'
+              ? 'Короля сняли.'
               : 'Пешка поймана.'
             : settling
-              ? 'Ряды едут вниз.'
-              : pinned
-                ? 'Пешка стоит в своём ряду: шаг влево, шаг вправо, на месте. По фигуре в своём ряду можно въехать и убрать её.'
+              ? 'Фигуры идут на короля.'
+              : king
+                ? 'Король: шаг и взятие в любую из восьми сторон, назад включительно. Клетка с фигурой доступна, если её можно взять.'
                 : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
@@ -906,7 +947,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
               : isRace
-                ? 'Пешка приколота к своему ряду. Фигуры падают сверху рядом; ушедшие за нижний край исчезают. Считаются прокрученные ряды: каждые десять конвейер ускоряется.'
+                ? 'Вы король: один шаг и одно взятие в любую сторону. Фигуры выходят из двух верхних рядов и ходят по своим шахматным правилам. Считаются пережитые ходы: каждые двенадцать волна ускоряется, на столько же растёт уровень режима.'
                 : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
@@ -1037,8 +1078,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <p className="modal-text">
             {mode === 'race'
               ? result.newBest
-                ? `Рекорд: ${result.bestScore ?? result.score} рядов.`
-                : `Остановились на ${result.score} ряду.`
+                ? `Рекорд: ${result.bestScore ?? result.score} ходов.`
+                : `Продержались ${result.score} ходов.`
               : result.newBest
                 ? `Высота ${result.bestScore ?? result.score} клеток.`
                 : `Остановились на высоте ${result.score} клеток.`}
@@ -1091,6 +1132,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
       {rulesOpen && (
         <RulesModal
+          race={isRace}
           onClose={() => setRulesOpen(false)}
           onTerms={onTerms}
           onPrivacy={onPrivacy}
@@ -1216,13 +1258,13 @@ function LoseModal({
           {isEndless
             ? `Высота ${result.score}`
             : isRace
-              ? `${modeName}, рядов ${result.score}`
+              ? `${modeName}, ходов ${result.score}`
               : `${modeName}, уровень ${result.level}`}
         </span>
-        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : isRace ? 'Ряд сомкнулся' : 'Пешка поймана'}</h2>
+        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : isRace ? 'Короля поймали' : 'Пешка поймана'}</h2>
         <p className="modal-text">
           {isRace
-            ? 'Конвейер закрыл последний свободный ход. Каждый ряд идёт в рекорд, каждые десять рядов режим поднимает уровень.'
+            ? 'Фигура встала на клетку короля, либо ходить стало некуда. Каждый пережитый ход идёт в рекорд, каждые двенадцать режим поднимает уровень.'
             : stuck
               ? 'Дорога закрыта: ходить некуда, взятия кончились.'
               : captured
@@ -1241,7 +1283,7 @@ function LoseModal({
         <div className="callout">
           <span className="label label-accent">Рекорд</span>
           <span>
-            {isRace ? `${result.bestScore} рядов` : `Высота ${result.bestScore} клеток`}, награда {result.coinsEarned} монет.
+            {isRace ? `${result.bestScore} ходов` : `Высота ${result.bestScore} клеток`}, награда {result.coinsEarned} монет.
           </span>
         </div>
       )}

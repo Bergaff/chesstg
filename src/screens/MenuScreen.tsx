@@ -156,7 +156,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <dt>Уровень в «Гонках»</dt>
           <dd className="serif">
             {modes?.race?.level ?? 1}
-            {modes?.race?.best ? <span className="race-best"> · {modes.race.best} ряд.</span> : null}
+            {modes?.race?.best ? <span className="race-best"> · {modes.race.best} ходов</span> : null}
           </dd>
         </div>
         <div className="stat-row">
@@ -220,8 +220,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="menu-list">
-        {modeRow('jam', 'Парковка', 'Пробка фигур: перегоните белых наверх, чёрных вниз. Бить нельзя.')}
-        {modeRow('race', 'Гонки', 'Конвейер: пешка в своём ряду, фигуры падают сверху. Считаются ряды.')}
+        {modeRow('jam', 'Парковка', 'Пробка фигур: уведите белых за нижний край, чёрных за верхний. Бить нельзя.')}
+        {modeRow('race', 'Гонки', 'Король против фигур, приходящих сверху. Считаются пережитые ходы.')}
         <button
           type="button"
           className={cn('menu-row', !profile.endlessUnlocked && 'locked')}

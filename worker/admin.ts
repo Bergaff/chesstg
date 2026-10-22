@@ -662,13 +662,14 @@ function describeRun(row: Record<string, unknown>): Record<string, unknown> {
     outcome: String(parsed.outcome ?? row.status ?? ''),
     capturedBy: parsed.capturedBy ?? null,
     reason,
-    // В «Парковке» фигура никого не бьёт: там проигрыш это кончившийся бюджет.
+    // В «Парковке» фигура никого не бьёт: там проигрыш это кончившийся бюджет,
+    // а `won` означает, что с поля увели всех.
     stuck: parsed.outcome === 'lost' && parsed.capturedBy == null && row.mode !== 'jam',
     budgetOut: row.mode === 'jam' && reason === 'budget',
     coinsEarned: Number(parsed.coinsEarned ?? 0),
     levelUp: Boolean(parsed.levelUp),
     modeLevel: parsed.level ?? row.level,
-    // Для конвейерных режимов важен рекорд: забег без победы, но с новым
+    // Для режимов без финиша важен рекорд: забег без победы, но с новым
     // результатом это нормальный забег, а не провал.
     newBest: Boolean(parsed.newBest),
     bestScore: parsed.bestScore ?? null,

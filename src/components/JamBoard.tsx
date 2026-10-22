@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { JAM_PIECE_GLYPH, jamPieceMoves, type Cell, type JamState } from '../engine';
+import {
+  JAM_PIECE_GLYPH,
+  jamExitCells,
+  jamExitRow,
+  jamPieceMoves,
+  type Cell,
+  type JamState,
+} from '../engine';
 import { cn } from '../lib/format';
 
 interface JamBoardProps {
@@ -15,10 +22,14 @@ interface JamBoardProps {
 
 const FRAME_PAD = 8;
 const GAP = 2;
+/** Полоса ухода: столько же клеток, сколько рядов поля, но ниже. */
+const LANE_HEIGHT = 22;
 
 /**
  * Доска «Парковки»: те же клетки, что и в пешечных режимах, но фигур много,
- * и у них есть цвет. Белые идут наверх, чёрные вниз, свои не бьются.
+ * и у них есть цвет. Сверху и снизу поля - полосы ухода: чёрные уходят за
+ * верхний край, белые за нижний. Полосы рисуются всегда, иначе поле прыгало бы
+ * при каждом выборе фигуры.
  */
 export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }: JamBoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -29,7 +40,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
     if (!element) return;
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
-      if (rect) setBox({ width: rect.width, height: rect.height });
+      if (rect) setBox({ width: rect.width, height: rect.height - LANE_HEIGHT * 2 });
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -48,18 +59,61 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
 
   const active = state.pieces.find((piece) => piece.id === selected);
   const targets = active && interactive ? jamPieceMoves(state, active) : [];
+  const exits = active && interactive ? jamExitCells(state, active) : [];
+  const ready = new Set(
+    interactive ? state.pieces.filter((piece) => jamExitCells(state, piece).length > 0).map((piece) => piece.id) : [],
+  );
   const isTarget = (x: number, y: number) => targets.some((target) => target.x === x && target.y === y);
+  const laneOpen = (side: 'white' | 'black', x: number) =>
+    exits.some((exit) => exit.x === x && exit.y === jamExitRow(state, side));
+
+  const lane = (side: 'white' | 'black') => {
+    const y = jamExitRow(state, side);
+    return (
+      <div className="jam-lane" style={{ height: LANE_HEIGHT, gap: GAP }}>
+        {Array.from({ length: cols }).map((_, colIndex) => {
+          const open = laneOpen(side, colIndex);
+          // Подсказка вполне может сказать «уводи»: тогда отметка стоит на
+          // полосе, а не на клетке поля.
+          const hintHere = hint !== null && hint.to.y === y && hint.to.x === colIndex;
+          return (
+            <button
+              key={`${side}-${colIndex}`}
+              type="button"
+              className={cn('jam-lane-cell', open && 'is-open', hintHere && 'cell-hint')}
+              style={{ width: cell || undefined, height: LANE_HEIGHT }}
+              disabled={!open}
+              aria-label={
+                open
+                  ? `увести фигуру ${side === 'white' ? 'за нижний' : 'за верхний'} край, колонка ${colIndex + 1}`
+                  : `полоса ухода, колонка ${colIndex + 1}: сейчас здесь уходить нечему`
+              }
+              onClick={() => {
+                if (open && active) onPlace({ x: colIndex, y });
+              }}
+            >
+              {hintHere && <span className="hint-no">1</span>}
+              <span className="jam-lane-mark" aria-hidden="true">
+                {side === 'white' ? '↓' : '↑'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="board-measure" ref={wrapRef}>
       <div
-        className={cn('board-frame', state.status === 'lost' && 'board-lost')}
+        className={cn('board-frame', 'jam-frame', state.status === 'lost' && 'board-lost')}
         style={{
           width: boardWidth > 0 ? boardWidth + FRAME_PAD * 2 : undefined,
-          height: boardHeight > 0 ? boardHeight + FRAME_PAD * 2 : undefined,
+          height: boardHeight > 0 ? boardHeight + FRAME_PAD * 2 + LANE_HEIGHT * 2 : undefined,
           opacity: cell > 0 ? 1 : 0,
         }}
       >
+        {lane('black')}
         <div
           className="board jam-board"
           style={{
@@ -80,7 +134,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
               const dark = (x + y) % 2 === 0;
               const piece = state.pieces.find((entry) => entry.x === x && entry.y === y);
               const target = isTarget(x, y);
-              const parked = piece ? (piece.side === 'white' ? y >= state.mid : y < state.mid) : false;
+              const canExit = piece ? ready.has(piece.id) : false;
               const hintHere = hint && hint.to.x === x && hint.to.y === y;
               const hintPiece = hint && piece && hint.id === piece.id;
               const fromLast = state.lastMove && state.lastMove.to.x === x && state.lastMove.to.y === y;
@@ -93,9 +147,8 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   className={cn(
                     'cell',
                     dark ? 'cell-dark' : 'cell-light',
-                    y >= state.mid ? 'cell-half-top' : 'cell-half-bottom',
+                    piece?.side === 'white' ? 'cell-half-bottom' : 'cell-half-top',
                     target && interactive && 'cell-move',
-                    parked && 'cell-parked',
                     fromLast && 'cell-flash',
                     hintHere && 'cell-hint',
                     hintPiece && 'cell-hint-source',
@@ -104,7 +157,9 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   disabled={!interactive || (!piece && !target)}
                   aria-label={
                     piece
-                      ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${JAM_PIECE_GLYPH[piece.type]} ${piece.type === 'rook' ? 'ладья' : piece.type === 'bishop' ? 'слон' : 'конь'}, клетка ${x + 1}, ${y + 1}${parked ? ', на своей половине' : ', не на своей половине'}`
+                      ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${
+                          piece.type === 'rook' ? 'ладья' : piece.type === 'bishop' ? 'слон' : 'конь'
+                        }, клетка ${x + 1}, ${y + 1}${canExit ? ', может уйти с поля' : ''}`
                       : target
                         ? `клетка ${x + 1}, ${y + 1}: сюда можно поставить фигуру`
                         : `клетка ${x + 1}, ${y + 1}`
@@ -126,7 +181,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                         'jam-piece',
                         piece.side === 'white' ? 'jam-white' : 'jam-black',
                         selected === piece.id && 'jam-selected',
-                        parked && 'jam-parked',
+                        canExit && 'jam-ready',
                       )}
                     >
                       <span className="piece-glyph">{JAM_PIECE_GLYPH[piece.type]}</span>
@@ -137,6 +192,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
             }),
           )}
         </div>
+        {lane('white')}
       </div>
       {cell === 0 && <div className="board-placeholder" />}
     </div>

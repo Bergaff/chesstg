@@ -29,7 +29,7 @@ import {
   MAX_LIVES,
   modeDef,
   raceCoinReward,
-  raceLevelForRows,
+  raceLevelForMoves,
   modeGate,
   modeUnlocked,
   parseRunState,
@@ -577,8 +577,8 @@ app.post('/api/run/start', async (c) => {
     if (Number.isFinite(stored) && stored >= 0) seed = Math.floor(stored) >>> 0;
   }
   // Генератор свой у каждого режима: кампания отбирает расстановку по полосе
-  // сложности, «Парковка» это головоломка из решённой позиции, «Гонки» -
-  // конвейер с зафиксированным рядом пешки.
+  // сложности, «Парковка» ищет план ухода фигур с поля, «Гонки» выдают полосу
+  // притока, а сложность в них растёт внутри забега.
   const initial =
     mode === 'jam'
       ? createJamPuzzle(level, seed)
@@ -605,8 +605,8 @@ app.post('/api/run/start', async (c) => {
 });
 
 /**
- * Подсказка в «Парковке». Сервер знает след перемешивания, поэтому отдаёт ход,
- * который точно ведёт к решению, а не догадку клиента. Клиент следа не видит:
+ * Подсказка в «Парковке». Сервер знает план решателя, поэтому отдаёт ход,
+ * который точно ведёт к решению, а не догадку клиента. Клиент плана не видит:
  * serializeRun вырезает его, иначе подсказка была бы бесплатной.
  *
  * Подсказка платная: перед запросом клиент покупает её через /api/bonus/use, а
@@ -633,7 +633,12 @@ app.post('/api/run/:id/hint', async (c) => {
   if (!isJamState(state)) fail(500, 'run_corrupt', 'Поле «Парковки» повреждено');
   const move = jamHint(state);
   if (!move) fail(409, 'no_hint', 'Полезного хода не видно: попробуйте разобрать пробку с другого края');
-  return c.json({ move, parked: state.score, total: state.pieces.length, movesLeft: Math.max(0, state.budget - state.moves) });
+  return c.json({
+    move,
+    removed: state.removed,
+    total: state.total,
+    movesLeft: Math.max(0, state.budget - state.moves),
+  });
 });
 
 app.get('/api/run/:id', async (c) => {
@@ -770,23 +775,23 @@ app.post('/api/run/:id/finish', async (c) => {
       livesAtAfter = next.livesAt;
     }
   } else if (mode === 'race') {
-    // «Гонки»: уровня-победы нет, есть ряды. Рекорд и уровень режима лежат в
-    // mode_levels.race, награда капается за длину забега, а не за новый рекорд:
-    // иначе игрок без рекорда сидел бы без монет совсем.
+    // «Гонки»: уровня-победы нет, счёт - пережитые ходы. Рекорд и уровень режима
+    // лежат в mode_levels.race, награда капается за длину забега, а не за новый
+    // рекорд: иначе игрок без рекорда сидел бы без монет совсем.
     const progress = modeProgress(user, 'race');
-    const rows = snapshot.score;
+    const survived = snapshot.score;
     const bestBefore = progress.best ?? 0;
-    newBest = rows > bestBefore;
-    // Монеты платим только когда конвейер реально поймал пешку: выйти из забега
-    // на тридцатом ряду и получить награду было бы слишком просто.
-    reward = outcome === 'lost' ? raceCoinReward(rows) : 0;
-    if (newBest || raceLevelForRows(rows) > progress.level) {
+    newBest = survived > bestBefore;
+    // Монеты платим только когда фигуры реально поймали короля: выйти из забега
+    // на двадцатом ходу и получить награду было бы слишком просто.
+    reward = outcome === 'lost' ? raceCoinReward(survived) : 0;
+    if (newBest || raceLevelForMoves(survived) > progress.level) {
       const levels = parseModeLevels(user.mode_levels);
-      const nextLevel = Math.max(progress.level, raceLevelForRows(rows));
+      const nextLevel = Math.max(progress.level, raceLevelForMoves(survived));
       levels.race = {
         level: nextLevel,
         maxLevel: Math.max(progress.maxLevel, nextLevel),
-        best: Math.max(bestBefore, rows),
+        best: Math.max(bestBefore, survived),
         bestMoves: Math.max(progress.bestMoves ?? 0, snapshot.moves),
       };
       modeLevelsAfter = serializeModeLevels(levels);

@@ -1,6 +1,6 @@
 import { cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
-import { raceLevelForRows, raceSpawnPool } from './race';
+import { RACE_SPAWN_ROWS, raceLevelForMoves, raceSpawnPool } from './race';
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
@@ -27,61 +27,9 @@ function noMovesLeft(state: GameState): boolean {
 }
 
 /**
- * Гибельна ли клетка для шага конвейера. Считаем геометрией, а не списком
- * ходов: проверка вызывается на каждое появление фигуры, а журнал длинного
- * забега сервер прогоняет целиком. Правила здесь те же, что у `conveyorStep`:
- * падение рядом, прыжок коня, ход слона по диагонали и выстрел ладьи вдоль ряда.
- */
-function cellLost(state: GameState, x: number, y: number): boolean {
-  for (const enemy of state.enemies) {
-    if (enemy.x === x && enemy.y === y) continue;
-    if (enemy.type !== 'bishop' && enemy.type !== 'knight' && enemy.x === x && enemy.y === y + 1) return true;
-    if (enemy.type === 'bishop' && Math.abs(enemy.x - x) === 1 && enemy.y === y + 1) return true;
-    if (enemy.type === 'knight') {
-      const dx = Math.abs(enemy.x - x);
-      const dy = enemy.y - y;
-      if ((dx === 1 && dy === 2) || (dx === 2 && dy === 1)) return true;
-    }
-    if (state.shield <= 0 && (enemy.type === 'rook' || enemy.type === 'queen') && enemy.y === y) {
-      const step = enemy.x < x ? 1 : -1;
-      let clear = true;
-      for (let cursor = enemy.x + step; cursor !== x; cursor += step) {
-        if (state.enemies.some((other) => other.x === cursor && other.y === y)) {
-          clear = false;
-          break;
-        }
-      }
-      if (clear) return true;
-    }
-  }
-  return false;
-}
-
-/**
- * Жив ли ещё игрок после своего хода: нужен притоку, чтобы конвейер не
- * перекрывал последний выход. Смерть от следующего ряда допустима, смерть от
- * самого появления фигуры - нет.
- */
-function escapeExists(state: GameState): boolean {
-  const rules = rulesFor(state.mode);
-  if (!rules.pinned) return legalMoves(state).length > 0;
-  for (const dx of [-1, 0, 1]) {
-    const x = state.player.x + dx;
-    if (x < 0 || x >= state.width) continue;
-    const y = state.player.y;
-    const occupant = state.enemies.find((enemy) => enemy.x === x && enemy.y === y);
-    // Свою клетку пешка не занимает, чужую - убирает рубкой, если режим её даёт.
-    if (occupant && !rules.ram) continue;
-    const probe = occupant ? { ...state, enemies: state.enemies.filter((enemy) => enemy !== occupant) } : state;
-    if (!cellLost(probe, x, y)) return true;
-  }
-  return false;
-}
-
-/**
- * Приток фигур сверху: движок «Гонок». Колонка и тип берутся из
- * `state.rng`, то есть из зерна уровня, поэтому сервер воспроизводит партию
- * шаг в шаг и договориться о «невидимом» появлении фигуры нельзя.
+ * Приток фигур с верхних рядов. Колонка, ряд и тип берутся из `state.rng`, то
+ * есть из зерна уровня, поэтому сервер воспроизводит партию шаг в шаг и
+ * договориться о «невидимом» появлении фигуры нельзя.
  */
 function spawnPhase(state: GameState): void {
   const rules = rulesFor(state.mode);
@@ -91,27 +39,23 @@ function spawnPhase(state: GameState): void {
   // Волна приходит по такту, иначе на узком поле приток превращается в стену.
   if (every > 1 && state.moves % every !== 0) return;
   const rng = new Rng(state.rng || 1);
-  const y = state.height - 1;
-  const pool: readonly string[] = rules.goal === 'scroll' ? raceSpawnPool(state.tier) : SPAWN_POOL;
-  const taken = (x: number) => state.enemies.some((e) => e.x === x && e.y === y) || (state.player.x === x && state.player.y === y);
+  const rows = Math.max(1, Math.min(rules.spawnRows || 1, state.height - 1));
+  const pool: readonly string[] = rules.player === 'king' ? raceSpawnPool(state.tier) : SPAWN_POOL;
+  const taken = (x: number, y: number) =>
+    state.enemies.some((e) => e.x === x && e.y === y) || (state.player.x === x && state.player.y === y);
   for (let spawned = 0; spawned < perTurn; spawned++) {
     let placed = false;
     for (let attempt = 0; attempt < 8 && !placed; attempt++) {
       const x = rng.int(state.width);
-      if (taken(x)) continue;
+      const y = state.height - 1 - rng.int(rows);
+      if (taken(x, y)) continue;
       const type = pickSpawnType(pool, rng);
       const candidate = { id: `s${state.moves}-${spawned}-${x}`, type, x, y };
       state.enemies.push(candidate);
-      // Конвейер не имеет права ставить фигуру, которая отнимает последний ход:
-      // тогда длина жизни превращается в лотерею притока, а не в задачу.
-      if (rules.goal === 'scroll' && !escapeExists(state)) {
-        state.enemies.pop();
-        continue;
-      }
-      // Фигура, которая бьёт пешку прямо с клетки рождения, хода не оставляет:
+      // Фигура, которая бьёт игрока прямо с клетки рождения, хода не оставляет:
       // в режимах на выживание такое не подставляется, иначе длина жизни
-      // превращается в лотерею. Не удалось подобрать место за 8 попыток, значит
-      // приток в этом ходу пропускается.
+      // превращается в лотерею притока. Не удалось подобрать место за 8 попыток,
+      // значит приток в этом ходу пропускается.
       if (rules.goal === 'survive' && enemyAttacksCell(state, candidate, state.player.x, state.player.y)) {
         state.enemies.pop();
         continue;
@@ -200,15 +144,18 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
     state.lastEvent = 'skip';
   } else if (action.type === 'move') {
     validateDx(action.dx);
-    const pinned = rulesFor(state.mode).pinned === true;
-    const dy = action.dy ?? (pinned ? 0 : 1);
-    if (pinned ? dy !== 0 : dy !== 1 && dy !== 2) throw new RuleError('Некорректная длина хода');
+    const rules = rulesFor(state.mode);
+    const king = rules.player === 'king';
+    const dy = action.dy ?? 1;
+    // Король ходит на клетку в любую сторону, поэтому его шаг это и -1, и 0.
+    // Пешка: только вперёд (1) и двойной шаг с начальной позиции (2).
+    if (king ? dy < -1 || dy > 1 : dy !== 1 && dy !== 2) throw new RuleError('Некорректная длина хода');
     const x = state.player.x + action.dx;
     const y = state.player.y + dy;
     const option = legalMoves(state).find((m) => m.dx === action.dx && (m.dy ?? 1) === dy);
     if (!option) {
       // Сообщения те же, что и раньше, по ним сверяет отказ клиент.
-      if (pinned) throw new RuleError('Пешка ходит только в своём ряду');
+      if (king && y < 0) throw new RuleError('За границей поля');
       if (y >= state.height) throw new RuleError('Верхняя граница поля');
       if (x < 0 || x >= state.width) throw new RuleError('За границей поля');
       if (dy === 2) throw new RuleError('Двойной ход доступен только с начальной позиции');
@@ -229,14 +176,14 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
 
   state.moves += 1;
   const modeRules = rulesFor(state.mode);
-  // В конвейере счёт это прокрученные ряды: пешка стоит на месте, ряды идут мимо.
-  state.score = modeRules.goal === 'scroll' ? state.moves : Math.max(state.score, state.player.y);
+  // В режиме на выживание счёт это пережитые ходы: финиша нет, есть дистанция.
+  state.score = modeRules.goal === 'survive' ? state.moves : Math.max(state.score, state.player.y);
 
-  if (modeRules.goal === 'scroll') {
-    const tension = raceLevelForRows(state.score);
+  if (modeRules.goal === 'survive' && modeRules.player === 'king') {
+    const tension = raceLevelForMoves(state.score);
     if (tension > state.tier) {
       state.tier = tension;
-      state.lastEvent = 'scroll';
+      state.lastEvent = 'tension';
     }
   }
 
@@ -244,10 +191,11 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // есть высота. «Парковка» и «Гонки» иначе никогда не выигрывают, и лаборатория
   // показывает 0% решаемых расстановок при работающих правилах.
   const goal = rulesFor(state.mode).goal;
-  // Режим на уклонение: верхний ряд не победа, а перелив в нижний. Пешка
-  // «проскакивает» на стартовую линию, и дальше всё продолжается, пока её не
-  // съели. Именно поэтому метрика режима длина жизни, а не проход.
-  if (goal === 'survive' && state.player.y >= state.height - 1) {
+  // Режим на уклонение: верхний ряд не победа, а перелив в нижний (только там,
+  // где он разрешён правилами). Пешка «проскакивает» на стартовую линию, и
+  // дальше всё продолжается, пока её не съели. Королю перелив не нужен: у него
+  // восемь направлений, он и так ходит назад.
+  if (goal === 'survive' && rulesFor(state.mode).wrapOnTop && state.player.y >= state.height - 1) {
     state.player = { x: state.player.x, y: 0 };
     state.lastEvent = 'wrap';
   }
@@ -277,7 +225,7 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // ни победы по верхнему ряду, ни осмысленного ожидания, партия проиграна.
   // Заморозка и щит ожиданием не считаются: там позиция обязана измениться.
   const rules = rulesFor(state.mode);
-  const stuckByRules = rules.motion === 'static' || rules.goal === 'survive' || rules.goal === 'scroll';
+  const stuckByRules = rules.motion === 'static' || rules.goal === 'survive';
   const noProgress = waitingForNothing && before === boardSignature(state);
   if (stuckByRules && noMovesLeft(state)) {
     state.status = 'lost';

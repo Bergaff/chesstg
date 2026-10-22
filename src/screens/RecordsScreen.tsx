@@ -80,7 +80,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
       : metric === 'campaign'
         ? `уровень ${row.maxLevel}`
         : metric === 'race'
-          ? `${row.modeBest ?? 0} ряд., уровень ${row.modeLevel}`
+          ? `${row.modeBest ?? 0} ходов, уровень ${row.modeLevel}`
           : `уровень ${row.modeLevel}`;
 
   return (

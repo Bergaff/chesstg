@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
+  RACE_ROWS,
   RACE_WIDTH,
   createCampaignLevel,
   createJamPuzzle,
@@ -287,7 +288,14 @@ describe('UI smoke', () => {
     const grid = await screen.findByRole('grid', { name: 'Поле парковки' });
     expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(jamInitial.width * jamInitial.height);
     expect(screen.getByText(`ходов ${jamInitial.budget}`)).toBeTruthy();
-    expect(screen.getByText(new RegExp(`на месте \\d+ из ${jamInitial.pieces.length}`))).toBeTruthy();
+    expect(screen.getByText(new RegExp(`уведено 0 из ${jamInitial.pieces.length}`))).toBeTruthy();
+    // Полосы ухода рисуются всегда, до выбора фигуры: иначе поле прыгало бы на
+    // каждом тапе, а с ним и вся доска.
+    const lanes = document.querySelectorAll('.jam-lane-cell');
+    expect(lanes.length).toBe(jamInitial.width * 2);
+    expect([...lanes].every((lane) => (lane as HTMLButtonElement).disabled)).toBe(
+      document.querySelectorAll('.jam-lane-cell.is-open').length === 0,
+    );
 
     // Тап по фигуре подсвечивает клетки, тап по клетке делает перестановку.
     const first = jamInitial.pieces.find((piece) => jamPieceMoves(jamInitial!, piece).length > 0)!;
@@ -312,7 +320,7 @@ describe('UI smoke', () => {
     expect((saved?.body as { actions?: unknown[] } | undefined)?.actions?.length).toBe(1);
   });
 
-  it('«Гонки» дают боковые кнопки и считают ряды', async () => {
+  it('«Гонки» дают девять кнопок хода и считают пережитые ходы', async () => {
     profile.maxLevel = 6;
     profile.modes.campaign = { level: 6, maxLevel: 6, unlocked: true, unlockAtLevel: 1 };
     profile.modes.race = { level: 2, maxLevel: 2, unlocked: true, unlockAtLevel: 5, best: 14, bestMoves: 16 };
@@ -323,28 +331,53 @@ describe('UI smoke', () => {
     expect(await screen.findByText('Начать')).toBeTruthy();
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('race');
-    // В приколотом ряду нет хода вперёд: ряд кнопок боковой, средний - «на месте».
-    expect(screen.getByRole('button', { name: 'На месте' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Вперёд' })).toBeNull();
+    // Король ходит во все стороны, поэтому кнопок девять и «вперёд» среди них есть.
+    // Конвейерных меток ряда больше нет: ряд не едет, фигуры приходят сверху.
     expect(screen.getByText('рекорд 14')).toBeTruthy();
-
-    // Конвейер отмечен в разметке: у поля есть класс едущего поля, ряд пешки
-    // несёт латунную линию, а HUD говорит, через сколько ходов ряд уедет вниз.
     const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
-    expect(grid.className).toContain('board-conveyor');
-    expect(grid.querySelectorAll('.cell-pin').length).toBe(RACE_WIDTH);
-    expect(screen.getByText(/сдвиг через \d/)).toBeTruthy();
-    expect(screen.getByText(/ваш ряд 2/)).toBeTruthy();
+    expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(RACE_WIDTH * RACE_ROWS);
+    expect(grid.className).not.toContain('board-conveyor');
+    expect(grid.querySelectorAll('.cell-pin').length).toBe(0);
 
     fireEvent.click(screen.getByText('Начать'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Влево' }));
-    await waitFor(() => expect(screen.getByText('Ход 2')).toBeTruthy());
+    const pad = document.querySelector('.move-pad');
+    const buttons = [...(pad?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
+    expect(buttons.length).toBe(9);
+    // Недоступный ход не убирается: кнопка стоит на месте и только выключена,
+    // поэтому геометрия поля не зависит от того, куда король может пойти.
+    expect(buttons.some((button) => button.disabled)).toBe(true);
+    expect(screen.getByText('Ходы 0')).toBeTruthy();
+
+    // Кнопки пад-а стоят в фиксированном порядке, поэтому ход выбираем не по
+    // подписи, а по индексу: подпись меняется, когда ход взятие.
+    const ORDER: Array<[number, number]> = [
+      [-1, 1],
+      [0, 1],
+      [1, 1],
+      [-1, 0],
+      [0, 0],
+      [1, 0],
+      [-1, -1],
+      [0, -1],
+      [1, -1],
+    ];
+    const options = legalMoves(initial);
+    // Берём боковой или обратный шаг: он отличается от хода вперёд только
+    // полем dy, и именно по нему сервер сверяет партию.
+    const picked = options.find((move) => (move.dy ?? 1) !== 1) ?? options[0];
+    const index = ORDER.findIndex(([dx, dy]) => dx === picked.dx && dy === (picked.dy ?? 1));
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(buttons[index].disabled).toBe(false);
+    fireEvent.click(buttons[index]);
+    await waitFor(() => expect(screen.getByText('Ходы 1')).toBeTruthy());
+    expect([...(document.querySelectorAll('.move-pad button') ?? [])].length).toBe(9);
     // Журнал уходит на сервер пачкой с задержкой: ждём именно вызов сохранения.
     await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
     const sent = calls.filter((call) => call.url.endsWith('/save')).at(-1);
-    // Шаг в своём ряду отличается от хода вперёд только полем dy: сервер по нему
-    // и сверяет партию, поэтому оно обязано доехать целым.
-    expect((sent?.body as { actions?: { dy?: number }[] } | undefined)?.actions?.[0]?.dy).toBe(0);
+    const action = (sent?.body as { actions?: { dx?: number; dy?: number }[] } | undefined)?.actions?.[0];
+    expect(action?.dx).toBe(picked.dx);
+    // Шаг вперёд в журнале пишется без dy: прежние партии от этого не разъезжаются.
+    expect(action?.dy).toBe(picked.dy ?? undefined);
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {

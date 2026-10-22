@@ -1,7 +1,7 @@
 import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
 import { auditState, difficultyBand, SURVIVAL_DEPTH, survivalTargetFor } from './audit';
 import { boardForMode, isSurvivalGoal, piecesFor, rulesFor, type ModeId } from './modes';
-import { RACE_PIN_ROW, RACE_PREFILL, RACE_ROWS, RACE_WIDTH, raceLevelForRows, raceSpawnPool } from './race';
+import { RACE_KING_ROW, RACE_PREFILL, RACE_ROWS, RACE_SPAWN_ROWS, RACE_WIDTH, raceSpawnPool } from './race';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
 import { availablePieceTypes, createCampaignLevel } from './level';
@@ -38,9 +38,13 @@ function emptyState(mode: ModeId, level: number, seed: number): GameState {
 }
 
 /**
- * «Парковка»: почти всё поле занято, фигуры не ходят. Пешка прочищает себе
- * дорогу взятиями по диагонали, поэтому в решение входит не только маршрут,
- * но и порядок, в котором фигуры уходят с доски.
+ * Лабораторная «Парковка»: почти всё поле занято, фигуры не ходят. Пешка
+ * прочищает себе дорогу взятиями по диагонали, поэтому в решение входит не
+ * только маршрут, но и порядок, в котором фигуры уходят с доски.
+ *
+ * Боевой режим так не играет: он уводит фигуры за край своим движком
+ * (`createJamPuzzle` в `jam.ts`), а этот генератор остаётся базой для
+ * лабораторных вариантов `jamExit2`, `jamExit4` и `jamStrictDiag`.
  */
 export function createJamLevel(level: number, seed: number): GameState {
   const base = emptyState('jam', level, seed);
@@ -83,10 +87,10 @@ export function createJamLevel(level: number, seed: number): GameState {
 }
 
 /**
- * «Гонки»: конвейер. Пешка приколота к своему ряду, сверху уже стоит несколько
- * фигур, дальше приток задают правила режима (`spawnRate`) и уровень гонки.
- * Стартовая фигура не имеет права бить пешку: забег не должен кончаться раньше
- * первого хода.
+ * «Гонки»: король против фигур, приходящих сверху. Король стартует в нижнем
+ * ряду (один ряд под него остаётся, чтобы было куда отступить), фигуры стоят в
+ * двух верхних рядах. Стартовая фигура не имеет права бить короля: забег не
+ * должен кончаться раньше первого хода.
  */
 export function createRaceLevel(level: number, seed: number): GameState {
   const width = RACE_WIDTH;
@@ -97,41 +101,33 @@ export function createRaceLevel(level: number, seed: number): GameState {
     mode: 'race',
     width,
     height,
-    player: { x: rng.int(width), y: RACE_PIN_ROW },
+    player: { x: rng.int(width), y: RACE_KING_ROW },
     enemies: [],
     status: 'playing',
     moves: 0,
     score: 0,
     level,
-    tier: raceLevelForRows(0),
+    tier: 1,
     freeze: 0,
     shield: 0,
     rng: 0,
     seed,
   };
   const pool = raceSpawnPool(1);
-  // Стартовые фигуры ставим не ниже пятого ряда и не в колонку пешки: первые
-  // три-четыре хода должны быть разгоном, а не проверкой реакции.
-  const bottom = RACE_PIN_ROW + 4;
-  const target = Math.min(RACE_PREFILL, (height - bottom) * (width - 1));
-  const columns = new Map<number, number>();
+  const target = Math.min(RACE_PREFILL, RACE_SPAWN_ROWS * width - 1);
   let placed = 0;
   let guard = 0;
-  while (placed < target && guard++ < 200) {
+  while (placed < target && guard++ < 300) {
     const x = rng.int(width);
-    const y = bottom + rng.int(Math.max(1, height - bottom));
-    if (y >= height) continue;
-    if (x === state.player.x) continue;
-    if ((columns.get(x) ?? 0) >= 1) continue;
+    const y = height - 1 - rng.int(RACE_SPAWN_ROWS);
     if (state.enemies.some((e) => e.x === x && e.y === y)) continue;
+    if (x === state.player.x && y === state.player.y) continue;
     const candidate = { id: `e${placed}`, type: rng.pick(pool), x, y };
     state.enemies.push(candidate);
-    const falls_on_pawn = candidate.x === state.player.x && candidate.y === state.player.y + 1;
-    if (falls_on_pawn || enemyAttacksCell(state, candidate, state.player.x, state.player.y)) {
+    if (enemyAttacksCell(state, candidate, state.player.x, state.player.y)) {
       state.enemies.pop();
       continue;
     }
-    columns.set(x, (columns.get(x) ?? 0) + 1);
     placed += 1;
   }
   state.rng = rng.save();
@@ -139,9 +135,9 @@ export function createRaceLevel(level: number, seed: number): GameState {
 }
 
 /**
- * Погоня: прежние «Гонки», где пешка бежит вверх, а фигуры идут за ней. Боевому
- * режиму не нужен, но лабораторный вариант `raceDodge` меряется именно на нём,
- * поэтому генератор остался отдельным.
+ * Погоня: пешка бежит вверх, фигуры идут за ней, верхний ряд переливает в
+ * нижний. Боевому режиму не нужен, но лабораторный вариант `raceDodge` меряется
+ * именно на нём, поэтому генератор остался отдельным.
  */
 export function createRaceChaseLevel(level: number, seed: number): GameState {
   const base = emptyState('race', level, seed);
@@ -174,8 +170,8 @@ export function createRaceChaseLevel(level: number, seed: number): GameState {
  */
 function createSpecialCandidate(mode: ModeId, level: number, seed: number): GameState {
   const family = mode.startsWith('jam') ? 'jam' : mode.startsWith('race') ? 'race' : 'campaign';
-  // У лабораторных вариантов погони свой генератор: боевые «Гонки» это конвейер
-  // с приколотым рядом, а там пешка вверх не бежит.
+  // У лабораторной погони свой генератор: боевые «Гонки» это король под
+  // притоком, а там пешка вверх не бежит.
   const base =
     family === 'jam'
       ? createJamLevel(level, seed)
@@ -195,6 +191,14 @@ function createSpecialCandidate(mode: ModeId, level: number, seed: number): Game
  * просмотренный вариант, а не крутимся бесконечно.
  */
 export function createSpecialLevel(mode: ModeId, level: number, seed: number, attempts = 12): GameState {
+  // Режимы короля без финиша мерить решаемостью нечем: поле всегда
+  // «решается» ровно в один исход, а смысл имеет только длина забега. Поэтому
+  // боевой режим отдаёт расстановку сразу, а разбор к ней применяют лабораторные
+  // метрики (`analyzeVariant`), не генератор.
+  if (rulesFor(mode).player === 'king') {
+    const state = createRaceLevel(level, seed);
+    return state.enemies.length > 0 && legalMoves(state).length > 0 ? { ...state, lastEvent: 'level' } : state;
+  }
   const band = difficultyBand(level, mode);
   let best: { state: GameState; quality: number } | null = null;
   for (let shift = 0; shift < attempts; shift++) {
