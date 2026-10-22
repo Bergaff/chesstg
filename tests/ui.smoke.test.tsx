@@ -3,6 +3,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
+  RACE_WIDTH,
   createCampaignLevel,
   createJamPuzzle,
   createRaceLevel,
@@ -326,6 +327,14 @@ describe('UI smoke', () => {
     expect(screen.getByRole('button', { name: 'На месте' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Вперёд' })).toBeNull();
     expect(screen.getByText('рекорд 14')).toBeTruthy();
+
+    // Конвейер отмечен в разметке: у поля есть класс едущего поля, ряд пешки
+    // несёт латунную линию, а HUD говорит, через сколько ходов ряд уедет вниз.
+    const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
+    expect(grid.className).toContain('board-conveyor');
+    expect(grid.querySelectorAll('.cell-pin').length).toBe(RACE_WIDTH);
+    expect(screen.getByText(/сдвиг через \d/)).toBeTruthy();
+    expect(screen.getByText(/ваш ряд 2/)).toBeTruthy();
 
     fireEvent.click(screen.getByText('Начать'));
     fireEvent.click(await screen.findByRole('button', { name: 'Влево' }));

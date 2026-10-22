@@ -23,6 +23,7 @@ import {
   modeDef,
   rulesFor,
   projectHint,
+  raceSpawnEvery,
   type BonusId,
   type Cell,
   type GameAction,
@@ -671,6 +672,11 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   const isEndless = mode === 'endless';
   const isRace = mode === 'race';
   const rules = rulesFor(mode);
+  // Такт конвейера: сколько ходов осталось до следующего сдвига ряда. Полоса
+  // из клеток отвечает на вопрос «ряд уедет сейчас или через ход», и это же
+  // объясняет, почему фигуры на поле едут не каждый ход.
+  const raceEvery = isRace ? raceSpawnEvery(state.tier) : 0;
+  const raceElapsed = isRace ? state.moves % raceEvery : 0;
   // Приколотый ряд: у «Гонок» пешка не идёт вверх, поэтому и кнопки другие.
   const pinned = rules.pinned === true;
   const modeName = isEndless ? 'Бесконечный режим' : modeDef(mode).name;
@@ -715,6 +721,19 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             <span className="status-item">рекорд {profile.modes.race.best ?? 0}</span>
           </>
         )}
+        {isRace && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item">
+              ваш ряд {state.player.y + 1}, сдвиг через {raceEvery - raceElapsed}
+              <span className="race-ticks" aria-hidden="true">
+                {Array.from({ length: raceEvery }).map((_, index) => (
+                  <i key={index} className={index < raceElapsed ? 'on' : undefined} />
+                ))}
+              </span>
+            </span>
+          </>
+        )}
         {rules.captureQuota > 0 && (
           <>
             <span className="status-sep" aria-hidden="true">/</span>
@@ -749,7 +768,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поднимайтесь выше, поле растёт'
               : isRace
-                ? 'Уходите из-под фигур, ладья и ферзь бьют вдоль вашего ряда'
+                ? 'Ряд пешки зафиксирован: фигуры едут вниз, уходите вбок, ладья и ферзь бьют вдоль ряда'
                 : 'Дойти до верхнего ряда'}
           </span>
           <span className="num">{state.score > 0 ? (isRace ? `${state.score} ряд.` : `${state.score} кл.`) : ''}</span>

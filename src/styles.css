@@ -1267,6 +1267,7 @@ a {
 .board {
   display: grid;
   background: var(--bg-deep);
+  position: relative;
 }
 
 .cell {
@@ -2470,10 +2471,8 @@ a {
   background: #2b2517;
 }
 
-.cell-pin {
-  outline: 1px solid var(--accent-dim);
-  outline-offset: -1px;
-}
+/* Контур ряда рисует `.pin-row-mark`, поэтому клетке достался
+   только фон и латунная линия сверху. */
 
 /* Колонка под прицелом: сверху в этом столбце кто-то едет. */
 .cell-lane::before {
@@ -2490,6 +2489,148 @@ a {
 
 .race-best {
   color: var(--accent);
+}
+
+/* Такт конвейера. Каждая клетка несёт тонкую верхнюю насечку ряда, и на такте
+   все насечки приезжают сверху: поле выглядит едущим, а не мигающим. Ряд
+   пешки той же линией выделен в латунь и не едет, потому что ряд зафиксирован
+   правилом, а не анимацией. */
+.board-conveyor .cell::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: -1px;
+  height: 1px;
+  background: var(--line-strong);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.board-conveyor.board-shift .cell::after {
+  animation: conveyor-rule 420ms cubic-bezier(0.3, 0.72, 0.22, 1) 1;
+}
+
+@keyframes conveyor-rule {
+  from {
+    opacity: 0.1;
+    transform: translateY(calc(-1 * var(--race-cell, 24px)));
+  }
+  60% {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+}
+
+/* Боковой ход пешки в своём ряду: та же механика, что у хода фигур, только короче,
+   чтобы ряд остался главным движением кадра. */
+.player-slide {
+  animation: enemy-slide 240ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
+}
+
+.piece-hold {
+  animation: conveyor-hold 420ms ease-out 1;
+}
+
+@keyframes conveyor-hold {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(2px);
+  }
+  70% {
+    transform: translateY(-1px);
+  }
+}
+
+/* Новая фигура въезжает сверху, а не проступает на пустой клетке. */
+.piece-spawn {
+  animation: piece-enter 320ms ease-out 1;
+}
+
+@keyframes piece-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-0.6 * var(--race-cell, 24px)));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pin-row-mark {
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  border: 1px solid var(--accent-dim);
+  pointer-events: none;
+}
+
+/* Латунный рельс ряда: одна линия на всю ширину, иначе её рвут зазоры сетки. */
+.pin-row-mark::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -2px;
+  height: 2px;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+.pin-row-mark.is-shift {
+  animation: conveyor-frame 420ms ease-out 1;
+}
+
+/* Пешку ряд тянет за собой, но держит: рельс вспыхивает и гаснет, сама клетка
+   не смещается, геометрия поля не дрогает. */
+.pin-row-mark.is-shift::after {
+  animation: conveyor-pin 420ms ease-out 1;
+}
+
+@keyframes conveyor-pin {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  45% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes conveyor-frame {
+  0%,
+  100% {
+    border-color: var(--accent-dim);
+  }
+  45% {
+    border-color: var(--accent);
+  }
+}
+
+/* Индикатор такта в HUD: столько клеток, через сколько ряд уйдёт вниз. */
+.race-ticks {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.race-ticks i {
+  width: 7px;
+  height: 3px;
+  background: var(--line-strong);
+  opacity: 0.7;
+}
+
+.race-ticks i.on {
+  background: var(--accent);
+  opacity: 1;
 }
 
 @media (min-width: 600px) {

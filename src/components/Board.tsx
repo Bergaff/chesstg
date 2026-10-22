@@ -56,6 +56,22 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
   );
   // Приколотый ряд «Гонок»: его подсвечиваем, а верхний ряд тогда не финиш.
   const pinned = rulesFor(state.mode).pinned === true;
+  // Такт конвейера: за один ход сдвигаются сразу все фигуры, одиночный ход это
+  // ход одной фигуры (конь, диагональ, рубка ряда). По этому отличию и
+  // поднимаем анимацию «ряд поехал».
+  const shifting = pinned && moved.some((m) => m.to.x === m.from.x && m.to.y === m.from.y - 1);
+  const seenRef = useRef<Set<string>>(new Set());
+  const seen = seenRef.current;
+  // Прежнее положение пешки нужно, чтобы боковой ход читался как перестановка
+  // в своём ряду, а не как перескок.
+  const playerBeforeRef = useRef<Cell | null>(null);
+  const playerBefore = playerBeforeRef.current;
+  useEffect(() => {
+    playerBeforeRef.current = { ...state.player };
+  }, [state.player]);
+  useEffect(() => {
+    seenRef.current = new Set(state.enemies.map((enemy) => enemy.id));
+  }, [state.enemies]);
   const cols = state.width;
   const rows = viewport.to - viewport.from;
   const gap = 2;
@@ -86,18 +102,37 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
         }}
       >
         <div
-          className="board"
-          style={{
-            width: boardWidth || undefined,
-            height: boardHeight || undefined,
-            gap,
-            fontSize: cell ? Math.round(cell * 0.56) : undefined,
-            gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
-            gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
-          }}
+          className={cn('board', pinned && 'board-conveyor', shifting && 'board-shift')}
+          style={
+            {
+              width: boardWidth || undefined,
+              height: boardHeight || undefined,
+              gap,
+              fontSize: cell ? Math.round(cell * 0.56) : undefined,
+              gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
+              gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
+              // Без этой переменной анимация ряда не знает шага клетки, а шаг
+              // считается из размера поля, а не из вёрстки.
+              '--race-cell': cell ? `${cell + gap}px` : undefined,
+            } as CSSProperties
+          }
           role="grid"
           aria-label="Игровое поле"
         >
+          {/* Ряд, к которому приколота пешка: обводим его целиком, чтобы было
+              видно, что на такте поле уезжает, а эта линия стоит. */}
+          {pinned && cell > 0 && (
+            <span
+              className={cn('pin-row-mark', shifting && 'is-shift')}
+              aria-hidden="true"
+              style={
+                {
+                  top: (viewport.to - 1 - state.player.y) * (cell + gap),
+                  height: cell,
+                } as CSSProperties
+              }
+            />
+          )}
           {Array.from({ length: rows }).map((_, rowIndex) =>
             Array.from({ length: cols }).map((__, colIndex) => {
               const y = viewport.to - 1 - rowIndex;
@@ -163,6 +198,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                         `enemy-${enemy.type}`,
                         state.freeze > 0 && 'enemy-iced',
                         arrived && 'enemy-moved',
+                        pinned && state.moves > 0 && !seen.has(enemy.id) && 'piece-spawn',
                       )}
                       style={
                         arrived
@@ -182,7 +218,23 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                     </span>
                   )}
                   {isPlayer && (
-                    <span key={`player-${x}-${y}`} className={cn('piece player-piece', `skin-${skin}`)}>
+                    <span
+                      key={`player-${x}-${y}`}
+                      className={cn(
+                        'piece player-piece',
+                        `skin-${skin}`,
+                        shifting && 'piece-hold',
+                        pinned && playerBefore && (playerBefore.x !== x || playerBefore.y !== y) && 'player-slide',
+                      )}
+                      style={
+                        pinned && playerBefore && (playerBefore.x !== x || playerBefore.y !== y)
+                          ? ({
+                              '--from-x': `${(playerBefore.x - x) * (cell + gap)}px`,
+                              '--from-y': `${(playerBefore.y - y) * (cell + gap)}px`,
+                            } as CSSProperties)
+                          : undefined
+                      }
+                    >
                       <span className="player-mark">
                         <span className="player-glyph">{playerGlyph}</span>
                       </span>
@@ -199,7 +251,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
           )}
         </div>
       </div>
-      {settling && <div className="board-turn-flag">ход фигур</div>}
+      {settling && <div className="board-turn-flag">{pinned ? 'ряд едет' : 'ход фигур'}</div>}
       {cell === 0 && <div className="board-placeholder" />}
     </div>
   );
