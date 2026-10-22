@@ -53,7 +53,7 @@ import {
   toProfile,
   REFERRAL_BONUS,
 } from './db';
-import { fail, HttpError, isPrefix, parseActions, readJson, nowMs } from './http';
+import { fail, HttpError, isPrefix, parseActions, parseStartOptions, readJson, nowMs } from './http';
 import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment } from './payments';
 import {
   answerCallbackQuery,
@@ -504,7 +504,20 @@ app.post('/api/run/start', async (c) => {
     });
   }
 
-  const seed = randomSeed();
+  const { repeat } = parseStartOptions(body);
+  let seed = randomSeed();
+  // «Переиграть» просит то же поле, что было в последнем забеге на этом уровне.
+  // Зерно храним в runs, поэтому повтор дешёвый и честный: сервер сам решает,
+  // какую расстановку выдать, клиент не может выбрать лёгкую.
+  if (repeat && mode === 'campaign') {
+    const previous = await c.env.DB.prepare(
+      "SELECT seed FROM runs WHERE user_id = ? AND mode = 'campaign' AND level = ? ORDER BY created_at DESC LIMIT 1",
+    )
+      .bind(user.id, user.level)
+      .first<{ seed: number | string | null }>();
+    const stored = Number(previous?.seed);
+    if (Number.isFinite(stored) && stored >= 0) seed = Math.floor(stored) >>> 0;
+  }
   const initial = mode === 'campaign' ? createCampaignLevel(user.level, seed) : createEndlessRun(seed);
   const id = crypto.randomUUID();
   const now = nowMs();

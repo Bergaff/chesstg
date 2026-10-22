@@ -32,6 +32,16 @@ export async function readJson(c: Context<AppEnv>): Promise<Record<string, unkno
   }
 }
 
+/**
+ * Параметры старта забега. `repeat: true` значит «дай ту же расстановку уровня»,
+ * а не новую: после поражения игрок выбирает, переигрывать поле или получить
+ * сгенерированное заново.
+ */
+export function parseStartOptions(value: unknown): { repeat: boolean } {
+  const body = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  return { repeat: body.repeat === true || body.repeat === 'true' };
+}
+
 export function parseActions(value: unknown): GameAction[] {
   if (!Array.isArray(value)) fail(400, 'bad_request', 'actions должен быть массивом');
   if (value.length > 5000) fail(413, 'too_many_actions', 'Слишком длинная партия');

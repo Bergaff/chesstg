@@ -301,7 +301,8 @@ describe('UI smoke', () => {
 
     expect(await screen.findByText('Пешка поймана', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText(/Минус одна жизнь/)).toBeTruthy();
-    expect(screen.getByText('Ещё раз')).toBeTruthy();
+    expect(screen.getByText('Переиграть это поле')).toBeTruthy();
+    expect(screen.getByText('Новый уровень')).toBeTruthy();
     expect(screen.getByText('Смотреть рекламу за жизнь')).toBeTruthy();
   });
 

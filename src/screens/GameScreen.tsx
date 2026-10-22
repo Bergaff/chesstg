@@ -168,6 +168,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     [changePhase, onExit, refresh, setProfile],
   );
 
+  // Повтор того же поля: флаг читается один раз при старте забега.
+  const repeatRef = useRef(false);
+
   const start = useCallback(async () => {
     changePhase('loading');
     finishedRef.current = false;
@@ -196,7 +199,12 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     pendingSaveRef.current = null;
 
     try {
-      const response = await api<StartRunResponse>('/api/run/start', { method: 'POST', body: { mode } });
+      const repeat = repeatRef.current;
+      repeatRef.current = false;
+      const response = await api<StartRunResponse>('/api/run/start', {
+        method: 'POST',
+        body: mode === 'campaign' && repeat ? { mode, repeat: true } : { mode },
+      });
       const nextRun = response.run;
       let current = nextRun.initial;
       const history: GameState[] = [];
@@ -576,9 +584,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     hapticImpact('medium');
   }
 
-  function nextLevel() {
+  function restart(repeat: boolean) {
+    repeatRef.current = repeat;
     setResult(null);
     void start();
+  }
+
+  function nextLevel() {
+    restart(false);
   }
 
   async function shareResult(kind: 'win' | 'lose') {
@@ -913,6 +926,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           isEndless={isEndless}
           onWatchLife={() => void watchLifeAd()}
           onRetry={nextLevel}
+          onRetrySame={mode === 'campaign' ? () => restart(true) : undefined}
           onShare={() => void shareResult('lose')}
           onMenu={onExit}
           onShop={goShopStars}
@@ -1056,6 +1070,7 @@ function LoseModal({
   isEndless,
   onWatchLife,
   onRetry,
+  onRetrySame,
   onShare,
   onMenu,
   onShop,
@@ -1069,6 +1084,8 @@ function LoseModal({
   isEndless: boolean;
   onWatchLife: () => void;
   onRetry: () => void;
+  /** Повторить ровно то же поле, что привело к поражению. */
+  onRetrySame?: () => void;
   onShare: () => void;
   onMenu: () => void;
   onShop: () => void;
@@ -1123,10 +1140,15 @@ function LoseModal({
 
       <div className="modal-actions">
         {canRetry && (
-          <button type="button" className="btn btn-primary" onClick={onRetry}>
-            {isEndless ? 'Новый забег' : 'Ещё раз'}
+          <button type="button" className="btn btn-primary" onClick={onRetrySame ?? onRetry}>
+            {isEndless ? 'Новый забег' : 'Переиграть это поле'}
           </button>
         )}
+        {canRetry && onRetrySame && !isEndless ? (
+          <button type="button" className="btn btn-outline" onClick={onRetry}>
+            Новый уровень
+          </button>
+        ) : null}
         {!adFree && !adClaimed && (
           <button
             type="button"
