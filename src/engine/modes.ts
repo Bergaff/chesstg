@@ -18,6 +18,8 @@ export interface ModeRules {
   motion: 'greedy' | 'down' | 'static';
   /** Плотная стена фигур вместо разреженной доски: режим «Парковка». */
   wall: boolean;
+  /** Сколько фигур за забег можно взять. 0 значит без ограничения. */
+  captureQuota: number;
   /** Число рядов поля как функция от номера уровня. */
   rows: (level: number) => number;
   /** Число фигур. */
@@ -43,6 +45,7 @@ const CORE: ModeRules = {
   skipQuota: 2,
   motion: 'greedy',
   wall: false,
+  captureQuota: 0,
   rows: (level) => (level <= 5 ? 4 : level <= 15 ? 6 : level <= 30 ? 8 : 9),
   pieces: (level) => (level <= 1 ? 1 : level <= 4 ? 2 : level <= 7 ? 3 : level <= 12 ? 4 : level <= 18 ? 5 : level <= 25 ? 6 : 7),
 };
@@ -57,6 +60,9 @@ export const MODE_RULES: Record<ModeId, ModeRules> = {
     skipQuota: 0,
     motion: 'static',
     wall: true,
+    // Без лимита «Парковка» решается в лоб: фигуры стоят, идёшь и ешь всех подряд.
+    // Квота превращает поле в задачу: выбирать, кого снять, а кого обойти.
+    captureQuota: 3,
     rows: (level) => Math.min(9, 5 + Math.floor(level / 4)),
     pieces: (level) => Math.min(12, 3 + Math.floor(level / 2)),
   },
@@ -67,6 +73,7 @@ export const MODE_RULES: Record<ModeId, ModeRules> = {
     skipQuota: 1,
     motion: 'down',
     wall: false,
+    captureQuota: 0,
     rows: (level) => Math.min(10, 6 + Math.floor(level / 5)),
     pieces: (level) => Math.min(8, 2 + Math.floor(level / 3)),
   },

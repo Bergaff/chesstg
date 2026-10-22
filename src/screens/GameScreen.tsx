@@ -743,9 +743,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           </button>
         </div>
 
-        {moves.length === 0 && !canPlay ? null : (
-          <div className="move-row">
+        <div className="move-row">
             {([-1, 0, 1] as MoveDx[]).map((dx) => {
+              // Подпись и знак берём из полных moves, а доступна кнопка только когда
+              // можно играть: ряд не должен менять состав кнопок, иначе поле дёргается.
               const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
               const available = canPlay && option !== undefined;
               const label = dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо';
@@ -769,8 +770,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
                 </button>
               );
             })}
-          </div>
-        )}
+        </div>
         <div className="side-row">
           {doubleStep && canPlay ? (
             <button type="button" className="skip-btn" onClick={() => handleMove(0, 2)}>

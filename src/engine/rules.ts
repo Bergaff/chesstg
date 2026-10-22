@@ -114,7 +114,10 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   state.moves += 1;
   state.score = Math.max(state.score, state.player.y);
 
-  if (state.mode === 'campaign' && state.player.y >= state.height - 1) {
+  // Победа по верхнему ряду во всех режимах, кроме бесконечного: там цели нет,
+  // есть высота. «Парковка» и «Гонки» иначе никогда не выигрывают, и лаборатория
+  // показывает 0% решаемых расстановок при работающих правилах.
+  if (state.mode !== 'endless' && state.player.y >= state.height - 1) {
     state.status = 'won';
     state.lastEvent = 'won';
     return state;

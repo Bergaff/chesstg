@@ -48,7 +48,7 @@ export function legalMoves(state: GameState): MoveOption[] {
       continue;
     }
     // Пешка бьёт только по диагонали вперёд, прямо фигуру ставить нельзя.
-    if (rules.captures && dx !== 0) {
+    if (rules.captures && dx !== 0 && (rules.captureQuota <= 0 || (state.captures ?? 0) < rules.captureQuota)) {
       result.push({ x, y, dx, dy: 1, takes: occupant.type });
     }
   }
@@ -66,6 +66,12 @@ export function legalMoves(state: GameState): MoveOption[] {
 
 export function isMoveLegal(state: GameState, dx: MoveDx, dy: 1 | 2 = 1): boolean {
   return legalMoves(state).some((m) => m.dx === dx && (m.dy ?? 1) === dy);
+}
+
+/** Сколько фигур ещё можно взять в режиме. */
+export function capturesLeft(state: GameState): number {
+  const quota = rulesFor(state.mode).captureQuota;
+  return quota <= 0 ? Number.POSITIVE_INFINITY : Math.max(0, quota - (state.captures ?? 0));
 }
 
 /** Сколько добровольных пропусков ещё доступно в режиме. */

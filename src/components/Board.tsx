@@ -107,7 +107,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
               const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
               const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
-              const isFinish = state.mode === 'campaign' && y === state.height - 1;
+              const isFinish = state.mode !== 'endless' && y === state.height - 1;
               const captured = state.status === 'lost' && isPlayer;
 
               return (

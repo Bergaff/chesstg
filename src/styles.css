@@ -1348,6 +1348,21 @@ a {
   margin-top: 8px;
 }
 
+/* Ряды кнопок держат высоту всегда: иначе при блокировке ввода доска
+   растягивается на освободившееся место и поле «прыгает» на каждый ход. */
+.move-row,
+.side-row {
+  min-height: 46px;
+}
+
+.move-row {
+  align-items: stretch;
+}
+
+.game-controls {
+  min-height: 132px;
+}
+
 .piece {
   position: relative;
   width: 100%;
