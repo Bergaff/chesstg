@@ -154,7 +154,7 @@ function PlacementLab({
     setPieces(maxPieces);
   }, [maxPieces]);
 
-  const band = useMemo(() => difficultyBand(level), [level]);
+  const band = useMemo(() => difficultyBand(level, mode), [level, mode]);
 
   /**
    * Сравнение режимов по одному уровню: объём пространства и время, за которое

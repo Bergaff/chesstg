@@ -1,5 +1,5 @@
 import { anyEnemyAttacksPlayer, legalMoves } from './board';
-import { auditState } from './audit';
+import { auditState, difficultyBand } from './audit';
 import { boardForMode, piecesFor, type ModeId } from './modes';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
@@ -117,14 +117,31 @@ export function createRaceLevel(level: number, seed: number): GameState {
  * Перебор ограничен несколькими попытками: если не нашли, возвращаем последний
  * просмотренный вариант, а не крутимся бесконечно.
  */
+function createSpecialCandidate(mode: ModeId, level: number, seed: number): GameState {
+  return mode === 'jam' ? createJamLevel(level, seed) : createRaceLevel(level, seed);
+}
+
+/**
+ * Кандидат режима лаборатории: базовая корректность плюс решаемость по разбору.
+ * Перебор ограничен несколькими попытками: если не нашли, возвращаем последний
+ * просмотренный вариант, а не крутимся бесконечно.
+ */
 export function createSpecialLevel(mode: ModeId, level: number, seed: number, attempts = 12): GameState {
-  let last: GameState | null = null;
+  const band = difficultyBand(level, mode);
+  let best: { state: GameState; delta: number } | null = null;
   for (let shift = 0; shift < attempts; shift++) {
-    const state = mode === 'jam' ? createJamLevel(level, seed + shift * 104729) : createRaceLevel(level, seed + shift * 104729);
+    const state = createSpecialCandidate(mode, level, seed + shift * 104729);
     if (state.enemies.length === 0 || legalMoves(state).length === 0 || anyEnemyAttacksPlayer(state)) continue;
     const report = auditState(state, { maxDepth: state.height + 4, maxNodes: 60_000 });
-    last = state;
-    if (report.solvable) return { ...state, lastEvent: 'level' };
+    if (!report.solvable) continue;
+    // Решаемых расстановок много, поэтому берём ту, что ближе к цели режима:
+    // иначе генератор отдаёт первый попавшийся проход, а не задачу нужной цены.
+    const delta = Math.abs(report.score - band.target);
+    if (!best || delta < best.delta) best = { state, delta };
+    if (report.score >= band.min && report.score <= band.max) return { ...state, lastEvent: 'level' };
   }
-  return last ?? { ...createJamLevel(level, seed), lastEvent: 'fallback' };
+  if (best) return { ...best.state, lastEvent: 'level' };
+  // Ни одна попытка не прошла разбор: отдаём последнюю корректную расстановку,
+  // чтобы лаборатория показала её как нерешаемую, а не упала.
+  return { ...createSpecialCandidate(mode, level, seed), lastEvent: 'fallback' };
 }

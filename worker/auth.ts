@@ -3,7 +3,8 @@ import type { AppEnv, TelegramUser, WorkerEnv } from './types';
 import { fail } from './http';
 import { botToken } from './token';
 import { verifySignedInitData, webAppKeyStatus } from './webAppKey';
-import { getOrCreateUser } from './db';
+import { getOrCreateUser, getUserById } from './db';
+import { readSession } from './session';
 
 const encoder = new TextEncoder();
 
@@ -312,6 +313,21 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
       isGuest: false,
     });
     c.set('auth', { user, kind: 'telegram', fresh: created, tgUser: check.user });
+    await next();
+    return;
+  }
+
+  // Сеанс сайта: подписанный токен после входа через виджет Telegram Login.
+  // Без него прогресс на сайте живёт только до перезапуска браузера.
+  if (authorization.startsWith('Bearer ')) {
+    const bearer = authorization.slice(7).trim();
+    const userId = await readSession(c.env, bearer);
+    if (!userId) {
+      fail(401, 'session_expired', 'Сеанс истёк, войдите через Telegram заново');
+    }
+    const user = await getUserById(c.env, userId);
+    if (!user) fail(401, 'session_unknown', 'Профиль не найден, войдите заново');
+    c.set('auth', { user, kind: 'session', fresh: false });
     await next();
     return;
   }

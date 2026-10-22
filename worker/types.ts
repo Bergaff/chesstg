@@ -18,6 +18,8 @@ export interface WorkerEnv {
   ADMIN_PASSWORD_HASH?: string;
   /** Ключ подписи токенов админки. Обязателен для доступа. */
   ADMIN_SECRET?: string;
+  /** Секрет подписи сеансовых токенов сайта. По умолчанию берётся ADMIN_SECRET. */
+  SESSION_SECRET?: string;
 }
 
 export interface TelegramUser {
@@ -75,7 +77,7 @@ export interface RunRow {
 
 export interface AuthContext {
   user: UserRow;
-  kind: 'telegram' | 'guest';
+  kind: 'telegram' | 'guest' | 'session';
   fresh: boolean;
   tgUser?: TelegramUser;
 }

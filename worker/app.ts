@@ -24,11 +24,13 @@ import {
 import { authMiddleware, syncTelegramName } from './auth';
 import { adminApp } from './admin';
 import { logEventInBackground } from './events';
-import { hasBotToken } from './token';
+import { botToken, hasBotToken } from './token';
+import { canSignSessions, signSession, verifyLoginWidget } from './session';
 import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import { build as BUILD } from '../version.json';
 import {
   activeRuns,
+  getOrCreateUser,
   getRun,
   getUserById,
   grantsForRun,
@@ -59,7 +61,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
-const publicPaths = new Set(['/api/health', '/api/config', '/api/telegram/webhook']);
+const publicPaths = new Set(['/api/health', '/api/config', '/api/telegram/webhook', '/api/auth/telegram']);
 
 app.use('/api/*', async (c, next) => {
   if (publicPaths.has(c.req.path)) return next();
@@ -190,6 +192,7 @@ app.get('/api/health', async (c) => {
     warnings.push('admin_password_missing');
   }
   if (!c.env.ADSGRAM_BLOCK_ID?.trim()) warnings.push('adsgram_block_missing');
+  if (!canSignSessions(c.env)) warnings.push('session_secret_missing');
   if (c.env.DEV_MODE === 'true') warnings.push('dev_mode');
 
   const base = {
@@ -312,6 +315,91 @@ app.post('/api/session', async (c) => {
   }
 
   return c.json(await sessionBody(c.env, authCtx, { challenge, referral }));
+});
+
+/**
+ * Вход на сайте через виджет Telegram Login.
+ *
+ * Telegram отдаёт профиль с подписью, мы её проверяем и выдаём свой токен сеанса.
+ * Если до входа играли как гость, гостевой профиль переезжает в телеграмовский:
+ * уровень, монеты, жизни и история забегов остаются на месте.
+ */
+app.post('/api/auth/telegram', async (c) => {
+  const body = await readJson(c);
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value === 'string' || typeof value === 'number') fields[key] = String(value);
+  }
+
+  const token = botToken(c.env);
+  if (!token) fail(503, 'auth_not_configured', 'Бот ещё не настроен, вход через Telegram недоступен');
+  if (!canSignSessions(c.env)) {
+    fail(503, 'session_secret_missing', 'Воркеру нечем подписывать сеансы: добавьте секрет ADMIN_SECRET или SESSION_SECRET');
+  }
+
+  const check = await verifyLoginWidget(fields, token);
+  if (!check.ok) {
+    console.warn('login_widget_rejected', check.reason);
+    const reasonText: Record<string, string> = {
+      no_hash: 'Telegram не прислал подпись профиля',
+      no_user: 'В ответе Telegram нет идентификатора пользователя',
+      bad_signature: 'Подпись профиля не совпал с BOT_TOKEN воркера',
+      no_auth_date: 'У ответа Telegram нет отметки времени',
+      too_old: 'Ответ Telegram слишком старый, нажмите кнопку входа заново',
+      clock_skew: 'Часы устройства сильно расходятся с сервером',
+    };
+    fail(401, 'login_rejected', reasonText[check.reason] ?? 'Telegram не подтвердил вход');
+  }
+
+  const userId = `tg:${check.user.id}`;
+  const now = nowMs();
+  let user = await getUserById(c.env, userId);
+  let merged = false;
+
+  if (!user) {
+    const guestId = c.req.header('X-Guest-Id')?.trim().toLowerCase() ?? '';
+    const guest = /^[a-f0-9]{32}$/.test(guestId) ? await getUserById(c.env, `guest:${guestId}`) : null;
+    if (guest) {
+      const tables = ['runs', 'grants', 'ad_events', 'payments', 'events'];
+      const statements = [
+        c.env.DB.prepare(
+          'UPDATE users SET id = ?, tg_id = ?, is_guest = 0, first_name = ?, username = ?, updated_at = ? WHERE id = ?',
+        ).bind(userId, check.user.id, check.user.firstName, check.user.username || null, now, guest.id),
+        ...tables.map((table) =>
+          c.env.DB.prepare(`UPDATE ${table} SET user_id = ? WHERE user_id = ?`).bind(userId, guest.id),
+        ),
+      ];
+      const moved = await c.env.DB.batch(statements).then(() => true).catch(() => false);
+      if (moved) {
+        user = await getUserById(c.env, userId);
+        merged = Boolean(user);
+      }
+    }
+  }
+
+  if (!user) {
+    const created = await getOrCreateUser(c.env, {
+      id: userId,
+      isGuest: false,
+      tgUser: { id: check.user.id, first_name: check.user.firstName || 'Игрок', username: check.user.username || undefined },
+    });
+    user = created.user;
+  } else {
+    await c.env.DB.prepare('UPDATE users SET first_name = ?, username = ?, updated_at = ? WHERE id = ?')
+      .bind(check.user.firstName || user.first_name, check.user.username || user.username, now, user.id)
+      .run()
+      .catch(() => undefined);
+    user = (await getUserById(c.env, user.id)) ?? user;
+  }
+
+  user = await refreshLives(c.env, user);
+  const session = await signSession(c.env, user.id);
+  await c.env.DB.prepare('INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(user.id, 'telegram_login', 1, JSON.stringify({ merged, username: check.user.username || null }), now)
+    .run()
+    .catch(() => undefined);
+
+  return c.json({ token: session, merged, profile: toProfile(user), config: publicConfig(c.env) });
 });
 
 app.get('/api/session', async (c) => {

@@ -353,11 +353,26 @@ export function difficultyTarget(level: number): number {
 }
 
 /**
+ * Цель сложности для режима лаборатории.
+ *
+ * У «Парковки» и «Гонок» доска плотнее уже на первых уровнях (рядов и фигур
+ * больше, чем в кампании того же номера), поэтому их оценка сравнивается не с
+ * кампанией, а со своей лестницей. Числа сняты с замеров: средние оценки
+ * сгенерированных уровней 57, 66, 70 для «Парковки» и 53, 67, 70 для «Гонок»
+ * на уровнях 5, 10 и 20.
+ */
+export function difficultyTargetFor(mode: ModeId | undefined, level: number): number {
+  if (mode === 'jam') return Math.round(Math.min(88, 58 + level * 1.1));
+  if (mode === 'race') return Math.round(Math.min(84, 46 + level * 1.2));
+  return difficultyTarget(level);
+}
+
+/**
  * Полоса отбора: ниже min уровень считается слишком простым,
  * выше max слишком жёстким для текущего прогресса.
  */
-export function difficultyBand(level: number): DifficultyBand {
-  const target = difficultyTarget(level);
+export function difficultyBand(level: number, mode?: ModeId | undefined): DifficultyBand {
+  const target = difficultyTargetFor(mode, level);
   return {
     target,
     min: Math.max(6, target - 10),

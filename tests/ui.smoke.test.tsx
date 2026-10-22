@@ -232,7 +232,14 @@ describe('UI smoke', () => {
     expect(screen.getByText('Ход 1')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    // На время хода фигур кнопки остаются на месте и только блокируются,
+    // иначе доска то сжимается, то растягивается под каждым нажатием.
+    const row = document.querySelector('.move-row');
+    const buttons = [...(row?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
+    expect(buttons.length).toBe(3);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
     await waitFor(() => expect(screen.getByText('Ход 2')).toBeTruthy());
+    expect([...(document.querySelectorAll('.move-row button') ?? [])].length).toBe(3);
     expect(calls.some((call) => call.url === '/api/run/start')).toBe(true);
   });
 

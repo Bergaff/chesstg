@@ -1,4 +1,5 @@
 const GUEST_KEY = 'pva.guest.v1';
+const SESSION_KEY = 'pva.session.v1';
 
 export class ApiError extends Error {
   status: number;
@@ -39,9 +40,40 @@ export function guestId(): string {
   }
 }
 
+/** Токен сеанса после входа через Telegram. На сайте он и есть сохранение прогресса. */
+export function sessionToken(): string {
+  try {
+    return localStorage.getItem(SESSION_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setSessionToken(token: string): void {
+  try {
+    localStorage.setItem(SESSION_KEY, token);
+  } catch {
+    /* приватный режим */
+  }
+}
+
+export function clearSessionToken(): void {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isLinked(): boolean {
+  return Boolean(sessionToken());
+}
+
 export function authHeaders(): Record<string, string> {
   const tg = typeof window !== 'undefined' ? window.Telegram?.WebApp : undefined;
   if (tg?.initData) return { Authorization: `tma ${tg.initData}` };
+  const token = sessionToken();
+  if (token) return { Authorization: `Bearer ${token}`, 'X-Guest-Id': guestId() };
   return { 'X-Guest-Id': guestId() };
 }
 
@@ -83,6 +115,11 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
         : response.status === 401
           ? 'Открой игру через Telegram'
           : 'Что-то пошло не так';
+    // Протухший или подделанный сеанс не должен блокировать игру: сбрасываем его,
+    // дальше клиент снова работает как гость и сможет войти заново.
+    if (code === 'session_expired' || code === 'session_unknown' || code === 'session_secret_missing') {
+      clearSessionToken();
+    }
     throw new ApiError(response.status, code, message, data);
   }
 

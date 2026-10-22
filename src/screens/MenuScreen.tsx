@@ -6,7 +6,9 @@ import {
   type GameMode,
 } from '../engine';
 import { useApp } from '../context/AppContext';
-import { api, ApiError } from '../lib/api';
+import { api, ApiError, clearSessionToken, isLinked } from '../lib/api';
+import { getTg } from '../lib/telegram';
+import { TelegramLogin } from '../components/TelegramLogin';
 import { cn, formatDuration, formatNumber } from '../lib/format';
 import { useCountdown, useNow } from '../lib/hooks';
 import type { AdRewardResponse } from '../lib/types';
@@ -25,6 +27,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
   const [challengeHidden, setChallengeHidden] = useState(false);
   const [adLoading, setAdLoading] = useState(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [linked, setLinked] = useState(() => isLinked());
+  const inTelegram = Boolean(getTg()?.initData);
   const now = useNow(1000, adLoading || cooldownUntil > 0);
   const cooldownLeft = Math.max(0, cooldownUntil - now);
 
@@ -125,6 +129,49 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <dd className="serif">{SKINS[profile.skin]?.name ?? 'Классика'}</dd>
         </div>
       </dl>
+
+      <div className="account">
+        <span className="label">Сохранение прогресса</span>
+        {inTelegram ? (
+          <p className="account-text">
+            Игра открыта из Telegram, прогресс привязан к твоему аккаунту и не потеряется при перезапуске.
+          </p>
+        ) : linked ? (
+          <>
+            <p className="account-text">Аккаунт Telegram подключён, прогресс переживёт закрытие браузера.</p>
+            <div className="account-actions">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  clearSessionToken();
+                  setLinked(false);
+                  void refresh();
+                  toast('Сеанс сброшен, играешь как гость на этом устройстве');
+                }}
+              >
+                Выйти из аккаунта
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="account-text">
+              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Войди через Telegram, и
+              уровень, монеты и рекорды останутся с аккаунтом на любом устройстве. Гостевой прогресс перенесётся.
+            </p>
+            <TelegramLogin
+              botUsername={config.botUsername}
+              label="Войти через Telegram"
+              onLinked={({ merged }) => {
+                setLinked(true);
+                void refresh();
+                toast(merged ? 'Прогресс привязан к Telegram' : 'Вошли через Telegram');
+              }}
+            />
+          </>
+        )}
+      </div>
 
       <div className="section-head">
         <span className="label">Разделы</span>

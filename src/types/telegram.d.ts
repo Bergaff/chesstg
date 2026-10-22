@@ -53,8 +53,38 @@ export interface TelegramWebApp {
 }
 
 declare global {
+  /** Профиль, который виджет Telegram Login отдаёт странице. */
+  interface TelegramLoginUser {
+    id: number;
+    first_name?: string;
+    last_name?: string;
+    username?: string;
+    photo_url?: string;
+    auth_date?: number;
+    hash?: string;
+    [key: string]: string | number | undefined;
+  }
+
   interface Window {
-    Telegram?: { WebApp: TelegramWebApp };
+    /** Колбэк виджета Telegram Login для страниц, не открытых из бота. */
+    onTelegramLogin?: (user: TelegramLoginUser) => void;
+    Telegram?: {
+      WebApp: TelegramWebApp;
+      LoginWidget?: {
+        createButton(
+          host: HTMLElement,
+          options: {
+            telegram: string;
+            button_text?: string;
+            size?: 'large' | 'medium' | 'small';
+            radius?: string;
+            user_is_bot?: boolean;
+            request_access?: boolean;
+            onTelegramLogin?: (user: TelegramLoginUser) => void;
+          },
+        ): void;
+      };
+    };
     Adsgram?: {
       init(options: { blockId: string; debug?: boolean; debugBannerType?: string }): {
         show(): Promise<{ done: boolean; description?: string; state?: string }>;
