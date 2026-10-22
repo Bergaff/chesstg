@@ -35,6 +35,8 @@ export interface VariantReport {
   avgCaptures: number;
   /** Разнообразие генератора: различных расстановок из `samples`. */
   uniqueLayouts: number;
+  /** Сколько досок генератор сдал без отбора: полоса не была достигнута за попытки. */
+  fallbacks: number;
   /** Насколько соседние уровни различаются по составу клеток (0..1). */
   layoutDistance: number;
   /** Среднее число победных первых ходов и шагов с выбором. */
@@ -116,6 +118,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
   let solvable = 0;
   let inBand = 0;
   let capped = 0;
+  let fallbacks = 0;
   let previousCells: Set<string> | null = null;
   let distanceSum = 0;
   let distancePairs = 0;
@@ -129,6 +132,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
       maxDepth: options.maxDepth ?? (survivalMode ? SURVIVAL_DEPTH : state.height + 4),
       maxNodes: 60_000,
     });
+    if (state.lastEvent === 'fallback') fallbacks += 1;
     layouts.add(layoutKey(state));
     const cells = layoutCells(state);
     if (previousCells) {
@@ -188,6 +192,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
     avgEscapes: +average(escapes).toFixed(2),
     avgCaptures: +average(captures).toFixed(2),
     uniqueLayouts,
+    fallbacks,
     layoutDistance: +distance.toFixed(3),
     avgFirstMoves: +average(firstMoves).toFixed(2),
     avgChoiceSteps: +avgChoiceSteps.toFixed(2),

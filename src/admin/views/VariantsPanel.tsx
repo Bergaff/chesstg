@@ -36,7 +36,7 @@ const GROUPS: Group[] = [
   {
     id: 'playable',
     title: 'Боевые режимы',
-    note: 'Те, что уже в игре. Нужны как база сравнения: без неё цифры вариантов ничего не значат.',
+    note: 'Те, что уже в игре. Нужны как база сравнения: без неё цифры вариантов ничего не значат. У «Бесконечного» цели нет, разбор до финиша к нему не применим.',
     modes: ['campaign', 'endless'],
   },
   {
@@ -68,11 +68,15 @@ const HEAD = [
   'Взятий',
   'Ушло',
   'Выбор',
+  'Форс',
   'Жизнь',
   'Разных досок',
   'Отличие соседних',
   'Реиграбельность',
 ];
+
+/** В бесконечном режиме победы нет, поэтому разбор до финиша к нему не применим. */
+const NO_GOAL: ModeId[] = ['endless'];
 
 export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [picks, setPicks] = useState<ModeId[]>(DEFAULT_PICKS);
@@ -248,15 +252,17 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
               <td className="is-mono">
                 {geo.width}×{geo.height}
               </td>
-              <td>{formatPercent(item.solvableShare, 1)}</td>
+              <td>{NO_GOAL.includes(mode) ? 'нет цели' : formatPercent(item.solvableShare, 1)}</td>
               <td>{item.avgScore}</td>
               <td>{item.avgSteps.toFixed(2)}</td>
               <td>{item.avgCaptures.toFixed(2)}</td>
               <td>{item.avgEscapes.toFixed(2)}</td>
               <td>{item.avgChoiceSteps.toFixed(2)}</td>
+              <td>{formatPercent(item.forcedShare, 0)}</td>
               <td className="is-mono">{survivalText(item)}</td>
               <td>
                 {item.uniqueLayouts} из {item.samples}
+                {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
               </td>
               <td>{formatPercent(item.layoutDistance, 1)}</td>
               <td>{item.replayIndex}</td>
@@ -281,7 +287,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         Индекс реиграбельности это 40% разнообразия генератора, 25% отличия соседних уровней, 25% шагов с
         выбором и 10% отсутствия безальтернативных ходов. «Ушло» это сколько фигур покинуло поле по пути
         решения, «Жизнь» средняя длина уклонения в ходах, «С решением» для режима на уклонение означает, что
-        пешка дожила до конца глубины разбора.
+        пешка дожила до конца глубины разбора, «откаты» сколько досок генератор сдал без отбора по полосе.
       </p>
     </Panel>
   );
@@ -319,14 +325,15 @@ function buildText(
     const cells = [
       modeDef(item.mode).name,
       `${geo.width}x${geo.height}`,
-      `${(item.solvableShare * 100).toFixed(1)}%`,
+      NO_GOAL.includes(item.mode) ? 'нет цели' : `${(item.solvableShare * 100).toFixed(1)}%`,
       `${item.avgScore}`,
       item.avgSteps.toFixed(2),
       item.avgCaptures.toFixed(2),
       item.avgEscapes.toFixed(2),
       item.avgChoiceSteps.toFixed(2),
+      `${(item.forcedShare * 100).toFixed(0)}%`,
       survivalText(item),
-      `${item.uniqueLayouts}/${item.samples}`,
+      `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
       `${(item.layoutDistance * 100).toFixed(1)}%`,
       `${item.replayIndex}`,
     ];
@@ -336,6 +343,12 @@ function buildText(
   lines.push(
     'Индекс реиграбельности: 40% разнообразия генератора, 25% отличия соседних уровней, 25% шагов с выбором, 10% отсутствия безальтернативных ходов.',
   );
+  lines.push(
+    '«Ушло» это сколько фигур покинуло поле по пути решения, «Жизнь» средняя длина уклонения в ходах, «откатов» сколько досок генератор сдал без отбора по полосе.',
+  );
+  if (reports.some((item) => NO_GOAL.includes(item.mode))) {
+    lines.push('«Бесконечный» помечен как «нет цели»: победы в нём нет, поэтому нули это не дефект, а отсутствие финиша.');
+  }
   return lines.join('\n');
 }
 

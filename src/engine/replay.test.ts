@@ -56,6 +56,17 @@ describe('прогон сравнений', () => {
     expect(auditState(createSpecialLevel('race', 8, 4242)!, { maxDepth: 10 }).survival).toBe(false);
   });
 
+  it('отчёт показывает откаты генератора', () => {
+    const campaign = analyzeVariant({ mode: 'campaign', level: 8, samples: 4, seed: 909 });
+    expect(campaign.fallbacks).toBe(0);
+    expect(campaign.uniqueLayouts).toBeLessThanOrEqual(campaign.samples);
+    // Строгая диагональ на том же уровне попадает в полосу не всегда: часть досок
+    // генератор сдаёт без отбора, и это должно быть видно в отчёте.
+    const strict = analyzeVariant({ mode: 'campaignStrictDiag', level: 10, samples: 64, seed: 20261022 });
+    expect(strict.fallbacks).toBeGreaterThanOrEqual(5);
+    expect(strict.solvableShare).toBeLessThan(1);
+  });
+
   it('цель по жизни убывает с уровнем и не выходит за границы', () => {
     expect(survivalTargetFor(1)).toBe(11);
     expect(survivalTargetFor(8)).toBe(9);
