@@ -59,9 +59,11 @@ export function jsonRunAction(action: RunAction): string {
     return `{"type":"piece","id":"${action.id}","to":{"x":${action.to.x},"y":${action.to.y}}}`;
   }
   if (action.type === 'move') {
-    return action.dy === 2
-      ? `{"type":"move","dx":${action.dx},"dy":2}`
-      : `{"type":"move","dx":${action.dx}}`;
+    // dy=1 не пишем: это значение по умолчанию. dy=0 (шаг в своём ряду) и dy=2
+    // значимы и обязаны отличаться в канонической строке.
+    return action.dy === undefined || action.dy === 1
+      ? `{"type":"move","dx":${action.dx}}`
+      : `{"type":"move","dx":${action.dx},"dy":${action.dy}}`;
   }
   if (action.type === 'skip') return '{"type":"skip"}';
   return `{"type":"buff","buff":"${action.buff}"}`;

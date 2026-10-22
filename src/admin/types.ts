@@ -210,6 +210,8 @@ export interface LevelStatRow {
   attemptsPerPlayer: number;
   avgMoves: number;
   avgScore: number;
+  /** Лучший счёт уровня: нужен режимам без победы, где меряют рекордом. */
+  bestScore?: number;
   hints: number;
   freezes: number;
   undos: number;
@@ -223,6 +225,8 @@ export interface LevelStatsResponse {
   rows: LevelStatRow[];
   /** Заголовок колонки провалов: у «Парковки» это бюджет, у остальных тупики. */
   stuckLabel?: string;
+  /** Режим без победы: вместо доли побед показываем рекорд и средние ряды. */
+  recordMode?: boolean;
 }
 
 export interface PaymentsResponse {

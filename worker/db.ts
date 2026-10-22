@@ -102,6 +102,8 @@ export function profileModes(user: UserRow) {
       maxLevel: progress.maxLevel,
       unlocked: modeUnlocked(mode, user.max_level),
       unlockAtLevel: gate,
+      ...(progress.best === undefined ? {} : { best: progress.best }),
+      ...(progress.bestMoves === undefined ? {} : { bestMoves: progress.bestMoves }),
     };
   };
   return {
@@ -272,10 +274,14 @@ export function serializeRun(run: RunRow) {
   };
 }
 
-/** Прогресс режима с уровнем: текущий и лучший. */
+/** Прогресс режима с уровнем: текущий, пройденный и рекорд рядов («Гонки»). */
 export interface ModeProgress {
   level: number;
   maxLevel: number;
+  /** Рекорд в прокрученных рядах: заполняется только у конвейерных режимов. */
+  best?: number;
+  /** Ходов в лучшем забеге. */
+  bestMoves?: number;
 }
 
 /**
@@ -299,10 +305,17 @@ export function parseModeLevels(raw: unknown): Record<string, ModeProgress> {
       const level = Number(value.level);
       const maxLevel = Number(value.maxLevel);
       const current = Number.isFinite(level) && level > 0 ? Math.floor(level) : 1;
-      const best = Number.isFinite(maxLevel) && maxLevel > 0 ? Math.floor(maxLevel) : current;
+      const reached = Number.isFinite(maxLevel) && maxLevel > 0 ? Math.floor(maxLevel) : current;
+      const entry: ModeProgress = { level: current, maxLevel: Math.max(current, reached) };
+      // Рекорд рядов есть не у всех режимов: пишем его, только если он пришёл
+      // числом, иначе профиль отдаёт best: 0 там, где рекорда не было никогда.
+      const rows = Number(value.best);
+      if (Number.isFinite(rows) && rows > 0) entry.best = Math.floor(rows);
+      const moves = Number(value.bestMoves);
+      if (Number.isFinite(moves) && moves > 0) entry.bestMoves = Math.floor(moves);
       // Пройденный уровень не может быть меньше текущего: иначе админка покажет
       // «открыто 2, играешь 7», а генератор возьмёт уровень из maxLevel.
-      out[mode] = { level: current, maxLevel: Math.max(current, best) };
+      out[mode] = entry;
     }
     return out;
   } catch {

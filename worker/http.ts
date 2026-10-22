@@ -81,10 +81,18 @@ export function parseActions(value: unknown, mode: GameMode): RunAction[] {
     if (action.type === 'move') {
       const dx = action.dx;
       if (dx !== -1 && dx !== 0 && dx !== 1) fail(400, 'bad_request', 'Некорректный dx');
-      // dy принимаем только 1 или 2: двойной ход возможен с начальной позиции,
-      // остальное сервер всё равно отвергнет правилами, но лучше отказать сразу.
-      const dy = action.dy === undefined || action.dy === 1 ? 1 : action.dy === 2 ? 2 : fail(400, 'bad_request', 'Некорректный dy');
-      actions.push(dy === 2 ? { type: 'move', dx, dy: 2 } : { type: 'move', dx });
+      // dy: 1 обычный ход, 2 двойной шаг с начальной позиции, 0 шаг в своём ряду
+      // («Гонки»). Остальное сервер всё равно отвергнет правилами, но лучше
+      // отказать сразу.
+      const dy =
+        action.dy === undefined || action.dy === 1
+          ? 1
+          : action.dy === 0
+            ? 0
+            : action.dy === 2
+              ? 2
+              : fail(400, 'bad_request', 'Некорректный dy');
+      actions.push(dy === 1 ? { type: 'move', dx } : { type: 'move', dx, dy });
     } else if (action.type === 'skip') {
       actions.push({ type: 'skip' });
     } else if (action.type === 'buff') {
@@ -111,9 +119,11 @@ export function jsonAction(action: RunAction): string {
     return `{"type":"piece","id":"${action.id}","to":{"x":${action.to.x},"y":${action.to.y}}}`;
   }
   if (action.type === 'move') {
-    return action.dy === 2
-      ? `{"type":"move","dx":${action.dx},"dy":2}`
-      : `{"type":"move","dx":${action.dx}}`;
+    // dy=1 не пишем: это значение по умолчанию, а dy=0 и dy=2 значимы и должны
+    // отличаться в канонической строке, иначе сверка журнала перепутает ходы.
+    return action.dy === undefined || action.dy === 1
+      ? `{"type":"move","dx":${action.dx}}`
+      : `{"type":"move","dx":${action.dx},"dy":${action.dy}}`;
   }
   if (action.type === 'skip') return '{"type":"skip"}';
   return `{"type":"buff","buff":"${action.buff}"}`;

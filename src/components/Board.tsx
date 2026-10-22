@@ -3,6 +3,7 @@ import {
   PIECE_GLYPH,
   SKINS,
   endlessViewport,
+  rulesFor,
   type Cell,
   type GameState,
   type MoveDx,
@@ -23,7 +24,7 @@ interface BoardProps {
   hint: Cell[];
   skin: SkinId;
   interactive: boolean;
-  onMove: (dx: MoveDx, dy?: 1 | 2) => void;
+  onMove: (dx: MoveDx, dy?: 0 | 1 | 2) => void;
   turn: number;
   /** Куда переставились фигуры последним ходом: нужно для показа хода врага. */
   moved?: MovedPiece[];
@@ -53,6 +54,8 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
     () => (state.mode === 'endless' ? endlessViewport(state) : { from: 0, to: state.height }),
     [state],
   );
+  // Приколотый ряд «Гонок»: его подсвечиваем, а верхний ряд тогда не финиш.
+  const pinned = rulesFor(state.mode).pinned === true;
   const cols = state.width;
   const rows = viewport.to - viewport.from;
   const gap = 2;
@@ -107,7 +110,9 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
               const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
               const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
-              const isFinish = state.mode !== 'endless' && y === state.height - 1;
+              const isFinish = !pinned && state.mode !== 'endless' && y === state.height - 1;
+              const pinRow = pinned && y === state.player.y;
+              const lane = pinned && !isPlayer && state.enemies.some((enemy) => enemy.x === x && enemy.y > y);
               const captured = state.status === 'lost' && isPlayer;
 
               return (
@@ -119,6 +124,8 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                     'cell',
                     dark ? 'cell-dark' : 'cell-light',
                     isFinish && 'cell-finish',
+                    pinRow && 'cell-pin',
+                    lane && 'cell-lane',
                     move && interactive && 'cell-move',
                     move?.takes && 'cell-take',
                     flash && 'cell-flash',

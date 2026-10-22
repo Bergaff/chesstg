@@ -55,7 +55,9 @@ describe('правила режимов', () => {
     expect(MODE_RULES.campaign.doubleStep).toBe(true);
     expect(MODE_RULES.campaign.skipQuota).toBe(2);
     expect(MODE_RULES.jam.motion).toBe('static');
-    expect(MODE_RULES.race.motion).toBe('down');
+    expect(MODE_RULES.race.motion).toBe('conveyor');
+    expect(MODE_RULES.race.pinned).toBe(true);
+    expect(MODE_RULES.race.goal).toBe('scroll');
   });
 
   it('геометрия кампании идёт из режима', () => {
@@ -74,13 +76,13 @@ describe('правила режимов', () => {
     expect(next.enemies[0]).toMatchObject({ x: 1, y: 2 });
   });
 
-  it('в «Гонках» фигура едет рядом вниз и уходит за край', () => {
-    const moving = base({ mode: 'race', enemies: [{ id: 'e0', type: 'rook', x: 3, y: 3 }] });
-    const after = applyAction(moving, { type: 'move', dx: 0 });
+  it('в «Гонках» фигура падает рядом вниз и уходит за нижний край', () => {
+    const moving = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 3, y: 3 }] });
+    const after = applyAction(moving, { type: 'move', dx: 0, dy: 0 });
     expect(after.enemies.some((e) => e.id === 'e0' && e.y === 2)).toBe(true);
 
-    const escaping = base({ mode: 'race', player: { x: 1, y: 0 }, enemies: [{ id: 'e0', type: 'rook', x: 3, y: 0 }] });
-    const cleared = applyAction(escaping, { type: 'move', dx: 0 });
+    const escaping = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 3, y: 0 }] });
+    const cleared = applyAction(escaping, { type: 'move', dx: 0, dy: 0 });
     expect(cleared.enemies.some((e) => e.id === 'e0')).toBe(false);
     expect(cleared.lastEvent).toBe('escaped');
   });
@@ -160,12 +162,14 @@ describe('квота взятий', () => {
     expect(state.player.y).toBe(4);
   });
 
-  it('в кампании и «Гонках» взятия не лимитированы', () => {
-    for (const mode of ['campaign', 'race'] as const) {
-      const state = wall(mode);
-      expect(capturesLeft(base({ mode, captures: 40 }))).toBe(Number.POSITIVE_INFINITY);
-      expect(legalMoves(state).some((move) => Boolean(move.takes))).toBe(true);
-    }
+  it('в кампании взятия не лимитированы, в «Гонках» вместо них рубка ряда', () => {
+    const state = wall('campaign');
+    expect(capturesLeft(base({ mode: 'campaign', captures: 40 }))).toBe(Number.POSITIVE_INFINITY);
+    expect(legalMoves(state).some((move) => Boolean(move.takes))).toBe(true);
+    // У конвейера пешка не бьёт по диагонали вперёд: у неё нет права вперёд.
+    const race = base({ mode: 'race', player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 2, y: 2 }] });
+    expect(legalMoves(race).some((move) => move.dy === 1)).toBe(false);
+    expect(capturesLeft(race)).toBe(Number.POSITIVE_INFINITY);
   });
 });
 
@@ -250,7 +254,9 @@ describe('полоса сложности по режимам', () => {
   });
 
   it('генератор выбирает уровень из своей полосы', () => {
-    for (const mode of ['jam', 'race'] as const) {
+    // Полоса нужна лабораторным генераторам стены: боевая «Парковка» это
+    // головоломка, а «Гонки» без финиша, их меряют длиной забега, не решаемостью.
+    for (const mode of ['jam', 'jamExit2'] as const) {
       const band = difficultyBand(10, mode);
       const state = createSpecialLevel(mode, 10, 4242);
       const report = auditState(state, { maxDepth: state.height + 4, maxNodes: 60_000 });
@@ -321,8 +327,8 @@ describe('переключатели вариантов', () => {
     expect(state.status).toBe('playing');
     expect(state.player.y).toBe(0);
     expect(state.lastEvent).toBe('wrap');
-    // Обычные «Гонки» на том же ходу побеждают.
-    expect(applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 }).status).toBe('won');
+    // Боевые «Гонки» на том же ходу даже не пустят пешку вперёд: ряд приколотов.
+    expect(() => applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 })).toThrow(/Некорректная длина хода/);
   });
 
   it('геометрия варианта совпадает с базовым режимом', () => {

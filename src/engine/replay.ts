@@ -1,5 +1,5 @@
 import { auditState, difficultyBand, SURVIVAL_DEPTH, type AuditResult } from './audit';
-import { rulesFor } from './modes';
+import { isSurvivalGoal, rulesFor } from './modes';
 import { applyAction } from './rules';
 import { createSpecialLevel } from './specials';
 import type { ModeId } from './modes';
@@ -127,7 +127,7 @@ export function analyzeVariant(options: AnalyzeOptions): VariantReport {
 
   for (let index = 0; index < samples; index++) {
     const state = createSpecialLevel(mode, level, seed + index * 7919);
-    const survivalMode = rulesFor(mode).goal === 'survive';
+    const survivalMode = isSurvivalGoal(mode);
     const report = auditState(state, {
       // Для режима на уклонение глубина нужна заметно больше высоты поля:
       // только так видно, уклонение кончается или продолжается до упора.

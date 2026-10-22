@@ -2,6 +2,7 @@ export * from './types';
 export * from './rng';
 export * from './board';
 export * from './jam';
+export * from './race';
 export * from './modes';
 export * from './runs';
 export * from './rules';

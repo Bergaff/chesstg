@@ -79,7 +79,9 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
       ? `${formatNumber(row.endlessBest)} клеток`
       : metric === 'campaign'
         ? `уровень ${row.maxLevel}`
-        : `уровень ${row.modeLevel}`;
+        : metric === 'race'
+          ? `${row.modeBest ?? 0} ряд., уровень ${row.modeLevel}`
+          : `уровень ${row.modeLevel}`;
 
   return (
     <div className="screen records-screen">

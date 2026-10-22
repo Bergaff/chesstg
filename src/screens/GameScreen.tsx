@@ -19,6 +19,7 @@ import {
   skipsLeft,
   capturesLeft,
   isLevelMode,
+  isWinLadder,
   modeDef,
   rulesFor,
   projectHint,
@@ -214,7 +215,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       repeatRef.current = false;
       const response = await api<StartRunResponse>('/api/run/start', {
         method: 'POST',
-        body: isLevelMode(mode) && repeat ? { mode, repeat: true } : { mode },
+        body: isWinLadder(mode) && repeat ? { mode, repeat: true } : { mode },
       });
       const payload = response.run;
       if (isJamState(payload.initial)) {
@@ -404,10 +405,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     }, next.status === 'lost' ? 700 : 450);
   }
 
-  function handleMove(dx: MoveDx, dy: 1 | 2 = 1) {
+  function handleMove(dx: MoveDx, dy: 0 | 1 | 2 = 1) {
     const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === dy);
     if (!option) return;
-    performAction(dy === 2 ? { type: 'move', dx, dy: 2 } : { type: 'move', dx });
+    performAction(dy === 1 ? { type: 'move', dx } : { type: 'move', dx, dy });
   }
 
   function handleSkip() {
@@ -581,7 +582,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       onExit();
       return;
     }
-    if (mode === 'endless') {
+    // Режимы без финиша (бесконечный и конвейерные «Гонки») при выходе надо
+    // закрывать забегом, иначе ряды останутся в активной партии и не попадут в
+    // рекорд и в уровень режима.
+    if (mode === 'endless' || mode === 'race') {
       if (!runRef.current || actionsRef.current.length === 0) {
         onExit();
         return;
@@ -665,7 +669,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   }
 
   const isEndless = mode === 'endless';
+  const isRace = mode === 'race';
   const rules = rulesFor(mode);
+  // Приколотый ряд: у «Гонок» пешка не идёт вверх, поэтому и кнопки другие.
+  const pinned = rules.pinned === true;
   const modeName = isEndless ? 'Бесконечный режим' : modeDef(mode).name;
   const captures = state ? capturesLeft(state) : Number.POSITIVE_INFINITY;
   const levelTypes = [...new Set(run.initial.enemies.map((enemy) => enemy.type))];
@@ -681,7 +688,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         <div className="game-heading">
           <span className="label">{modeName}</span>
           <b className="game-title">
-            {isEndless ? `Высота ${state.score}` : `Уровень ${run.level}`}
+            {isEndless ? `Высота ${state.score}` : isRace ? `Ряды ${state.score}` : `Уровень ${run.level}`}
           </b>
         </div>
         <div className="game-hud">
@@ -699,7 +706,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       <div className="game-status">
         <span className="status-item">Ход {state.moves + 1}</span>
         <span className="status-sep" aria-hidden="true">/</span>
-        <span className="status-item">{isEndless ? `Волна ${state.tier}` : `Поле ${run.initial.width}×${run.initial.height}`}</span>
+        <span className="status-item">
+          {isEndless ? `Волна ${state.tier}` : isRace ? `Конвейер ${state.tier}` : `Поле ${run.initial.width}×${run.initial.height}`}
+        </span>
+        {isRace && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item">рекорд {profile.modes.race.best ?? 0}</span>
+          </>
+        )}
         {rules.captureQuota > 0 && (
           <>
             <span className="status-sep" aria-hidden="true">/</span>
@@ -733,11 +748,11 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <span>
             {isEndless
               ? 'Поднимайтесь выше, поле растёт'
-              : mode === 'race'
-                ? 'Фигуры идут вниз, разойдитесь с ними и дойдите до верха'
+              : isRace
+                ? 'Уходите из-под фигур, ладья и ферзь бьют вдоль вашего ряда'
                 : 'Дойти до верхнего ряда'}
           </span>
-          <span className="num">{state.score > 0 ? `${state.score} кл.` : ''}</span>
+          <span className="num">{state.score > 0 ? (isRace ? `${state.score} ряд.` : `${state.score} кл.`) : ''}</span>
         </div>
         <Board
           state={state}
@@ -801,16 +816,26 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {([-1, 0, 1] as MoveDx[]).map((dx) => {
               // Подпись и знак берём из полных moves, а доступна кнопка только когда
               // можно играть: ряд не должен менять состав кнопок, иначе поле дёргается.
-              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
+              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === (pinned ? 0 : 1));
               const available = canPlay && option !== undefined;
-              const label = dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо';
+              const label = pinned
+                ? dx === -1
+                  ? 'влево'
+                  : dx === 0
+                    ? 'на месте'
+                    : 'вправо'
+                : dx === -1
+                  ? 'влево'
+                  : dx === 0
+                    ? 'вперёд'
+                    : 'вправо';
               return (
                 <button
                   key={dx}
                   type="button"
                   className={cn('move-btn', dx === 0 && 'primary', !available && 'off', option?.takes && 'move-take')}
                   disabled={!available}
-                  onClick={() => handleMove(dx)}
+                  onClick={() => handleMove(dx, pinned ? 0 : 1)}
                   aria-label={
                     option?.takes
                       ? `${label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
@@ -818,7 +843,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
                   }
                 >
                   <span className="move-glyph-lg" aria-hidden="true">
-                    {dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
+                    {pinned ? (dx === -1 ? '←' : dx === 0 ? '·' : '→') : dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
                   </span>
                   <span className="move-label">{option?.takes ? 'взять' : label}</span>
                 </button>
@@ -838,7 +863,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           ) : null}
         </div>
         <p className="control-hint">
-          {!playerAlive ? 'Пешка поймана.' : settling ? 'Ход фигур.' : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
+          {!playerAlive
+            ? isRace
+              ? 'Конвейер сомкнулся.'
+              : 'Пешка поймана.'
+            : settling
+              ? 'Ряды едут вниз.'
+              : pinned
+                ? 'Пешка стоит в своём ряду: шаг влево, шаг вправо, на месте. По фигуре в своём ряду можно въехать и убрать её.'
+                : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
 
@@ -853,8 +886,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <p className="modal-text">
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
-              : mode === 'race'
-                ? 'Дойти до верхнего ряда. Фигуры едут вниз рядом с вами, ушедшие за край исчезают с доски.'
+              : isRace
+                ? 'Пешка приколота к своему ряду. Фигуры падают сверху рядом; ушедшие за нижний край исчезают. Считаются прокрученные ряды: каждые десять конвейер ускоряется.'
                 : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
@@ -967,9 +1000,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           adBusy={adBusy}
           adClaimed={adLifeClaimed}
           isEndless={isEndless}
+          isRace={isRace}
           onWatchLife={() => void watchLifeAd()}
           onRetry={nextLevel}
-          onRetrySame={isLevelMode(mode) ? () => restart(true) : undefined}
+          onRetrySame={isWinLadder(mode) ? () => restart(true) : undefined}
           onShare={() => void shareResult('lose')}
           onMenu={onExit}
           onShop={goShopStars}
@@ -982,9 +1016,13 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           <span className="label">Забег</span>
           <h2 className="modal-title">{result.newBest ? 'Новый рекорд' : 'Забег завершён'}</h2>
           <p className="modal-text">
-            {result.newBest
-              ? `Высота ${result.bestScore ?? result.score} клеток.`
-              : `Остановились на высоте ${result.score} клеток.`}
+            {mode === 'race'
+              ? result.newBest
+                ? `Рекорд: ${result.bestScore ?? result.score} рядов.`
+                : `Остановились на ${result.score} ряду.`
+              : result.newBest
+                ? `Высота ${result.bestScore ?? result.score} клеток.`
+                : `Остановились на высоте ${result.score} клеток.`}
             {result.coinsEarned > 0 ? ` Награда: ${result.coinsEarned} монет.` : ''}
           </p>
           <div className="modal-actions">
@@ -997,15 +1035,15 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       {quitOpen && (
         <Modal onClose={() => setQuitOpen(false)}>
           <span className="label">Пауза</span>
-          <h2 className="modal-title">{isEndless ? 'Завершить забег' : 'Выйти в меню'}</h2>
+          <h2 className="modal-title">{isEndless || isRace ? 'Завершить забег' : 'Выйти в меню'}</h2>
           <p className="modal-text">
-            {isEndless
+            {isEndless || isRace
               ? 'Результат попадёт в рекорды, но продолжить этот забег уже не получится.'
               : 'Партия сохранится, можно вернуться к этому ходу позже.'}
           </p>
           <div className="modal-actions">
             <button type="button" className="btn btn-primary" onClick={confirmExit}>
-              {isEndless ? 'Завершить' : 'Выйти'}
+              {isEndless || isRace ? 'Завершить' : 'Выйти'}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => setQuitOpen(false)}>
               Остаться
@@ -1115,6 +1153,7 @@ function LoseModal({
   adBusy,
   adClaimed,
   isEndless,
+  isRace,
   onWatchLife,
   onRetry,
   onRetrySame,
@@ -1130,6 +1169,7 @@ function LoseModal({
   adBusy: boolean;
   adClaimed: boolean;
   isEndless: boolean;
+  isRace: boolean;
   onWatchLife: () => void;
   onRetry: () => void;
   /** Повторить ровно то же поле, что привело к поражению. */
@@ -1153,14 +1193,22 @@ function LoseModal({
         <div className="result-mark danger" aria-hidden="true">
           <span className="result-glyph">{captured ? PIECE_GLYPH[captured] : '♟'}</span>
         </div>
-        <span className="label">{isEndless ? `Высота ${result.score}` : `${modeName}, уровень ${result.level}`}</span>
-        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : 'Пешка поймана'}</h2>
+        <span className="label">
+          {isEndless
+            ? `Высота ${result.score}`
+            : isRace
+              ? `${modeName}, рядов ${result.score}`
+              : `${modeName}, уровень ${result.level}`}
+        </span>
+        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : isRace ? 'Ряд сомкнулся' : 'Пешка поймана'}</h2>
         <p className="modal-text">
-          {stuck
-            ? 'Дорога закрыта: ходить некуда, взятия кончились.'
-            : captured
-              ? `${PIECE_NAME[captured]} добрался до вашей пешки.`
-              : 'Фигура добралась до вашей пешки.'}{' '}
+          {isRace
+            ? 'Конвейер закрыл последний свободный ход. Каждый ряд идёт в рекорд, каждые десять рядов режим поднимает уровень.'
+            : stuck
+              ? 'Дорога закрыта: ходить некуда, взятия кончились.'
+              : captured
+                ? `${PIECE_NAME[captured]} добрался до вашей пешки.`
+                : 'Фигура добралась до вашей пешки.'}{' '}
           Минус одна жизнь.
         </p>
       </div>
@@ -1174,7 +1222,7 @@ function LoseModal({
         <div className="callout">
           <span className="label label-accent">Рекорд</span>
           <span>
-            Высота {result.bestScore} клеток, награда {result.coinsEarned} монет.
+            {isRace ? `${result.bestScore} рядов` : `Высота ${result.bestScore} клеток`}, награда {result.coinsEarned} монет.
           </span>
         </div>
       )}
@@ -1189,7 +1237,7 @@ function LoseModal({
       <div className="modal-actions">
         {canRetry && (
           <button type="button" className="btn btn-primary" onClick={onRetrySame ?? onRetry}>
-            {isEndless ? 'Новый забег' : 'Переиграть это поле'}
+            {isEndless || isRace ? 'Новый забег' : 'Переиграть это поле'}
           </button>
         )}
         {canRetry && onRetrySame && !isEndless ? (

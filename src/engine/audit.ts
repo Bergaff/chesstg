@@ -1,5 +1,5 @@
 import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
-import { rulesFor } from './modes';
+import { isSurvivalGoal, rulesFor } from './modes';
 import type { ModeId } from './modes';
 import { applyAction } from './rules';
 import { Rng, mix32 } from './rng';
@@ -147,7 +147,7 @@ export function auditState(start: GameState, options: AuditOptions = {}): AuditR
 
   // В режиме на выживание цели дойти до верха нет: там успехом считается сам
   // факт, что пешка осталась в живых на всей глубине поиска.
-  const survival = rulesFor(start.mode).goal === 'survive';
+  const survival = isSurvivalGoal(start.mode);
 
   /** Есть ли победа за оставшиеся depth действий. */
   const canWin = (state: GameState, depth: number): boolean => {

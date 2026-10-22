@@ -72,7 +72,7 @@ export interface GameState {
 }
 
 export type GameAction =
-  | { type: 'move'; dx: MoveDx; dy?: 1 | 2 }
+  | { type: 'move'; dx: MoveDx; dy?: 0 | 1 | 2 }
   | { type: 'skip' }
   | { type: 'buff'; buff: BuffKind };
 
@@ -83,8 +83,8 @@ export interface Cell {
 
 export interface MoveOption extends Cell {
   dx: MoveDx;
-  /** Число рядов, пройденных за ход: 1, либо 2 при ходе с начальной позиции. */
-  dy?: 1 | 2;
+  /** Рядов, пройденных за ход: 1, либо 2 при двойном шаге, 0 в приколотом ряду. */
+  dy?: 0 | 1 | 2;
   /** Тип фигуры, которую пешка бьёт на этой клетке. */
   takes?: PieceType;
 }

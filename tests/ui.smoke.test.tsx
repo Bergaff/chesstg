@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import {
   createCampaignLevel,
   createJamPuzzle,
+  createRaceLevel,
   jamPieceMoves,
   legalMoves,
   type GameState,
@@ -308,6 +309,33 @@ describe('UI smoke', () => {
     await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
     const saved = calls.filter((call) => call.url.endsWith('/save')).at(-1);
     expect((saved?.body as { actions?: unknown[] } | undefined)?.actions?.length).toBe(1);
+  });
+
+  it('«Гонки» дают боковые кнопки и считают ряды', async () => {
+    profile.maxLevel = 6;
+    profile.modes.campaign = { level: 6, maxLevel: 6, unlocked: true, unlockAtLevel: 1 };
+    profile.modes.race = { level: 2, maxLevel: 2, unlocked: true, unlockAtLevel: 5, best: 14, bestMoves: 16 };
+    initial = createRaceLevel(2, SEED);
+    await boot();
+
+    fireEvent.click(screen.getByText('Гонки').closest('button')!);
+    expect(await screen.findByText('Начать')).toBeTruthy();
+    const start = calls.find((call) => call.url === '/api/run/start');
+    expect((start?.body as { mode?: string } | undefined)?.mode).toBe('race');
+    // В приколотом ряду нет хода вперёд: ряд кнопок боковой, средний - «на месте».
+    expect(screen.getByRole('button', { name: 'На месте' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Вперёд' })).toBeNull();
+    expect(screen.getByText('рекорд 14')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Начать'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Влево' }));
+    await waitFor(() => expect(screen.getByText('Ход 2')).toBeTruthy());
+    // Журнал уходит на сервер пачкой с задержкой: ждём именно вызов сохранения.
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
+    const sent = calls.filter((call) => call.url.endsWith('/save')).at(-1);
+    // Шаг в своём ряду отличается от хода вперёд только полем dy: сервер по нему
+    // и сверяет партию, поэтому оно обязано доехать целым.
+    expect((sent?.body as { actions?: { dy?: number }[] } | undefined)?.actions?.[0]?.dy).toBe(0);
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {

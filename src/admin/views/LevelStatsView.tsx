@@ -54,7 +54,12 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
   const stuckLevels = rows.filter((row) => row.stuck > 0).length;
   const stuckLabel = data?.stuckLabel ?? 'Тупиков';
   const jam = (data?.mode ?? mode) === 'jam';
-  const hardLevels = busy.filter((row) => row.winRate < 0.25).length;
+  // «Гонки» уровня не выигрывают: там тяжело считается по длине забега, а не
+  // по доле побед.
+  const recordMode = data?.recordMode === true;
+  const hardLevels = recordMode
+    ? busy.filter((row) => row.avgScore < 10).length
+    : busy.filter((row) => row.winRate < 0.25).length;
 
   return (
     <div className="adm-stack">
@@ -111,7 +116,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             уровней с провалами <b>{stuckLevels}</b>
           </span>
           <span>
-            уровней с долей побед ниже 25% <b>{hardLevels}</b>
+            {recordMode ? 'уровней со средним рядом ниже 10' : 'уровней с долей побед ниже 25%'} <b>{hardLevels}</b>
           </span>
           {edge && (
             <span>
@@ -125,15 +130,14 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             'Уровень',
             'Игроков',
             'Забегов',
-            'Побед',
-            'Доля',
+            ...(recordMode ? ['Лучший ряд', 'Средний ряд'] : ['Побед', 'Доля']),
             'Проигрышей',
             stuckLabel,
             'Брошено',
             'Активно',
             'Попыток на игрока',
             'Ходов',
-            'Монет',
+            ...(recordMode ? [] : ['Средний счёт']),
             'Подсказок',
             'Заморозок',
             'Отмен',
@@ -147,12 +151,21 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
               <td>
                 {row.level}
                 {edge?.level === row.level && <small className="adm-muted"> край</small>}
-                {row.played >= 10 && row.winRate < 0.25 && <small className="adm-row-flag"> тяжело</small>}
+                {!recordMode && row.played >= 10 && row.winRate < 0.25 && <small className="adm-row-flag"> тяжело</small>}
               </td>
               <td>{row.players}</td>
               <td>{row.played}</td>
-              <td>{row.won}</td>
-              <td>{formatPercent(row.winRate, 1)}</td>
+              {recordMode ? (
+                <>
+                  <td>{row.bestScore ?? 0}</td>
+                  <td>{row.avgScore.toFixed(1)}</td>
+                </>
+              ) : (
+                <>
+                  <td>{row.won}</td>
+                  <td>{formatPercent(row.winRate, 1)}</td>
+                </>
+              )}
               <td>{row.lost}</td>
               <td>
                 {row.stuck > 0 ? <span className="adm-row-flag">{row.stuck}</span> : 0}
@@ -161,7 +174,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
               <td>{row.active}</td>
               <td>{row.attemptsPerPlayer.toFixed(2)}</td>
               <td>{row.avgMoves.toFixed(1)}</td>
-              <td>{row.avgScore.toFixed(1)}</td>
+              {!recordMode && <td>{row.avgScore.toFixed(1)}</td>}
               <td>{row.hints}</td>
               <td>{row.freezes}</td>
               <td>{row.undos}</td>

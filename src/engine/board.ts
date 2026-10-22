@@ -33,9 +33,30 @@ export function isPlayerAt(state: GameState, x: number, y: number): boolean {
  * Ходы пешки: один ряд вперёд (прямо или по диагонали) плюс, по правилам режима,
  * взятие по диагонали и двойной шаг с начальной позиции.
  */
+/**
+ * Ходы в приколотом ряду («Гонки»): влево, вправо, на месте, плюс рубка фигуры,
+ * если она стоит в том же ряду рядом. Вперёд нельзя: ряд закреплён за пешкой.
+ */
+function pinnedMoves(state: GameState, rules: { ram?: boolean }): MoveOption[] {
+  const result: MoveOption[] = [];
+  for (const dx of [-1, 0, 1] as MoveDx[]) {
+    const x = state.player.x + dx;
+    const y = state.player.y;
+    if (!inside(state, x, y)) continue;
+    const occupant = enemyAt(state, x, y);
+    if (!occupant) {
+      result.push({ x, y, dx, dy: 0 });
+      continue;
+    }
+    if (rules.ram) result.push({ x, y, dx, dy: 0, takes: occupant.type });
+  }
+  return result;
+}
+
 export function legalMoves(state: GameState): MoveOption[] {
   if (state.status !== 'playing') return [];
   const rules = rulesFor(state.mode);
+  if (rules.pinned) return pinnedMoves(state, rules);
   const result: MoveOption[] = [];
   const directions: MoveDx[] = [-1, 0, 1];
   for (const dx of directions) {
@@ -66,7 +87,7 @@ export function legalMoves(state: GameState): MoveOption[] {
   return result;
 }
 
-export function isMoveLegal(state: GameState, dx: MoveDx, dy: 1 | 2 = 1): boolean {
+export function isMoveLegal(state: GameState, dx: MoveDx, dy: 0 | 1 | 2 = 1): boolean {
   return legalMoves(state).some((m) => m.dx === dx && (m.dy ?? 1) === dy);
 }
 
@@ -270,9 +291,73 @@ export function exitStep(state: GameState, enemy: Enemy): Cell | 'escape' | null
 }
 
 /** Цель хода фигуры с учётом способа движения режима. */
+/** Бьёт ли дальнобойная фигура пешку вдоль их общего ряда. */
+function sameRowShot(state: GameState, enemy: Enemy): boolean {
+  if (enemy.y !== state.player.y || enemy.x === state.player.x) return false;
+  const step = enemy.x < state.player.x ? 1 : -1;
+  for (let x = enemy.x + step; x !== state.player.x; x += step) {
+    if (enemyAt(state, x, enemy.y, enemy.id)) return false;
+  }
+  return true;
+}
+
+/** Слон спускается по диагонали, отскакивая от бортов: его ряд смещается каждый ход. */
+function diagonalStep(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const y = enemy.y - 1;
+  if (y < 0) return 'escape';
+  const drift = (enemy.x + enemy.y) % 2 === 0 ? -1 : 1;
+  for (const dx of [drift, -drift, 0]) {
+    const x = enemy.x + dx;
+    if (!inside(state, x, y)) continue;
+    if (enemyAt(state, x, y, enemy.id)) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+/**
+ * Падение без обхода: занята клетка снизу - фигура ждёт. В конвейере это важно:
+ * диагональный обход из `downStep` сыпал фигуры в соседние колонки, и пробка
+ * доедала пешку с боков независимо от того, куда она уходит.
+ */
+function strictFall(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const y = enemy.y - 1;
+  if (y < 0) return 'escape';
+  if (enemyAt(state, enemy.x, y, enemy.id)) return null;
+  return { x: enemy.x, y };
+}
+
+/** Конь перепрыгивает пробку: два ряда вниз и ряд в сторону, иначе падает как все. */
+function knightDescent(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  const towards = state.player.x > enemy.x ? 1 : -1;
+  for (const dx of [towards, -towards, 0]) {
+    const x = enemy.x + (dx === 0 ? 1 : dx);
+    if (inside(state, x, enemy.y - 2) && !enemyAt(state, x, enemy.y - 2, enemy.id)) {
+      return { x, y: enemy.y - 2 };
+    }
+  }
+  return strictFall(state, enemy);
+}
+
+/**
+ * Шаг фигуры по конвейеру «Гонок». Пешку снимают два случая: падение прямо на
+ * неё (это видит проверка позиции) и выстрел ладьи или ферзя вдоль общего ряда.
+ * Всё остальное - просто движение вниз, поэтому ряд пешки читаем.
+ */
+export function conveyorStep(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+  if (state.shield <= 0 && (enemy.type === 'rook' || enemy.type === 'queen') && sameRowShot(state, enemy)) {
+    return { x: state.player.x, y: state.player.y };
+  }
+  if (enemy.type === 'bishop') return diagonalStep(state, enemy);
+  if (enemy.type === 'knight') return knightDescent(state, enemy);
+  return strictFall(state, enemy);
+}
+
 export function enemyTarget(state: GameState, enemy: Enemy): Cell | 'escape' | null {
-  const motion = rulesFor(state.mode).motion;
+  const rules = rulesFor(state.mode);
+  const motion = rules.motion;
   if (motion === 'static') return null;
+  if (motion === 'conveyor') return conveyorStep(state, enemy);
   if (motion === 'down') return downStep(state, enemy);
   if (motion === 'exit') return exitStep(state, enemy);
   return chooseEnemyMove(state, enemy);

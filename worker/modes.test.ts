@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseModeLevels, profileModes, serializeModeLevels, modeProgress, toProfile } from './db';
-import { parseRunMode } from './http';
+import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
 import type { UserRow } from './types';
 
 /** Строка игрока с минимальным набором полей: остальные для прогресса не важны. */
@@ -33,6 +33,19 @@ function user(patch: Partial<UserRow> = {}): UserRow {
     ...patch,
   };
 }
+
+describe('журнал конвейерного режима', () => {
+  it('различает шаг в своём ряду и ход вперёд', () => {
+    const stay = parseActions([{ type: 'move', dx: 0, dy: 0 }], 'race');
+    expect(stay).toEqual([{ type: 'move', dx: 0, dy: 0 }]);
+    // Отсутствие dy это прежний ход вперёд: канон у них обязан различаться.
+    const forward = parseActions([{ type: 'move', dx: 0 }], 'race');
+    expect(jsonAction(stay[0])).not.toBe(jsonAction(forward[0]));
+    expect(isPrefix(stay, forward)).toBe(false);
+    expect(isPrefix(stay, stay)).toBe(true);
+    expect(() => parseActions([{ type: 'move', dx: 0, dy: 3 }], 'race')).toThrow();
+  });
+});
 
 describe('режимы в запросах клиента', () => {
   it('принимает боевые режимы и отсекает лабораторные', () => {
@@ -71,6 +84,17 @@ describe('прогресс режимов в JSON-колонке', () => {
     const raw = serializeModeLevels({ jam: { level: 4, maxLevel: 6 }, race: { level: 1, maxLevel: 1 } });
     expect(JSON.parse(raw)).toEqual({ jam: { level: 4, maxLevel: 6 }, race: { level: 1, maxLevel: 1 } });
     expect(parseModeLevels(raw).race).toEqual({ level: 1, maxLevel: 1 });
+  });
+
+  it('хранит рекорд рядов у «Гонок» и не выдумывает его у «Парковки»', () => {
+    const parsed = parseModeLevels('{"race":{"level":4,"maxLevel":4,"best":37,"bestMoves":41},"jam":{"level":2,"maxLevel":2}}');
+    expect(parsed.race).toEqual({ level: 4, maxLevel: 4, best: 37, bestMoves: 41 });
+    expect(parsed.jam).toEqual({ level: 2, maxLevel: 2 });
+    // Мусор вместо числа не должен уезжать в профиль: лучше уж без рекорда.
+    expect(parseModeLevels('{"race":{"level":1,"maxLevel":1,"best":"много"}}').race).toEqual({ level: 1, maxLevel: 1 });
+    const row = user({ max_level: 6, mode_levels: serializeModeLevels(parsed) });
+    expect(profileModes(row).race).toMatchObject({ level: 4, best: 37, bestMoves: 41 });
+    expect(profileModes(row).jam.best).toBeUndefined();
   });
 
   it('кампания живёт в своих колонках, а не в JSON', () => {

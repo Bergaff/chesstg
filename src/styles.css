@@ -2459,6 +2459,39 @@ a {
   cursor: pointer;
 }
 
+/* =========================================================
+   Гонки: конвейер с приколотым рядом пешки
+   ========================================================= */
+
+/* Свой ряд подсвечен: игрок должен видеть полосу, по которой едет, а не
+   искать пешку глазами на тёмном поле. */
+.board .cell-pin.cell-light,
+.board .cell-pin.cell-dark {
+  background: #2b2517;
+}
+
+.cell-pin {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
+}
+
+/* Колонка под прицелом: сверху в этом столбце кто-то едет. */
+.cell-lane::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 2px;
+  height: 26%;
+  margin-left: -1px;
+  background: var(--danger);
+  opacity: 0.45;
+}
+
+.race-best {
+  color: var(--accent);
+}
+
 @media (min-width: 600px) {
   .modal-backdrop {
     align-items: center;

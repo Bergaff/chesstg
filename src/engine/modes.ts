@@ -1,3 +1,4 @@
+import { RACE_PREFILL, RACE_ROWS, RACE_WIDTH, raceSpawnEvery, raceSpawnPerTurn } from './race';
 import type { AnyMode, GameMode } from './types';
 
 /**
@@ -16,17 +17,26 @@ export interface ModeRules {
   skipQuota: number;
   /**
    * Как ходят фигуры: `greedy` идут на пешку, `down` конвейером рядом вниз,
-   * `static` стоят, `exit` уходят с поля в боковые или все четыре стороны.
+   * `static` стоят, `exit` уходят с поля в боковые или все четыре стороны,
+   * `conveyor` падают рядом и бьют только по своей линии.
    */
-  motion: 'greedy' | 'down' | 'static' | 'exit';
+  motion: 'greedy' | 'down' | 'static' | 'exit' | 'conveyor';
   /** Для `motion: 'exit'`: 2 значит только влево-вправо, 4 во все стороны. */
   exitDirections: 2 | 4;
   /** Можно ли вставать на свободную диагональ. false: диагональ только для взятия. */
   freeDiagonal: boolean;
-  /** `top` цель побега вверх, `survive` цели нет: важно, сколько продержишься. */
-  goal: 'top' | 'survive';
+  /** `top` цель побега вверх, `survive` цели нет, `scroll` - счёт в прокрученных рядах. */
+  goal: 'top' | 'survive' | 'scroll';
   /** Сколько фигур появляется на верхнем ряду за ход (0 значит без притока). */
   spawnPerTurn: number;
+  /** Приток как функция уровня режима: конвейер ускоряется, а не растягивается. */
+  spawnRate?: (level: number) => number;
+  /** Такт притока: волна раз в столько-то ходов. */
+  spawnEvery?: (level: number) => number;
+  /** Пешка приколота к своему ряду: ходит влево-вправо, вперёд нельзя. */
+  pinned?: boolean;
+  /** В приколотом ряду можно убрать фигуру, встав на её клетку. */
+  ram?: boolean;
   /** Плотная стена фигур вместо разреженной доски: режим «Парковка». */
   wall: boolean;
   /** Сколько фигур за забег можно взять. 0 значит без ограничения. */
@@ -61,6 +71,7 @@ const CORE: ModeRules = {
   freeDiagonal: true,
   goal: 'top',
   spawnPerTurn: 0,
+  pinned: false,
   rows: (level) => (level <= 5 ? 4 : level <= 15 ? 6 : level <= 30 ? 8 : 9),
   pieces: (level) => (level <= 1 ? 1 : level <= 4 ? 2 : level <= 7 ? 3 : level <= 12 ? 4 : level <= 18 ? 5 : level <= 25 ? 6 : 7),
 };
@@ -76,6 +87,7 @@ const JAM: ModeRules = {
   freeDiagonal: true,
   goal: 'top',
   spawnPerTurn: 0,
+  pinned: false,
   // Без лимита «Парковка» решается в лоб: фигуры стоят, идёшь и ешь всех подряд.
   // Квота превращает поле в задачу: выбирать, кого снять, а кого обойти.
   captureQuota: 3,
@@ -84,19 +96,25 @@ const JAM: ModeRules = {
 };
 
 const RACE: ModeRules = {
-  // «Гонки»: фигуры едут рядом вниз, пешка бежит навстречу, ушедшие за край исчезают.
-  captures: true,
-  doubleStep: true,
-  skipQuota: 1,
-  motion: 'down',
+  // «Гонки»: бесконечный конвейер. Пешка приколота к своему ряду, фигуры падают
+  // сверху рядом, ушедшие за нижний край исчезают. Взятие - не способ пройти
+  // стену, а способ расчистить свой ряд.
+  captures: false,
+  doubleStep: false,
+  skipQuota: 0,
+  motion: 'conveyor',
   wall: false,
   captureQuota: 0,
   exitDirections: 2,
-  freeDiagonal: true,
-  goal: 'top',
-  spawnPerTurn: 0,
-  rows: (level) => Math.min(10, 6 + Math.floor(level / 5)),
-  pieces: (level) => Math.min(8, 2 + Math.floor(level / 3)),
+  freeDiagonal: false,
+  goal: 'scroll',
+  spawnPerTurn: 1,
+  spawnRate: raceSpawnPerTurn,
+  spawnEvery: raceSpawnEvery,
+  pinned: true,
+  ram: true,
+  rows: () => RACE_ROWS,
+  pieces: () => RACE_PREFILL,
 };
 
 /**
@@ -116,9 +134,18 @@ const VARIANTS: Partial<Record<ModeId, ModeRules>> = {
   raceDodge: {
     ...RACE,
     motion: 'greedy',
+    // Вариант мерялся до конвейера: оставляем ему прежний набор переключателей,
+    // иначе сравнение в лаборатории идёт с другим движком.
+    goal: 'survive',
+    pinned: false,
+    ram: false,
+    captures: true,
+    doubleStep: true,
+    freeDiagonal: true,
+    skipQuota: 1,
+    spawnRate: undefined,
     // Один бесплатный пропуск оставляем как в базе: без него пешка обязана
     // ходить в любую сторону, и уклонение вырождается в «первый ход решает».
-    goal: 'survive',
     spawnPerTurn: 1,
     rows: () => 9,
     pieces: (level) => Math.min(10, 3 + Math.floor(level / 4)),
@@ -177,9 +204,17 @@ export function modeUnlocked(mode: GameMode, campaignMaxLevel: number): boolean 
   return campaignMaxLevel >= modeGate(mode);
 }
 
-/** Режимы с номером уровня: победил поднялся, проиграл переиграл. Бесконечный не из них. */
+/** Режимы с номером уровня в профиле. Бесконечного здесь нет: у него только рекорд. */
 export function isLevelMode(mode: GameMode): boolean {
   return mode === 'campaign' || mode === 'jam' || mode === 'race';
+}
+
+/**
+ * Режимы, где уровень двигает победа: дошёл до верха - получил следующий.
+ * «Гонки» не из них: там конца нет, уровень растёт от прокрученных рядов.
+ */
+export function isWinLadder(mode: GameMode): boolean {
+  return mode === 'campaign' || mode === 'jam';
 }
 
 export function isModeId(value: unknown): value is ModeId {
@@ -196,7 +231,7 @@ export function modeFamily(mode: ModeId): 'campaign' | 'jam' | 'race' {
 export function colsFor(mode: ModeId, level: number): number {
   const family = modeFamily(mode);
   if (family === 'jam') return Math.min(6, 4 + Math.floor(level / 10));
-  if (family === 'race') return 6;
+  if (family === 'race') return RACE_WIDTH;
   if (level <= 5) return 3;
   if (level <= 15) return 4;
   if (level <= 30) return 5;
@@ -213,6 +248,16 @@ export function piecesFor(mode: ModeId, level: number): number {
 
 export function rulesFor(mode: AnyMode | undefined): ModeRules {
   return MODE_RULES[mode && isModeId(mode) ? mode : 'campaign'];
+}
+
+/**
+ * Режим без финиша: исход решает только длина жизни. У «Гонок» тот же смысл,
+ * но жизнь измеряется прокрученными рядами, поэтому разбор и генератор для них
+ * работают вместе.
+ */
+export function isSurvivalGoal(mode: AnyMode | undefined): boolean {
+  const goal = rulesFor(mode).goal;
+  return goal === 'survive' || goal === 'scroll';
 }
 
 export function modeDef(mode: ModeId): ModeDef {
@@ -235,7 +280,7 @@ export function modeDef(mode: ModeId): ModeDef {
     },
     race: {
       name: 'Гонки',
-      note: 'Фигуры едут рядом вниз, пешка навстречу: кто первый разминётся.',
+      note: 'Конвейер: пешка в своём ряду, фигуры падают сверху. Счёт это ряды, каждые десять рядов режим поднимает уровень.',
       playable: true,
     },
     jamExit2: {

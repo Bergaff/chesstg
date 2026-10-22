@@ -16,6 +16,10 @@ export interface ModeProgress {
   unlocked: boolean;
   /** На каком уровне кампании открывается режим. */
   unlockAtLevel: number;
+  /** Рекорд в прокрученных рядах: есть только у «Гонок». */
+  best?: number;
+  /** Ходов в лучшем забеге. */
+  bestMoves?: number;
 }
 
 export interface Profile {
@@ -145,6 +149,8 @@ export interface LeaderboardRow {
   level: number;
   /** Уровень в том режиме, по которому сейчас сортируется таблица. */
   modeLevel: number;
+  /** Рекорд в рядах: приходит только для «Гонок», где уровня-победы нет. */
+  modeBest?: number;
 }
 
 export interface LeaderboardResponse {

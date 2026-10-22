@@ -12,6 +12,7 @@ import {
   createCampaignLevel,
   createEndlessRun,
   createJamPuzzle,
+  createRaceLevel,
   createSpecialLevel,
   endlessCoinReward,
   type GameAction,
@@ -19,6 +20,7 @@ import {
   isBonusId,
   isJamState,
   isLevelMode,
+  isWinLadder,
   isSkinId,
   jamHint,
   type JamState,
@@ -26,6 +28,8 @@ import {
   materializeLives,
   MAX_LIVES,
   modeDef,
+  raceCoinReward,
+  raceLevelForRows,
   modeGate,
   modeUnlocked,
   parseRunState,
@@ -546,6 +550,7 @@ app.post('/api/run/start', async (c) => {
   }
 
   const { repeat } = parseStartOptions(body);
+  // Уровень берём из прогресса режима: у гонок он растёт от рядов, а не от побед.
   const level = isLevelMode(mode) ? modeProgress(user, mode).level : 0;
   let seed = randomSeed();
   // «Переиграть» просит то же поле, что было в последнем забеге на этом уровне.
@@ -560,16 +565,19 @@ app.post('/api/run/start', async (c) => {
     const stored = Number(previous?.seed);
     if (Number.isFinite(stored) && stored >= 0) seed = Math.floor(stored) >>> 0;
   }
-  // Генератор свой у каждого режима: кампания и «Гонки» отбирают расстановку по
-  // полосе сложности, «Парковка» это головоломка, собранная из решённой позиции.
+  // Генератор свой у каждого режима: кампания отбирает расстановку по полосе
+  // сложности, «Парковка» это головоломка из решённой позиции, «Гонки» -
+  // конвейер с зафиксированным рядом пешки.
   const initial =
     mode === 'jam'
       ? createJamPuzzle(level, seed)
-      : mode === 'campaign'
-        ? createCampaignLevel(level, seed)
-        : mode === 'endless'
-          ? createEndlessRun(seed)
-          : createSpecialLevel(mode, level, seed);
+      : mode === 'race'
+        ? createRaceLevel(level, seed)
+        : mode === 'campaign'
+          ? createCampaignLevel(level, seed)
+          : mode === 'endless'
+            ? createEndlessRun(seed)
+            : createSpecialLevel(mode, level, seed);
   const id = crypto.randomUUID();
   const now = nowMs();
 
@@ -715,6 +723,9 @@ app.post('/api/run/:id/finish', async (c) => {
   let bestTierAfter = user.endless_best_tier;
   let bestMovesAfter = user.endless_best_moves;
   let newBest = false;
+  // Колонки endless_* принадлежат бесконечному режиму: «Гонки» пишут рекорд в
+  // mode_levels, иначе два режима дрались бы за одно поле.
+  let endlessRecord = false;
   let modeLevelsAfter = user.mode_levels;
   let modeLevelsChanged = false;
 
@@ -723,7 +734,7 @@ app.post('/api/run/:id/finish', async (c) => {
   // жизнь и оставляет уровень тот же. Разница только в том, где лежит прогресс:
   // у кампании в колонках профиля, у остальных в JSON `mode_levels`.
   const mode = run.mode;
-  if (isLevelMode(mode)) {
+  if (isWinLadder(mode)) {
     const progress = modeProgress(user, mode);
     if (outcome === 'won') {
       if (run.level > progress.level) {
@@ -747,9 +758,38 @@ app.post('/api/run/:id/finish', async (c) => {
       livesAfter = next.lives;
       livesAtAfter = next.livesAt;
     }
+  } else if (mode === 'race') {
+    // «Гонки»: уровня-победы нет, есть ряды. Рекорд и уровень режима лежат в
+    // mode_levels.race, награда капается за длину забега, а не за новый рекорд:
+    // иначе игрок без рекорда сидел бы без монет совсем.
+    const progress = modeProgress(user, 'race');
+    const rows = snapshot.score;
+    const bestBefore = progress.best ?? 0;
+    newBest = rows > bestBefore;
+    // Монеты платим только когда конвейер реально поймал пешку: выйти из забега
+    // на тридцатом ряду и получить награду было бы слишком просто.
+    reward = outcome === 'lost' ? raceCoinReward(rows) : 0;
+    if (newBest || raceLevelForRows(rows) > progress.level) {
+      const levels = parseModeLevels(user.mode_levels);
+      const nextLevel = Math.max(progress.level, raceLevelForRows(rows));
+      levels.race = {
+        level: nextLevel,
+        maxLevel: Math.max(progress.maxLevel, nextLevel),
+        best: Math.max(bestBefore, rows),
+        bestMoves: Math.max(progress.bestMoves ?? 0, snapshot.moves),
+      };
+      modeLevelsAfter = serializeModeLevels(levels);
+      modeLevelsChanged = true;
+    }
+    if (outcome === 'lost') {
+      const next = loseLife(user.lives, user.lives_at, now);
+      livesAfter = next.lives;
+      livesAtAfter = next.livesAt;
+    }
   } else {
     if (snapshot.score > user.endless_best) {
       newBest = true;
+      endlessRecord = true;
       bestAfter = snapshot.score;
       bestTierAfter = snapshot.tier;
       bestMovesAfter = snapshot.moves;
@@ -782,7 +822,12 @@ app.post('/api/run/:id/finish', async (c) => {
     // В «Парковке» конца фигуры не бывает: там причина - кончившийся бюджет ходов.
     reason: isJamState(state) ? state.lastEvent ?? '' : '',
     newBest,
-    bestScore: run.mode === 'endless' ? Math.max(user.endless_best, snapshot.score) : null,
+    bestScore:
+      run.mode === 'endless'
+        ? Math.max(user.endless_best, snapshot.score)
+        : run.mode === 'race'
+          ? Math.max(modeProgress(user, 'race').best ?? 0, snapshot.score)
+          : null,
     endlessUnlockedNow,
   };
 
@@ -809,7 +854,7 @@ app.post('/api/run/:id/finish', async (c) => {
     set.push('coins = coins + ?');
     binds.push(reward);
   }
-  if (levelUp) {
+  if (levelUp || modeLevelsChanged) {
     if (mode === 'campaign') {
       set.push('level = ?', 'max_level = MAX(max_level, ?)');
       binds.push(levelAfter, levelAfter);
@@ -824,7 +869,7 @@ app.post('/api/run/:id/finish', async (c) => {
     set.push('lives = ?', 'lives_at = ?');
     binds.push(livesAfter, livesAtAfter);
   }
-  if (newBest) {
+  if (endlessRecord) {
     set.push('endless_best = ?', 'endless_best_tier = ?', 'endless_best_moves = ?');
     binds.push(bestAfter, bestTierAfter, bestMovesAfter);
   }
@@ -1127,14 +1172,25 @@ app.get('/api/leaderboard', async (c) => {
   // понятный db_not_ready вместо пустой таблицы.
   const modeColumn = (mode: 'jam' | 'race') =>
     `COALESCE(CAST(json_extract(mode_levels, '$.${mode}.level') AS INTEGER), 0)`;
+  // В «Гонках» уровень это следствие рекорда, поэтому в таблице сравниваем сами
+  // ряды: два игрока на пятом уровне могли пройти 52 и 96 рядов.
+  const raceRowsColumn = `COALESCE(CAST(json_extract(mode_levels, '$.race.best') AS INTEGER), 0)`;
   const rankColumn =
-    metric === 'campaign' ? 'max_level' : metric === 'endless' ? 'endless_best' : modeColumn(metric);
+    metric === 'campaign'
+      ? 'max_level'
+      : metric === 'endless'
+        ? 'endless_best'
+        : metric === 'race'
+          ? raceRowsColumn
+          : modeColumn(metric);
   const order =
     metric === 'campaign'
       ? 'max_level DESC, endless_best DESC, updated_at ASC'
       : metric === 'endless'
         ? 'endless_best DESC, max_level DESC, updated_at ASC'
-        : `${rankColumn} DESC, max_level DESC, updated_at ASC`;
+        : metric === 'race'
+          ? `${raceRowsColumn} DESC, ${modeColumn('race')} DESC, max_level DESC, updated_at ASC`
+          : `${rankColumn} DESC, max_level DESC, updated_at ASC`;
 
   const where = friends
     ? '(id = ? OR referred_by = ?)'
@@ -1165,6 +1221,7 @@ app.get('/api/leaderboard', async (c) => {
     level: row.level,
     modeLevel:
       metric === 'jam' || metric === 'race' ? modeProgress(row as unknown as UserRow, metric).level : 0,
+    modeBest: metric === 'race' ? modeProgress(row as unknown as UserRow, 'race').best ?? 0 : undefined,
   }));
 
   const rankWhere = friends
@@ -1175,7 +1232,9 @@ app.get('/api/leaderboard', async (c) => {
       ? user.max_level
       : metric === 'endless'
         ? user.endless_best
-        : modeProgress(user, metric).level;
+        : metric === 'race'
+          ? (modeProgress(user, 'race').best ?? 0)
+          : modeProgress(user, metric).level;
   const rankBindings = friends ? [user.id, user.id, myValue] : [myValue];
   const rankRow = await c.env.DB.prepare(
     `SELECT COUNT(*) + 1 AS rank FROM users WHERE ${rankWhere}${rankColumn} > ?`,

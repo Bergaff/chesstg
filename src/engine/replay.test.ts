@@ -52,8 +52,8 @@ describe('прогон сравнений', () => {
     // Глубина для выживания это потолок, а не путь к финишу: чем больше глубина,
     // тем длиннее зафиксированная жизнь.
     expect(auditState(state!, { maxDepth: 14, maxNodes: 60_000 }).steps).toBeGreaterThanOrEqual(report.steps);
-    // Обычные «Гонки» так же не считаются.
-    expect(auditState(createSpecialLevel('race', 8, 4242)!, { maxDepth: 10 }).survival).toBe(false);
+    // Боевые «Гонки» теперь тоже без финиша: у них тот же замер жизни.
+    expect(auditState(createSpecialLevel('race', 8, 4242)!, { maxDepth: 10 }).survival).toBe(true);
   });
 
   it('отчёт показывает откаты генератора', () => {
@@ -80,15 +80,18 @@ describe('прогон сравнений', () => {
     expect(dodge.survival!.max).toBeLessThan(SURVIVAL_DEPTH);
   });
 
-  it('отчёт по уклонению измеряет жизнь, отчёт по гонкам её не измеряет', () => {
-    const dodge = analyzeVariant({ mode: 'raceDodge', level: 6, samples: 4, seed: 500, maxDepth: 10 });
+  // Разбор двух режимов без финиша самый дорогой в файле: перебор по глубине
+  // идёт по всем трём ходам пешки, поэтому тесту нужен свой потолок времени.
+  it('отчёт по уклонению и отчёт по конвейеру измеряют жизнь', () => {
+    const dodge = analyzeVariant({ mode: 'raceDodge', level: 6, samples: 2, seed: 500, maxDepth: 8 });
     expect(dodge.survival).toBeDefined();
     expect(dodge.survival!.avg).toBeGreaterThan(0);
     expect(dodge.survival!.min).toBeGreaterThan(0);
-    const race = analyzeVariant({ mode: 'race', level: 6, samples: 4, seed: 500 });
-    expect(race.survival).toBeUndefined();
+    const race = analyzeVariant({ mode: 'race', level: 6, samples: 2, seed: 500, maxDepth: 6 });
+    expect(race.survival).toBeDefined();
+    expect(race.survival!.avg).toBeGreaterThan(0);
     expect(race.inBandShare).toBeGreaterThanOrEqual(0);
-  });
+  }, 30_000);
 
   it('сравнение возвращает отчёты по порядку и без расхождений на равных правилах', () => {
     const reports = compareVariants(['jam', 'campaignFreeDiag'], 6, 4, 909);

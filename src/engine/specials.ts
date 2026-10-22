@@ -1,6 +1,7 @@
-import { anyEnemyAttacksPlayer, legalMoves } from './board';
+import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
 import { auditState, difficultyBand, SURVIVAL_DEPTH, survivalTargetFor } from './audit';
-import { boardForMode, piecesFor, rulesFor, type ModeId } from './modes';
+import { boardForMode, isSurvivalGoal, piecesFor, rulesFor, type ModeId } from './modes';
+import { RACE_PIN_ROW, RACE_PREFILL, RACE_ROWS, RACE_WIDTH, raceLevelForRows, raceSpawnPool } from './race';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
 import { availablePieceTypes, createCampaignLevel } from './level';
@@ -82,30 +83,84 @@ export function createJamLevel(level: number, seed: number): GameState {
 }
 
 /**
- * «Гонки»: фигуры едут рядом вниз, пешка идёт навстречу. Ушедшая за нижний край
- * фигура покидает поле, поэтому с каждым ходом дорога вверх очищается, а цена
- * ошибки меняется: в начале важно не встать под фигуру, в конце успеть.
+ * «Гонки»: конвейер. Пешка приколота к своему ряду, сверху уже стоит несколько
+ * фигур, дальше приток задают правила режима (`spawnRate`) и уровень гонки.
+ * Стартовая фигура не имеет права бить пешку: забег не должен кончаться раньше
+ * первого хода.
  */
 export function createRaceLevel(level: number, seed: number): GameState {
+  const width = RACE_WIDTH;
+  const height = RACE_ROWS;
+  const rng = new Rng(mix32(seed, level, 0x9ac3, width, height));
+  const state: GameState = {
+    version: 1,
+    mode: 'race',
+    width,
+    height,
+    player: { x: rng.int(width), y: RACE_PIN_ROW },
+    enemies: [],
+    status: 'playing',
+    moves: 0,
+    score: 0,
+    level,
+    tier: raceLevelForRows(0),
+    freeze: 0,
+    shield: 0,
+    rng: 0,
+    seed,
+  };
+  const pool = raceSpawnPool(1);
+  // Стартовые фигуры ставим не ниже пятого ряда и не в колонку пешки: первые
+  // три-четыре хода должны быть разгоном, а не проверкой реакции.
+  const bottom = RACE_PIN_ROW + 4;
+  const target = Math.min(RACE_PREFILL, (height - bottom) * (width - 1));
+  const columns = new Map<number, number>();
+  let placed = 0;
+  let guard = 0;
+  while (placed < target && guard++ < 200) {
+    const x = rng.int(width);
+    const y = bottom + rng.int(Math.max(1, height - bottom));
+    if (y >= height) continue;
+    if (x === state.player.x) continue;
+    if ((columns.get(x) ?? 0) >= 1) continue;
+    if (state.enemies.some((e) => e.x === x && e.y === y)) continue;
+    const candidate = { id: `e${placed}`, type: rng.pick(pool), x, y };
+    state.enemies.push(candidate);
+    const falls_on_pawn = candidate.x === state.player.x && candidate.y === state.player.y + 1;
+    if (falls_on_pawn || enemyAttacksCell(state, candidate, state.player.x, state.player.y)) {
+      state.enemies.pop();
+      continue;
+    }
+    columns.set(x, (columns.get(x) ?? 0) + 1);
+    placed += 1;
+  }
+  state.rng = rng.save();
+  return state;
+}
+
+/**
+ * Погоня: прежние «Гонки», где пешка бежит вверх, а фигуры идут за ней. Боевому
+ * режиму не нужен, но лабораторный вариант `raceDodge` меряется именно на нём,
+ * поэтому генератор остался отдельным.
+ */
+export function createRaceChaseLevel(level: number, seed: number): GameState {
   const base = emptyState('race', level, seed);
   const rng = new Rng(mix32(seed, level, 0x9ac3, base.width, base.height));
   const state: GameState = { ...base, player: { x: rng.int(base.width), y: 0 }, enemies: [] };
   const types = availablePieceTypes(Math.min(31, 8 + level));
-  const target = Math.min(piecesFor('race', level), (base.height - 2) * base.width);
+  const target = Math.min(Math.min(10, 3 + Math.floor(level / 4)), (base.height - 2) * base.width);
   const columns = new Map<number, number>();
   let placed = 0;
   let guard = 0;
   while (placed < target && guard++ < 200) {
     const x = rng.int(base.width);
-    // Фигуры стараемся ставить выше середины: иначе они сходят с поля раньше,
-    // чем пешка успеет до них добежать, и забег превращается в прогулку.
+    // Фигуры выше середины: иначе они сходят с поля раньше, чем пешка добежит.
     const y = Math.min(base.height - 2, Math.floor(base.height / 2) + rng.int(Math.max(1, Math.ceil(base.height / 2))));
     if (y < 2) continue;
     if ((columns.get(x) ?? 0) >= 2) continue;
     if (state.enemies.some((e) => e.x === x && e.y === y)) continue;
     columns.set(x, (columns.get(x) ?? 0) + 1);
-    const type = rng.pick(types);
-    state.enemies.push({ id: `e${placed}`, type, x, y });
+    state.enemies.push({ id: `e${placed}`, type: rng.pick(types), x, y });
     placed += 1;
   }
   state.rng = rng.save();
@@ -119,8 +174,16 @@ export function createRaceLevel(level: number, seed: number): GameState {
  */
 function createSpecialCandidate(mode: ModeId, level: number, seed: number): GameState {
   const family = mode.startsWith('jam') ? 'jam' : mode.startsWith('race') ? 'race' : 'campaign';
+  // У лабораторных вариантов погони свой генератор: боевые «Гонки» это конвейер
+  // с приколотым рядом, а там пешка вверх не бежит.
   const base =
-    family === 'jam' ? createJamLevel(level, seed) : family === 'race' ? createRaceLevel(level, seed) : createCampaignLevel(level, seed);
+    family === 'jam'
+      ? createJamLevel(level, seed)
+      : mode === 'race'
+        ? createRaceLevel(level, seed)
+        : family === 'race'
+          ? createRaceChaseLevel(level, seed)
+          : createCampaignLevel(level, seed);
   // Важно: режим на состоянии подменяется на вариант, иначе движок читает
   // правила базового режима и сравнение вариантов показывает одно и то же.
   return base.mode === mode ? base : { ...base, mode };
@@ -137,7 +200,7 @@ export function createSpecialLevel(mode: ModeId, level: number, seed: number, at
   for (let shift = 0; shift < attempts; shift++) {
     const state = createSpecialCandidate(mode, level, seed + shift * 104729);
     if (state.enemies.length === 0 || legalMoves(state).length === 0 || anyEnemyAttacksPlayer(state)) continue;
-    const survivalMode = rulesFor(mode).goal === 'survive';
+    const survivalMode = isSurvivalGoal(mode);
     const depth = survivalMode ? SURVIVAL_DEPTH : state.height + 4;
     const report = auditState(state, { maxDepth: depth, maxNodes: 60_000 });
     // В режиме на выживание полоса другая: считается не цена ошибки, а длина

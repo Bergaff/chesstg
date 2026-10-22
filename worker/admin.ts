@@ -668,6 +668,10 @@ function describeRun(row: Record<string, unknown>): Record<string, unknown> {
     coinsEarned: Number(parsed.coinsEarned ?? 0),
     levelUp: Boolean(parsed.levelUp),
     modeLevel: parsed.level ?? row.level,
+    // Для конвейерных режимов важен рекорд: забег без победы, но с новым
+    // результатом это нормальный забег, а не провал.
+    newBest: Boolean(parsed.newBest),
+    bestScore: parsed.bestScore ?? null,
   };
 }
 
@@ -691,6 +695,7 @@ adminApp.get('/levels/stats', async (c) => {
             SUM(status = 'active') AS active,
             COALESCE(AVG(moves), 0) AS avgMoves,
             COALESCE(AVG(score), 0) AS avgScore,
+            COALESCE(MAX(score), 0) AS bestScore,
             MIN(created_at) AS firstAt,
             MAX(updated_at) AS lastAt
      FROM runs
@@ -707,15 +712,26 @@ adminApp.get('/levels/stats', async (c) => {
   // Для пешечных режимов «плохое поле» это поражение без взятия (тупик). У
   // «Парковки» своей фигуры-охотника нет, там тот же смысл несёт кончившийся
   // бюджет ходов: уровень не пройти за данное число перестановок.
-  const stuckPattern = mode === 'jam' ? '%"reason":"budget"%' : '%"capturedBy":null%';
-  const stuck = await c.env.DB.prepare(
-    `SELECT level, COUNT(*) AS n
-     FROM runs
-     WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND result LIKE ?
-     GROUP BY level`,
-  )
-    .bind(mode, start, `%${stuckPattern}%`)
-    .all<{ level: number; n: number }>();
+  // У «Гонок» уровня-победы нет: там плохой забег это короткий, он показывает,
+  // что конвейер складывается раньше, чем игрок успевает разобрать поле.
+  const stuck =
+    mode === 'race'
+      ? await c.env.DB.prepare(
+          `SELECT level, COUNT(*) AS n
+           FROM runs
+           WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND score < 5
+           GROUP BY level`,
+        )
+          .bind(mode, start)
+          .all<{ level: number; n: number }>()
+      : await c.env.DB.prepare(
+          `SELECT level, COUNT(*) AS n
+           FROM runs
+           WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND result LIKE ?
+           GROUP BY level`,
+        )
+          .bind(mode, start, mode === 'jam' ? '%"reason":"budget"%' : '%"capturedBy":null%')
+          .all<{ level: number; n: number }>();
 
   const bonuses = await c.env.DB.prepare(
     `SELECT r.level AS level, g.kind AS kind, COUNT(*) AS n
@@ -751,6 +767,7 @@ adminApp.get('/levels/stats', async (c) => {
       attemptsPerPlayer: Number(row.players) > 0 ? played / Number(row.players) : 0,
       avgMoves: Number(row.avgMoves),
       avgScore: Number(row.avgScore),
+      bestScore: Number(row.bestScore),
       hints: bonusByLevel.get(level)?.hint ?? 0,
       freezes: bonusByLevel.get(level)?.freeze ?? 0,
       undos: bonusByLevel.get(level)?.undo ?? 0,
@@ -759,7 +776,10 @@ adminApp.get('/levels/stats', async (c) => {
     };
   });
 
-  return c.json({ mode, days, rows, stuckLabel: mode === 'jam' ? 'Бюджет не осилили' : 'Тупиков' });
+  const stuckLabel = mode === 'jam' ? 'Бюджет не осилили' : mode === 'race' ? 'Короткие забеги' : 'Тупиков';
+  // У режима без победы колонка «доля побед» бессмысленна: там уровнем правит
+  // рекорд, поэтому в ответе отдельный флаг, а не подмена чисел.
+  return c.json({ mode, days, rows, stuckLabel, recordMode: mode === 'race' });
 });
 
 /** Режимы с номером уровня: только они попадают в статистику прохождений. */
