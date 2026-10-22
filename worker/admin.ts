@@ -656,11 +656,15 @@ function describeRun(row: Record<string, unknown>): Record<string, unknown> {
   }
   const { result: _drop, ...rest } = row;
   void _drop;
+  const reason = String(parsed.reason ?? '');
   return {
     ...rest,
     outcome: String(parsed.outcome ?? row.status ?? ''),
     capturedBy: parsed.capturedBy ?? null,
-    stuck: parsed.outcome === 'lost' && parsed.capturedBy == null,
+    reason,
+    // В «Парковке» фигура никого не бьёт: там проигрыш это кончившийся бюджет.
+    stuck: parsed.outcome === 'lost' && parsed.capturedBy == null && row.mode !== 'jam',
+    budgetOut: row.mode === 'jam' && reason === 'budget',
     coinsEarned: Number(parsed.coinsEarned ?? 0),
     levelUp: Boolean(parsed.levelUp),
     modeLevel: parsed.level ?? row.level,
@@ -700,13 +704,17 @@ adminApp.get('/levels/stats', async (c) => {
 
   // Причина поражения видна только в JSON результата: «тупик» это про генератор,
   // «съеден» про игру. Считаем отдельно, чтобы не тащить JSON в первую выборку.
+  // Для пешечных режимов «плохое поле» это поражение без взятия (тупик). У
+  // «Парковки» своей фигуры-охотника нет, там тот же смысл несёт кончившийся
+  // бюджет ходов: уровень не пройти за данное число перестановок.
+  const stuckPattern = mode === 'jam' ? '%"reason":"budget"%' : '%"capturedBy":null%';
   const stuck = await c.env.DB.prepare(
     `SELECT level, COUNT(*) AS n
      FROM runs
-     WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND result LIKE '%"capturedBy":null%'
+     WHERE mode = ? AND status = 'lost' AND level > 0 AND created_at >= ? AND result LIKE ?
      GROUP BY level`,
   )
-    .bind(mode, start)
+    .bind(mode, start, `%${stuckPattern}%`)
     .all<{ level: number; n: number }>();
 
   const bonuses = await c.env.DB.prepare(
@@ -751,7 +759,7 @@ adminApp.get('/levels/stats', async (c) => {
     };
   });
 
-  return c.json({ mode, days, rows });
+  return c.json({ mode, days, rows, stuckLabel: mode === 'jam' ? 'Бюджет не осилили' : 'Тупиков' });
 });
 
 /** Режимы с номером уровня: только они попадают в статистику прохождений. */

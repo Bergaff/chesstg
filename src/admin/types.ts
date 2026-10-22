@@ -152,7 +152,11 @@ export interface UserRunRow {
   updatedAt: number;
   outcome: string;
   capturedBy: string | null;
+  /** Причина конца из результата: в «Парковке» это `budget`. */
+  reason?: string;
   stuck: boolean;
+  /** «Парковка» проиграна, потому что кончился бюджет ходов. */
+  budgetOut?: boolean;
   coinsEarned: number;
   levelUp: boolean;
   modeLevel: number;
@@ -217,6 +221,8 @@ export interface LevelStatsResponse {
   mode: 'campaign' | 'jam' | 'race';
   days: number;
   rows: LevelStatRow[];
+  /** Заголовок колонки провалов: у «Парковки» это бюджет, у остальных тупики. */
+  stuckLabel?: string;
 }
 
 export interface PaymentsResponse {

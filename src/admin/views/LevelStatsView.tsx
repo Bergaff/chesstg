@@ -52,6 +52,8 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
     null,
   );
   const stuckLevels = rows.filter((row) => row.stuck > 0).length;
+  const stuckLabel = data?.stuckLabel ?? 'Тупиков';
+  const jam = (data?.mode ?? mode) === 'jam';
   const hardLevels = busy.filter((row) => row.winRate < 0.25).length;
 
   return (
@@ -106,7 +108,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             игроков <b>{formatNumber(rows.reduce((sum, row) => sum + row.players, 0))}</b>
           </span>
           <span>
-            уровней с тупиками <b>{stuckLevels}</b>
+            уровней с провалами <b>{stuckLevels}</b>
           </span>
           <span>
             уровней с долей побед ниже 25% <b>{hardLevels}</b>
@@ -126,7 +128,7 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
             'Побед',
             'Доля',
             'Проигрышей',
-            'Тупиков',
+            stuckLabel,
             'Брошено',
             'Активно',
             'Попыток на игрока',
@@ -170,9 +172,9 @@ export function LevelStatsView({ onUnauthorized }: { onUnauthorized: (message: s
         </Table>
 
         <p className="adm-note">
-          «Тупик» это поражение, где фигуры не сделали ни одного взятия: такое поле обязан перебрать
-          генератор, а не игрок. «Попыток на игрока» выше двух говорит, что уровень проходят с
-          пятого раза, и это уже про сложность, а не про интерес.
+          {jam
+            ? 'Провал в «Парковке» это кончившийся бюджет ходов: уровень либо слишком плотный для данного числа перестановок, либо игрок пробовал один раз и бросил. «Попыток на игрока» выше трёх значит, что уровни переставляют наугад.'
+            : '«Тупик» это поражение, где фигуры не сделали ни одного взятия: такое поле обязан перебрать генератор, а не игрок. «Попыток на игрока» выше двух говорит, что уровень проходят с пятого раза, и это уже про сложность, а не про интерес.'}
         </p>
       </Panel>
     </div>

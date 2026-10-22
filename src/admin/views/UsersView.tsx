@@ -42,6 +42,7 @@ function runOutcome(row: UserRunRow): ReactNode {
   if (status === 'active') return <span className="adm-muted">в процессе</span>;
   if (status === 'won') return 'выигран';
   if (status === 'quit') return 'свернут';
+  if (row.budgetOut) return 'не хватило ходов';
   if (row.stuck) return 'тупик поля';
   const captured = row.capturedBy ? String(row.capturedBy) : '';
   return captured ? `пойман (${pieceTitle(captured)})` : 'проигран';

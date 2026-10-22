@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { PLAYABLE_MODES, type GameAction, type GameMode } from '../src/engine';
+import { PLAYABLE_MODES, type GameMode, type JamAction, type RunAction } from '../src/engine';
 import type { AppEnv } from './types';
 
 export class HttpError extends Error {
@@ -52,14 +52,32 @@ export function parseRunMode(value: unknown): GameMode | null {
   return (PLAYABLE_MODES as readonly string[]).includes(value) ? (value as GameMode) : null;
 }
 
-export function parseActions(value: unknown): GameAction[] {
+/**
+ * Журнал действий. Для «Парковки» это перестановки фигур, для всех остальных
+ * режимов - ходы пешки, пропуски и бонусы. Режим передаётся явно, иначе игрок
+ * мог бы подсунуть головоломке чужие действия и наоборот.
+ */
+export function parseActions(value: unknown, mode: GameMode): RunAction[] {
   if (!Array.isArray(value)) fail(400, 'bad_request', 'actions должен быть массивом');
   if (value.length > 5000) fail(413, 'too_many_actions', 'Слишком длинная партия');
 
-  const actions: GameAction[] = [];
+  const actions: RunAction[] = [];
   for (const item of value) {
     if (!item || typeof item !== 'object') fail(400, 'bad_request', 'Некорректное действие');
     const action = item as Record<string, unknown>;
+    if (mode === 'jam') {
+      if (action.type !== 'piece') fail(400, 'bad_request', 'В «Парковке» только перестановки фигур');
+      const id = typeof action.id === 'string' ? action.id.slice(0, 24) : '';
+      if (!id) fail(400, 'bad_request', 'Не указан id фигуры');
+      const to = action.to as Record<string, unknown> | undefined;
+      const x = Number(to?.x);
+      const y = Number(to?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || x > 40 || y < 0 || y > 40) {
+        fail(400, 'bad_request', 'Некорректная клетка');
+      }
+      actions.push({ type: 'piece', id, to: { x, y } } as JamAction);
+      continue;
+    }
     if (action.type === 'move') {
       const dx = action.dx;
       if (dx !== -1 && dx !== 0 && dx !== 1) fail(400, 'bad_request', 'Некорректный dx');
@@ -81,10 +99,18 @@ export function parseActions(value: unknown): GameAction[] {
   return actions;
 }
 
-export function jsonAction(action: GameAction): string {
+/** Прежний разбор для тестов и мест, где режим заведомо пешечный. */
+export function parsePawnActions(value: unknown): RunAction[] {
+  return parseActions(value, 'campaign');
+}
+
+export function jsonAction(action: RunAction): string {
+  // Канонический вид важен для сверки истории: отсутствие dy и dy=1 это одно и
+  // то же действие, иначе проверка префикса падала бы на двойном ходе.
+  if (action.type === 'piece') {
+    return `{"type":"piece","id":"${action.id}","to":{"x":${action.to.x},"y":${action.to.y}}}`;
+  }
   if (action.type === 'move') {
-    // Канонический вид: отсутствие dy и dy=1 это одно и то же действие, иначе
-    // сверка клиентской последовательности с серверной падала бы на двойном ходе.
     return action.dy === 2
       ? `{"type":"move","dx":${action.dx},"dy":2}`
       : `{"type":"move","dx":${action.dx}}`;
@@ -93,11 +119,11 @@ export function jsonAction(action: GameAction): string {
   return `{"type":"buff","buff":"${action.buff}"}`;
 }
 
-export function actionsEqual(a: GameAction, b: GameAction): boolean {
+export function actionsEqual(a: RunAction, b: RunAction): boolean {
   return jsonAction(a) === jsonAction(b);
 }
 
-export function isPrefix(prefix: GameAction[], all: GameAction[]): boolean {
+export function isPrefix(prefix: RunAction[], all: RunAction[]): boolean {
   if (prefix.length > all.length) return false;
   for (let i = 0; i < prefix.length; i++) {
     if (!actionsEqual(prefix[i], all[i])) return false;

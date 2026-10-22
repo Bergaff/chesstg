@@ -3,29 +3,38 @@ import { cors } from 'hono/cors';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import {
   AD_COINS_REWARD,
-  BONUSES,
-  MAX_LIVES,
   addLife,
+  type AnyRunState,
   applyActions,
+  BONUSES,
+  type BonusId,
   campaignCoinReward,
   createCampaignLevel,
   createEndlessRun,
+  createJamPuzzle,
   createSpecialLevel,
+  endlessCoinReward,
+  type GameAction,
+  type GameState,
+  isBonusId,
+  isJamState,
   isLevelMode,
+  isSkinId,
+  jamHint,
+  type JamState,
+  loseLife,
+  materializeLives,
+  MAX_LIVES,
   modeDef,
   modeGate,
   modeUnlocked,
-  rulesFor,
-  endlessCoinReward,
-  isBonusId,
-  isSkinId,
-  loseLife,
-  materializeLives,
+  parseRunState,
   randomSeed,
+  replayRun,
   RuleError,
-  type BonusId,
-  type GameAction,
-  type GameState,
+  rulesFor,
+  type RunAction,
+  snapshotOf,
 } from '../src/engine';
 import { authMiddleware, syncTelegramName } from './auth';
 import { adminApp } from './admin';
@@ -128,25 +137,30 @@ function auth(c: Context<AppEnv>) {
   return c.get('auth');
 }
 
-function safeParseActions(raw: string): GameAction[] {
+function safeParseActions(raw: string): RunAction[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) fail(500, 'run_corrupt');
-    return parsed as GameAction[];
+    return parsed as RunAction[];
   } catch {
     fail(500, 'run_corrupt', 'Повреждённый журнал ходов');
   }
 }
 
-function replay(run: RunRow, actions: GameAction[]): GameState {
-  let initial: GameState;
+/**
+ * Проиграть журнал ходов поверх сохранённого поля. Форма состояния зависит от
+ * режима: у «Парковки» свои правила, поэтому разбор и применение идут через
+ * общий диспетчер движка, а наружу отдаётся снимок счётчиков.
+ */
+function replay(run: RunRow, actions: RunAction[]): AnyRunState {
+  let initial: AnyRunState;
   try {
-    initial = JSON.parse(run.initial_state) as GameState;
+    initial = parseRunState(JSON.parse(run.initial_state));
   } catch {
     fail(500, 'run_corrupt', 'Повреждённое поле');
   }
   try {
-    return applyActions(initial, actions);
+    return replayRun(initial, actions);
   } catch (error) {
     if (error instanceof RuleError) fail(422, 'invalid_actions', error.message);
     fail(422, 'invalid_actions', 'Ходы не соответствуют правилам');
@@ -546,14 +560,16 @@ app.post('/api/run/start', async (c) => {
     const stored = Number(previous?.seed);
     if (Number.isFinite(stored) && stored >= 0) seed = Math.floor(stored) >>> 0;
   }
-  // Кампания и режимы с уровнем генерируются по-разному: у «Парковки» и «Гонок»
-  // свой генератор с отбором расстановки по полосе сложности режима.
+  // Генератор свой у каждого режима: кампания и «Гонки» отбирают расстановку по
+  // полосе сложности, «Парковка» это головоломка, собранная из решённой позиции.
   const initial =
-    mode === 'campaign'
-      ? createCampaignLevel(level, seed)
-      : mode === 'endless'
-        ? createEndlessRun(seed)
-        : createSpecialLevel(mode, level, seed);
+    mode === 'jam'
+      ? createJamPuzzle(level, seed)
+      : mode === 'campaign'
+        ? createCampaignLevel(level, seed)
+        : mode === 'endless'
+          ? createEndlessRun(seed)
+          : createSpecialLevel(mode, level, seed);
   const id = crypto.randomUUID();
   const now = nowMs();
 
@@ -569,6 +585,38 @@ app.post('/api/run/start', async (c) => {
   return c.json({ resumed: false, run: serializeRun(run) });
 });
 
+/**
+ * Подсказка в «Парковке». Сервер знает след перемешивания, поэтому отдаёт ход,
+ * который точно ведёт к решению, а не догадку клиента. Клиент следа не видит:
+ * serializeRun вырезает его, иначе подсказка была бы бесплатной.
+ *
+ * Подсказка платная: перед запросом клиент покупает её через /api/bonus/use, а
+ * здесь сервер сверяет запись награды по позиции журнала.
+ */
+app.post('/api/run/:id/hint', async (c) => {
+  const authCtx = auth(c);
+  const run = await requireOwnRun(c.env, c.req.param('id'), authCtx.user.id);
+  if (run.mode !== 'jam') fail(400, 'hint_not_supported', 'Подсказка на сервере нужна только в «Парковке»');
+  if (run.status !== 'active') fail(409, 'run_finished', 'Забег уже завершён');
+
+  const body = await readJson(c);
+  const incoming = Array.isArray(body.actions) ? parseActions(body.actions, run.mode) : safeParseActions(run.actions);
+  const stored = safeParseActions(run.actions);
+  if (!isPrefix(stored, incoming)) {
+    fail(409, 'actions_conflict', 'История ходов изменилась не по правилам');
+  }
+
+  const grants = await grantsForRun(c.env, run.id);
+  const paid = grants.some((grant) => grant.kind === 'hint' && grant.action_index === incoming.length);
+  if (!paid) fail(402, 'hint_not_paid', 'Подсказка не оплачена');
+
+  const state = replay(run, incoming);
+  if (!isJamState(state)) fail(500, 'run_corrupt', 'Поле «Парковки» повреждено');
+  const move = jamHint(state);
+  if (!move) fail(409, 'no_hint', 'Полезного хода не видно: попробуйте разобрать пробку с другого края');
+  return c.json({ move, parked: state.score, total: state.pieces.length, movesLeft: Math.max(0, state.budget - state.moves) });
+});
+
 app.get('/api/run/:id', async (c) => {
   const authCtx = auth(c);
   const run = await requireOwnRun(c.env, c.req.param('id'), authCtx.user.id);
@@ -580,26 +628,26 @@ async function saveActions(c: Context<AppEnv>, user: UserRow, runId: string) {
   const run = await requireOwnRun(c.env, runId, user.id);
   if (run.status !== 'active') fail(409, 'run_finished', 'Этот забег уже завершён');
 
-  const incoming = parseActions(body.actions);
+  const incoming = parseActions(body.actions, run.mode);
   const stored = safeParseActions(run.actions);
   if (!isPrefix(incoming, stored) && !isPrefix(stored, incoming)) {
     fail(409, 'actions_conflict', 'История ходов изменилась не по правилам');
   }
 
-  const state = replay(run, incoming);
+  const snapshot = snapshotOf(replay(run, incoming));
   const now = nowMs();
   const result = await c.env.DB.prepare(
     `UPDATE runs SET actions = ?, moves = ?, score = ?, updated_at = ?
      WHERE id = ? AND status = 'active' AND actions = ?`,
   )
-    .bind(JSON.stringify(incoming), state.moves, state.score, now, run.id, run.actions)
+    .bind(JSON.stringify(incoming), snapshot.moves, snapshot.score, now, run.id, run.actions)
     .run();
 
   if (Number(result.meta?.changes ?? 0) === 0) {
     fail(409, 'save_conflict', 'Партия изменилась на другом устройстве');
   }
 
-  return { ok: true, saved: incoming.length, moves: state.moves, score: state.score };
+  return { ok: true, saved: incoming.length, moves: snapshot.moves, score: snapshot.score };
 }
 
 app.post('/api/run/:id/save', async (c) => {
@@ -625,13 +673,14 @@ app.post('/api/run/:id/finish', async (c) => {
   }
 
   const body = await readJson(c);
-  const actions = parseActions(body.actions);
+  const actions = parseActions(body.actions, run.mode);
   const stored = safeParseActions(run.actions);
   if (!isPrefix(stored, actions) && !isPrefix(actions, stored)) {
     fail(409, 'actions_conflict', 'История ходов не совпадает');
   }
 
   const state = replay(run, actions);
+  const snapshot = snapshotOf(state);
 
   // Каждый применённый бонус должен быть оплачен/получен за рекламу заранее.
   const grants = await grantsForRun(c.env, run.id);
@@ -654,7 +703,7 @@ app.post('/api/run/:id/finish', async (c) => {
   const now = nowMs();
   let user = await refreshLives(c.env, authCtx.user, now);
   const outcome: 'won' | 'lost' | 'quit' =
-    state.status === 'won' ? 'won' : state.status === 'lost' ? 'lost' : 'quit';
+    snapshot.status === 'won' ? 'won' : snapshot.status === 'lost' ? 'lost' : 'quit';
 
   let reward = 0;
   let levelUp = false;
@@ -699,12 +748,12 @@ app.post('/api/run/:id/finish', async (c) => {
       livesAtAfter = next.livesAt;
     }
   } else {
-    if (state.score > user.endless_best) {
+    if (snapshot.score > user.endless_best) {
       newBest = true;
-      bestAfter = state.score;
-      bestTierAfter = state.tier;
-      bestMovesAfter = state.moves;
-      reward = endlessCoinReward(state.score);
+      bestAfter = snapshot.score;
+      bestTierAfter = snapshot.tier;
+      bestMovesAfter = snapshot.moves;
+      reward = endlessCoinReward(snapshot.score);
     }
     if (outcome === 'lost') {
       const next = loseLife(user.lives, user.lives_at, now);
@@ -722,16 +771,18 @@ app.post('/api/run/:id/finish', async (c) => {
     outcome,
     mode: run.mode,
     level: run.level,
-    score: state.score,
-    moves: state.moves,
+    score: snapshot.score,
+    moves: snapshot.moves,
     coinsEarned: reward,
     levelUp,
     nextLevel: levelAfter,
     maxLevel: maxLevelAfter,
     lives: livesAfter,
-    capturedBy: state.capturedBy ?? null,
+    capturedBy: snapshot.capturedBy ?? null,
+    // В «Парковке» конца фигуры не бывает: там причина - кончившийся бюджет ходов.
+    reason: isJamState(state) ? state.lastEvent ?? '' : '',
     newBest,
-    bestScore: run.mode === 'endless' ? Math.max(user.endless_best, state.score) : null,
+    bestScore: run.mode === 'endless' ? Math.max(user.endless_best, snapshot.score) : null,
     endlessUnlockedNow,
   };
 

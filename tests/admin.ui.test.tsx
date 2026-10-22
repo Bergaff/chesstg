@@ -290,7 +290,7 @@ describe('админка', () => {
     expect(screen.getByText('тяжело')).toBeTruthy();
     expect(screen.getByText('край')).toBeTruthy();
     const note = screen.getByText((_content, element) => element?.classList.contains('adm-stats-note') === true);
-    expect(note.textContent).toContain('уровней с тупиками 1');
+    expect(note.textContent).toContain('уровней с провалами 1');
     expect(note.textContent).toContain('уровней с долей побед ниже 25% 1');
     expect(note.textContent).toContain('край прохождения уровень 2');
   });

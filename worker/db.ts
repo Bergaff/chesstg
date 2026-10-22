@@ -248,6 +248,14 @@ export function serializeRun(run: RunRow) {
   } catch {
     fail(500, 'run_corrupt', 'Повреждённые данные забега');
   }
+  // След перемешивания «Парковки» решает уровень целиком: клиенту он не
+  // показываем, иначе подсказка становится бесплатной.
+  if (initial && typeof initial === 'object' && 'mode' in initial && (initial as { mode?: string }).mode === 'jam') {
+    const { scramble: _scramble, ...jamPublic } = initial as Record<string, unknown>;
+    void _scramble;
+    initial = jamPublic;
+  }
+
   return {
     id: run.id,
     mode: run.mode,
