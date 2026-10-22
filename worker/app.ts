@@ -49,18 +49,19 @@ import {
   activeRuns,
   getOrCreateUser,
   getRun,
-  modeProgress,
-  parseModeLevels,
-  serializeModeLevels,
   getUserById,
   grantsForRun,
+  hasModeLevels,
+  modeProgress,
   ownedSkins,
+  parseModeLevels,
   publicConfig,
+  REFERRAL_BONUS,
   refreshLives,
   requireOwnRun,
+  serializeModeLevels,
   serializeRun,
   toProfile,
-  REFERRAL_BONUS,
 } from './db';
 import { fail, HttpError, isPrefix, parseActions, parseRunMode, parseStartOptions, readJson, nowMs } from './http';
 import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment } from './payments';
@@ -497,6 +498,18 @@ app.post('/api/run/start', async (c) => {
       mode === 'endless' ? 'endless_locked' : 'mode_locked',
       `Режим «${modeDef(mode).name}» откроется на ${modeGate(mode)} уровне кампании`,
       { mode, unlockAtLevel: modeGate(mode) },
+    );
+  }
+
+  // «Парковка» и «Гонки» помнят уровень только в колонке mode_levels. Без
+  // миграции 0004 забег всё равно не сохранить: финиш падал бы на каждом
+  // уровне, поэтому режим не пускаем дальше проверки.
+  if (isLevelMode(mode) && mode !== 'campaign' && !(await hasModeLevels(c.env))) {
+    fail(
+      503,
+      'db_migration_required',
+      'Прогресс режима некуда сохранять: примените миграцию 0004_mode_levels.sql в SQL консоли D1',
+      { migration: '0004_mode_levels.sql' },
     );
   }
 

@@ -178,6 +178,32 @@ export async function getOrCreateUser(
   return { user, created: true };
 }
 
+/**
+ * Есть ли в базе колонка `users.mode_levels` (миграция 0004). Результат
+ * кэшируется на изолятор на минуту: проверка это один дешёвый PRAGMA, а
+ * поднимать забег без куда сохранять прогресс смысла нет.
+ */
+let modeLevelsProbe: { at: number; present: boolean } | null = null;
+
+export async function hasModeLevels(env: WorkerEnv): Promise<boolean> {
+  const now = Date.now();
+  if (modeLevelsProbe && now - modeLevelsProbe.at < 60_000) return modeLevelsProbe.present;
+  let present = false;
+  try {
+    const info = await env.DB.prepare('PRAGMA table_info(users)').all<{ name: string }>();
+    present = (info.results ?? []).some((col) => col.name === 'mode_levels');
+  } catch {
+    present = false;
+  }
+  modeLevelsProbe = { at: now, present };
+  return present;
+}
+
+/** Только для тестов: сбросить кэш проверки колонок. */
+export function resetModeLevelsProbe(): void {
+  modeLevelsProbe = null;
+}
+
 /** Пересчитывает жизни с учётом времени и сохраняет, если что-то изменилось. */
 export async function refreshLives(env: WorkerEnv, user: UserRow, now = Date.now()): Promise<UserRow> {
   const lives = materializeLives(user.lives, user.lives_at, now);
