@@ -28,7 +28,11 @@
     "ALLOW_GUESTS": "true",
     "DEV_MODE": "false",
     "ADSGRAM_SRC": "https://sad.adsgram.ai/js/sad.min.js",
-    "ADSGRAM_BLOCK_ID": ""
+    "ADSGRAM_BLOCK_ID": "",
+    // Вечные сердца для проверки: Telegram id через запятую. Держим в репозитории,
+    // потому что `wrangler deploy` затирает переменные, заданные только в панели.
+    // Список даёт только сердца: монеты, уровень и остальной прогресс пишутся как обычно.
+    "QA_LIVES_IDS": "369330135, 6856213029"
   },
   "observability": {
     "enabled": true

@@ -347,13 +347,25 @@ describe('админка', () => {
     expect(await screen.findByText('Лаборатория расстановок')).toBeTruthy();
     expect(screen.getByText('Запустить разбор')).toBeTruthy();
     expect(screen.getByText('Сохранённые отчёты')).toBeTruthy();
-    // Прогоны это часть лаборатории: три карточки, по одной на каждый режим.
+    // Прогоны это часть лаборатории, и окно у них одно: вкладки переключают
+    // таблицу и подпись запуска, а не плодят карточки.
     expect(screen.getByText('Прогоны: кампания, парковка, гонки')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Диагональ' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Парковка' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Гонки' })).toBeTruthy();
     expect(screen.getByText('Кампания: диагональ только бить или свободно')).toBeTruthy();
-    expect(screen.getByText('Парковка: сложность и реиграбельность')).toBeTruthy();
-    expect(screen.getByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Сравнить диагональ' })).toBeTruthy();
+    // Две другие таблицы скрыты, пока на них не перешли: окон больше одного нет.
+    expect(screen.queryByText('Парковка: сложность и реиграбельность')).toBeNull();
+    expect(screen.queryByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Парковка' }));
+    expect(screen.getByText('Парковка: сложность и реиграбельность')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Замерить генератор (7)' })).toBeTruthy();
+    expect(screen.queryByText('Кампания: диагональ только бить или свободно')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Гонки' }));
+    expect(screen.getByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Прогнать гонки (7)' })).toBeTruthy();
     // Списка режимов с галочками больше нет: варианты фиксированы прогонами.
     expect(screen.queryByRole('checkbox', { name: 'Гонки на уклонение' })).toBeNull();
@@ -382,11 +394,13 @@ describe('админка', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
 
     // У боевого режима своя метрика: не доля побед, а длина плана, развилки и
-    // разнообразие расстановок.
+    // разнообразие расстановок. Окно прогонов одно, поэтому сначала вкладка.
+    fireEvent.click(await screen.findByRole('button', { name: 'Парковка' }));
     expect(screen.getByLabelText('Уровни для «Парковки» и «Гонок»')).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Сверх бюджета' })).toBeTruthy();
-    // Колонка реиграбельности есть и в кампании, и в парковке: проверяем обе.
-    expect(screen.getAllByRole('columnheader', { name: 'Реиграбельность' }).length).toBe(2);
+    // Таблица одна на все прогоны: колонка реиграбельности встречается один раз,
+    // а не по разу на каждую карточку.
+    expect(screen.getAllByRole('columnheader', { name: 'Реиграбельность' })).toHaveLength(1);
     expect(screen.getByRole('columnheader', { name: 'Развилка' })).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Прощение' })).toBeTruthy();
     // Два уровня и минимум досок: прогон обязан закончиться внутри теста, иначе
@@ -408,6 +422,7 @@ describe('админка', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
     fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Прогнать гонки (1)' }));

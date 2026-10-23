@@ -14,9 +14,11 @@ import { Panel, StatusLine, Table, formatPercent } from '../ui';
 import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
 
 /**
- * Лаборатория прогонов.
+ * Лаборатория прогонов: одно окно, три прогона.
  *
- * Три карточки - по одной на вопрос, который нельзя задать одной расстановкой:
+ * Вкладки переключают то, что показано в таблице, и меняют подпись запуска.
+ * Данные каждого прогона живут отдельно, поэтому результат предыдущего не
+ * теряется, пока считаешь следующий, и между ними можно ходить туда-сюда.
  *
  * 1. «Кампания»: что меняет право вставать на пустую диагональ. Те же доски,
  *    два варианта правил, и мы смотрим, где задача интереснее.
@@ -24,12 +26,13 @@ import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
  *    выбора. Победа тут тривиальна (план есть почти всегда), поэтому меряется
  *    длина плана, развилки на нём и отличия расстановок.
  * 3. «Гонки»: сколько ходов партия остаётся решаемой. Игрок заперт в полосе из
- *    двух нижних рядов, и финал забега - позиция, где от фигуры не уйти. Это и
- *    есть «до нерешаемой ситуации»: её перебирает `isDoomed`, а не эвристика.
+ *    двух нижних рядов, и финал забега - позиция, где от фигуры не уйти.
  *
- * Всё считается в воркере (см. `variantsClient`): перебор на каждый ход
- * короля занимает секунды на доску, и на главном потоке вкладка бы встала.
+ * Всё считается в воркере (см. `variantsClient`): перебор на каждый ход короля
+ * занимает секунды на доску, и на главном потоке вкладка бы встала.
  */
+
+type SuiteId = 'diagonal' | 'jam' | 'race';
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
@@ -48,42 +51,71 @@ const DIAGONAL_HEAD = [
   'Оценка',
   'Шаги',
   'Взятий',
-  'Ушло',
   'Выбор',
-  'Форс',
   'Разных досок',
   'Отличие соседних',
   'Реиграбельность',
 ];
 
+interface SuiteMeta {
+  /** Подпись вкладки. */
+  tab: string;
+  /** Заголовок прогона в шапке окна. */
+  title: string;
+  /** Что меряем и как это читать - коротко, по одной строке. */
+  note: string;
+  /** Подпись кнопки запуска. */
+  run: string;
+  /** Сноска под таблицей: формулы сводных индексов. */
+  footnote: string;
+}
+
+const SUITE: Record<SuiteId, SuiteMeta> = {
+  diagonal: {
+    tab: 'Диагональ',
+    title: 'Кампания: диагональ только бить или свободно',
+    note: 'Один генератор, две версии права на пустую диагональ. Если «только бить» не хуже по цифрам, правило можно оставлять как есть.',
+    run: 'Сравнить диагональ',
+    footnote:
+      '«Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10% отсутствия безальтернативных ходов. «Выбор» - средняя развилка на пути решения.',
+  },
+  jam: {
+    tab: 'Парковка',
+    title: 'Парковка: сложность и реиграбельность',
+    note: 'Головоломка без финиша по времени: важна длина плана, число развилок и различие досок. «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема: низкое значит «один неверный ход, и всё».',
+    run: `Замерить генератор`,
+    footnote:
+      '«Запас» - сколько ходов бюджета остаётся после плана: бюджет около двух длин плана, поэтому различают уровни именно план и запас, а не прощение.',
+  },
+  race: {
+    tab: 'Гонки',
+    title: 'Гонки: сколько можно играть до нерешаемой позиции',
+    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), сдвиг поля его не убивает. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти.`,
+    run: 'Прогнать гонки',
+    footnote:
+      '«Решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает, что игрок всегда умирает в позиции, где ходить было некуда.',
+  },
+};
+
+const SUITE_ORDER: SuiteId[] = ['diagonal', 'jam', 'race'];
+
 export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [levels, setLevels] = useState(LEVELS_LADDER);
+  const [active, setActive] = useState<SuiteId>('diagonal');
 
   const [reports, setReports] = useState<VariantReport[]>([]);
-  const [running, setRunning] = useState(false);
-  const [sample, setSample] = useState<{ mode: ModeId; done: number; total: number } | null>(null);
-  const [error, setError] = useState('');
-  const [stopped, setStopped] = useState(false);
-  const [note, setNote] = useState('');
-
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
-  const [jamRunning, setJamRunning] = useState(false);
-  const [jamDone, setJamDone] = useState({ done: 0, total: 0 });
-  const [jamError, setJamError] = useState('');
-
   const [raceRows, setRaceRows] = useState<RaceMeasure[]>([]);
-  const [raceRunning, setRaceRunning] = useState(false);
-  const [raceDone, setRaceDone] = useState({ done: 0, total: 0 });
-  const [raceError, setRaceError] = useState('');
+
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [error, setError] = useState('');
+  const [note, setNote] = useState('');
 
   const busyRef = useRef(false);
   const suiteRef = useRef<{ cancel: () => void } | null>(null);
-  const jamBusyRef = useRef(false);
-  const jamSuiteRef = useRef<{ cancel: () => void } | null>(null);
-  const raceBusyRef = useRef(false);
-  const raceSuiteRef = useRef<{ cancel: () => void } | null>(null);
   const stopRef = useRef(false);
 
   const parsedLevels = useMemo(
@@ -97,106 +129,101 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   );
 
   const byMode = useMemo(() => new Map(reports.map((report) => [report.mode, report])), [reports]);
+  const conclusion = useMemo(() => diagonalConclusion(reports), [reports]);
+  const meta = SUITE[active];
 
-  const runDiagonal = () => {
+  /** Один прогон за раз: кнопка блокируется, а результат предыдущего остаётся. */
+  function start(run: () => Promise<void>) {
     if (busyRef.current) return;
     busyRef.current = true;
     stopRef.current = false;
     setRunning(true);
     setError('');
     setNote('');
-    setStopped(false);
-    setReports([]);
-    setSample({ mode: DIAGONAL_PAIR[0], done: 0, total: samples });
-    const suite = runVariantSuite(
-      { modes: DIAGONAL_PAIR, level, samples, seed },
-      {
-        onSample: (mode, done, total) => setSample({ mode, done, total }),
-        onReport: (item) => setReports((current) => [...current, item]),
-      },
-    );
-    suiteRef.current = suite;
-    suite.done
+    void run()
       .catch((runError: unknown) => {
         if (!stopRef.current) setError(runError instanceof Error ? runError.message : 'Прогон не удался');
       })
       .finally(() => {
         setRunning(false);
+        setProgress('');
         busyRef.current = false;
         suiteRef.current = null;
-        setSample(null);
       });
-  };
+  }
 
-  const runJam = () => {
-    if (jamBusyRef.current || parsedLevels.length === 0) return;
-    jamBusyRef.current = true;
-    stopRef.current = false;
-    setJamRunning(true);
-    setJamError('');
-    setJamRows([]);
-    setJamDone({ done: 0, total: parsedLevels.length });
-    const suite = runJamSuite(
-      { levels: parsedLevels, samples, seed },
-      {
-        onRow: (row, done, total) => {
-          setJamRows((current) => [...current, row]);
-          setJamDone({ done, total });
+  const runDiagonal = () =>
+    start(async () => {
+      setReports([]);
+      setProgress(`${modeDef(DIAGONAL_PAIR[0]).name}: 0 из ${samples}`);
+      const suite = runVariantSuite(
+        { modes: DIAGONAL_PAIR, level, samples, seed },
+        {
+          onSample: (mode, done, total) => setProgress(`${modeDef(mode).name}: ${done} из ${total}`),
+          onReport: (item) => setReports((current) => [...current, item]),
         },
-      },
-    );
-    jamSuiteRef.current = suite;
-    suite.done
-      .catch((runError: unknown) => {
-        if (!stopRef.current) setJamError(runError instanceof Error ? runError.message : 'Замер не удался');
-      })
-      .finally(() => {
-        setJamRunning(false);
-        jamBusyRef.current = false;
-        jamSuiteRef.current = null;
-      });
-  };
+      );
+      suiteRef.current = suite;
+      await suite.done;
+    });
 
-  const runRace = () => {
-    if (raceBusyRef.current || parsedLevels.length === 0) return;
-    raceBusyRef.current = true;
-    stopRef.current = false;
-    setRaceRunning(true);
-    setRaceError('');
-    setRaceRows([]);
-    setRaceDone({ done: 0, total: parsedLevels.length });
-    const suite = runRaceSuite(
-      { levels: parsedLevels, samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))), seed },
-      {
-        onRow: (row, done, total) => {
-          setRaceRows((current) => [...current, row]);
-          setRaceDone({ done, total });
+  const runJam = () =>
+    start(async () => {
+      if (parsedLevels.length === 0) return;
+      setJamRows([]);
+      setProgress(`Уровень 0 из ${parsedLevels.length}`);
+      const suite = runJamSuite(
+        { levels: parsedLevels, samples, seed },
+        {
+          onRow: (row, done, total) => {
+            setJamRows((current) => [...current, row]);
+            setProgress(`Уровень ${done} из ${total}`);
+          },
         },
-      },
-    );
-    raceSuiteRef.current = suite;
-    suite.done
-      .catch((runError: unknown) => {
-        if (!stopRef.current) setRaceError(runError instanceof Error ? runError.message : 'Прогон не удался');
-      })
-      .finally(() => {
-        setRaceRunning(false);
-        raceBusyRef.current = false;
-        raceSuiteRef.current = null;
-      });
+      );
+      suiteRef.current = suite;
+      await suite.done;
+    });
+
+  const runRace = () =>
+    start(async () => {
+      if (parsedLevels.length === 0) return;
+      setRaceRows([]);
+      setProgress(`Уровень 0 из ${parsedLevels.length}`);
+      const suite = runRaceSuite(
+        { levels: parsedLevels, samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))), seed },
+        {
+          onRow: (row, done, total) => {
+            setRaceRows((current) => [...current, row]);
+            setProgress(`Уровень ${done} из ${total}`);
+          },
+        },
+      );
+      suiteRef.current = suite;
+      await suite.done;
+    });
+
+  const runActive = () => {
+    if (active === 'diagonal') runDiagonal();
+    else if (active === 'jam') runJam();
+    else runRace();
   };
 
-  const stopAll = () => {
+  const stop = () => {
     stopRef.current = true;
-    setStopped(true);
     suiteRef.current?.cancel();
-    jamSuiteRef.current?.cancel();
-    raceSuiteRef.current?.cancel();
   };
 
-  const conclusion = useMemo(() => diagonalConclusion(reports), [reports]);
+  const count = active === 'diagonal' ? reports.length : active === 'jam' ? jamRows.length : raceRows.length;
+  const canRun = active === 'diagonal' || parsedLevels.length > 0;
 
-  const copy = async (text: string) => {
+  const copy = async () => {
+    const text =
+      active === 'diagonal'
+        ? diagonalText(reports, { level, samples, seed })
+        : active === 'jam'
+          ? jamText(jamRows, { samples, seed })
+          : raceText(raceRows, { samples, seed });
     const ok = await writeClipboard(text);
     setNote(ok ? 'Скопировано. Вставляй прямо в чат или в `docs/modes.md`.' : 'Буфер обмена недоступен, выдели текст вручную.');
   };
@@ -204,7 +231,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   return (
     <Panel
       title="Прогоны: кампания, парковка, гонки"
-      note={`Уровень ${level} задаёт доску и число фигур для кампании; «Парковка» и «Гонки» считают свою лестницу уровней. 1000 досок на вариант это секунды, перебор «Гонок» - десятки секунд, поэтому всё в воркере`}
+      note={`Уровень ${level} задаёт доску и число фигур для кампании, «Парковка» и «Гонки» считают свою лестницу уровней. Перебор живёт в воркере, поэтому вкладка не замирает`}
     >
       <div className="adm-row-actions">
         <label className="adm-field is-inline">
@@ -218,6 +245,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             onChange={(event) =>
               setSamples(Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, Number(event.target.value) || MIN_SAMPLES)))
             }
+            disabled={running}
           />
         </label>
         <label className="adm-field is-inline">
@@ -228,6 +256,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             max={4294967295}
             value={seed}
             onChange={(event) => setSeed(Math.abs(Number(event.target.value)) || 1)}
+            disabled={running}
           />
         </label>
         <label className="adm-field is-inline">
@@ -237,252 +266,256 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             value={levels}
             onChange={(event) => setLevels(event.target.value)}
             placeholder={LEVELS_LADDER}
-            disabled={jamRunning || raceRunning}
+            disabled={running}
           />
         </label>
-      </div>
-
-      <div className="adm-checks">
         {SAMPLE_PRESETS.map((value) => (
           <button
             key={value}
             type="button"
             className={`adm-chip${samples === value ? ' is-active' : ''}`}
             onClick={() => setSamples(value)}
-            disabled={running || jamRunning || raceRunning}
+            disabled={running}
           >
             {value}
           </button>
         ))}
-        {(running || jamRunning || raceRunning) && (
-          <button type="button" className="btn btn-quiet" onClick={stopAll}>
-            Остановить
-          </button>
-        )}
       </div>
 
-      {note && <StatusLine kind="ok">{note}</StatusLine>}
-
       <section className="adm-suite">
-        <div className="adm-suite-head">
-          <h3 className="adm-suite-title">Кампания: диагональ только бить или свободно</h3>
-          <p className="adm-note">
-            Один и тот же генератор, две версии права на пустую диагональ. Смотрим длину решения, развилки и
-            реиграбельность: если «диагональ только бить» не хуже, правило можно оставить как есть.
-          </p>
+        <div className="adm-suite-tabs">
+          <span className="adm-label">Прогон</span>
+          {SUITE_ORDER.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`adm-chip${active === id ? ' is-active' : ''}`}
+              onClick={() => setActive(id)}
+              aria-pressed={active === id}
+            >
+              {SUITE[id].tab}
+            </button>
+          ))}
+          {running && (
+            <button type="button" className="btn btn-quiet" onClick={stop}>
+              Остановить
+            </button>
+          )}
         </div>
+
+        <div className="adm-suite-head">
+          <h3 className="adm-suite-title">{meta.title}</h3>
+          <p className="adm-note">{meta.note}</p>
+        </div>
+
         <div className="adm-row-actions">
-          <button type="button" className="btn btn-outline" onClick={runDiagonal} disabled={running}>
-            {running && sample ? `${modeDef(sample.mode).name}: ${sample.done} из ${sample.total}` : 'Сравнить диагональ'}
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={runActive}
+            disabled={running || !canRun}
+          >
+            {running && progress
+              ? progress
+              : `${meta.run}${active === 'diagonal' ? '' : ` (${parsedLevels.length})`}`}
           </button>
-          {reports.length > 0 && (
-            <button type="button" className="btn btn-quiet" onClick={() => void copy(diagonalText(reports, { level, samples, seed }))}>
+          {count > 0 && (
+            <button type="button" className="btn btn-quiet" onClick={() => void copy()}>
               Скопировать
             </button>
           )}
         </div>
+
         {error && <StatusLine kind="error">{error}</StatusLine>}
-        <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона вариантов">
-          {DIAGONAL_PAIR.map((mode) => {
-            const item = byMode.get(mode);
-            const geo = boardForMode(mode, level);
-            if (!item) {
-              return (
-                <tr key={mode}>
-                  <td>{modeDef(mode).name}</td>
-                  <td className="is-mono">
-                    {geo.width}×{geo.height}
-                  </td>
-                  <td colSpan={DIAGONAL_HEAD.length - 2} className="adm-muted">
-                    {running ? 'считаем' : 'нет данных'}
-                  </td>
-                </tr>
-              );
-            }
-            return (
-              <tr key={mode}>
-                <td>{modeDef(mode).name}</td>
-                <td className="is-mono">
-                  {geo.width}×{geo.height}
-                </td>
-                <td>{formatPercent(item.solvableShare, 1)}</td>
-                <td>{item.avgScore}</td>
-                <td>{item.avgSteps.toFixed(2)}</td>
-                <td>{item.avgCaptures.toFixed(2)}</td>
-                <td>{item.avgEscapes.toFixed(2)}</td>
-                <td>{item.avgChoiceSteps.toFixed(2)}</td>
-                <td>{formatPercent(item.forcedShare, 0)}</td>
-                <td>
-                  {item.uniqueLayouts} из {item.samples}
-                  {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
-                </td>
-                <td>{formatPercent(item.layoutDistance, 1)}</td>
-                <td>{item.replayIndex}</td>
-              </tr>
-            );
-          })}
-        </Table>
-        {conclusion && <p className="adm-suite-note">{conclusion}</p>}
-        {reports.length > 0 && <pre className="adm-code adm-copyable">{diagonalText(reports, { level, samples, seed })}</pre>}
-      </section>
+        {note && <StatusLine kind="ok">{note}</StatusLine>}
 
-      <section className="adm-suite">
-        <div className="adm-suite-head">
-          <h3 className="adm-suite-title">Парковка: сложность и реиграбельность</h3>
-          <p className="adm-note">
-            Головоломка без финиша по времени: важна длина плана, число развилок на нём и то, насколько генератор
-            даёт разные доски. «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема: низкое
-            прощение значит «один неверный ход, и всё», то есть головоломку заучивают, а не решают.
-          </p>
-        </div>
-        <div className="adm-row-actions">
-          <button type="button" className="btn btn-outline" onClick={runJam} disabled={jamRunning || parsedLevels.length === 0}>
-            {jamRunning ? `Уровень ${jamDone.done} из ${jamDone.total || parsedLevels.length}` : `Замерить генератор (${parsedLevels.length})`}
-          </button>
-          {jamRows.length > 0 && (
-            <button type="button" className="btn btn-quiet" onClick={() => void copy(jamText(jamRows, { samples, seed }))}>
-              Скопировать
-            </button>
-          )}
-        </div>
-        {jamError && <StatusLine kind="error">{jamError}</StatusLine>}
-        {jamRows.length > 0 && <pre className="adm-code adm-copyable">{jamText(jamRows, { samples, seed })}</pre>}
-        <Table
-          head={[
-            'Уровень',
-            'Поле',
-            'Фигур',
-            'План, ходы',
-            'Разброс',
-            'Решаемых',
-            'Сверх бюджета',
-            'Развилка',
-            'Прощение',
-            'Запас',
-            'Уникальных',
-            'Отличие досок',
-            'Сложность',
-            'Реиграбельность',
-          ]}
-          empty="Замер берёт расстановки тем же генератором, что выдаёт бою"
-        >
-          {parsedLevels.map((value) => {
-            const item = jamRows.find((row) => row.level === value);
-            if (!item) {
-              return (
-                <tr key={value}>
-                  <td>{value}</td>
-                  <td colSpan={13} className="adm-muted">
-                    {jamRunning ? 'считаем' : 'нет данных'}
-                  </td>
-                </tr>
-              );
-            }
-            return (
-              <tr key={value}>
-                <td>{value}</td>
-                <td className="is-mono">
-                  {item.width}×{item.height}
-                </td>
-                <td>{item.avgPieces}</td>
-                <td className="is-mono">{item.avgCost}</td>
-                <td className="is-mono">
-                  {item.minCost}-{item.maxCost}
-                </td>
-                <td>{formatPercent(item.solvedShare, 1)}</td>
-                <td className={item.overBudget > 0 ? 'is-warn' : undefined}>{item.overBudget}</td>
-                <td>{item.avgChoice}</td>
-                <td>{formatPercent(item.forgiveness, 0)}</td>
-                <td className="is-mono">
-                  {item.slackAvg} из {item.budgetAvg}
-                </td>
-                <td>
-                  {item.uniqueLayouts} из {item.samples}
-                </td>
-                <td>{formatPercent(item.layoutDistance, 1)}</td>
-                <td>{item.difficulty}</td>
-                <td>{item.replayIndex}</td>
-              </tr>
-            );
-          })}
-        </Table>
-      </section>
+        {active === 'diagonal' && <DiagonalTable reports={reports} byMode={byMode} level={level} running={running} />}
+        {active === 'jam' && <JamTable rows={jamRows} levels={parsedLevels} running={running} />}
+        {active === 'race' && <RaceTable rows={raceRows} levels={parsedLevels} running={running} />}
 
-      <section className="adm-suite">
-        <div className="adm-suite-head">
-          <h3 className="adm-suite-title">Гонки: сколько можно играть до нерешаемой позиции</h3>
-          <p className="adm-note">
-            Король заперт в двух нижних рядах ({RACE_MIN_WIDTH}×{RACE_ROWS} на старте, рост вширь до {RACE_WIDTH}{' '}
-            колонок), сдвиг поля его не убивает. Прогон играет жадным ботом и на каждом ходе перебирает ответы фигур:
-            «до нерешаемой» - номер хода, после которого от фигуры уже не уйти ни одним ходом.
-          </p>
-        </div>
-        <div className="adm-row-actions">
-          <button type="button" className="btn btn-outline" onClick={runRace} disabled={raceRunning || parsedLevels.length === 0}>
-            {raceRunning ? `Уровень ${raceDone.done} из ${raceDone.total || parsedLevels.length}` : `Прогнать гонки (${parsedLevels.length})`}
-          </button>
-          {raceRows.length > 0 && (
-            <button type="button" className="btn btn-quiet" onClick={() => void copy(raceText(raceRows, { samples, seed }))}>
-              Скопировать
-            </button>
-          )}
-        </div>
-        {raceError && <StatusLine kind="error">{raceError}</StatusLine>}
-        {raceRows.length > 0 && <pre className="adm-code adm-copyable">{raceText(raceRows, { samples, seed })}</pre>}
-        <Table
-          head={[
-            'Уровень',
-            'Ширина в конце',
-            'Ходов до нерешаемой',
-            'Разброс',
-            'Партия, ходов',
-            'Решаемых до конца',
-            'Взятий',
-            'Чем кончились',
-          ]}
-          empty="Прогон считает перебором: ход, после которого любой ответ фигур ведёт к смерти"
-        >
-          {parsedLevels.map((value) => {
-            const item = raceRows.find((row) => row.level === value);
-            if (!item) {
-              return (
-                <tr key={value}>
-                  <td>{value}</td>
-                  <td colSpan={7} className="adm-muted">
-                    {raceRunning ? 'считаем' : 'нет данных'}
-                  </td>
-                </tr>
-              );
-            }
-            return (
-              <tr key={value}>
-                <td>{value}</td>
-                <td className="is-mono">{item.widthEnd.toFixed(1)}</td>
-                <td className="is-mono">
-                  {item.doomMedian} (в среднем {item.doomAvg.toFixed(1)})
-                </td>
-                <td className="is-mono">
-                  {item.doomMin}-{item.doomMax}
-                </td>
-                <td className="is-mono">
-                  {item.lengthMedian} (в среднем {item.lengthAvg.toFixed(1)})
-                </td>
-                <td>{formatPercent(1 - item.doomShare, 0)}</td>
-                <td>{item.capturesAvg.toFixed(1)}</td>
-                <td className="adm-muted">{causesText(item.causes)}{item.capped > 0 ? `, потолок ${item.capped}` : ''}</td>
-              </tr>
-            );
-          })}
-        </Table>
+        <p className="adm-suite-note">{meta.footnote}</p>
+        {conclusion && active === 'diagonal' && <p className="adm-suite-note">{conclusion}</p>}
+        {count > 0 && (
+          <pre className="adm-code adm-copyable">
+            {active === 'diagonal'
+              ? diagonalText(reports, { level, samples, seed })
+              : active === 'jam'
+                ? jamText(jamRows, { samples, seed })
+                : raceText(raceRows, { samples, seed })}
+          </pre>
+        )}
       </section>
-
-      <p className="adm-note">
-        «Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10%
-        отсутствия безальтернативных ходов. «Ушло» - сколько фигур покинуло поле по пути решения. В гонках
-        «решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает,
-        что игрок всегда умирает в позиции, где ходить было некуда.
-      </p>
     </Panel>
+  );
+}
+
+function DiagonalTable({
+  reports,
+  byMode,
+  level,
+  running,
+}: {
+  reports: VariantReport[];
+  byMode: Map<ModeId, VariantReport>;
+  level: number;
+  running: boolean;
+}): ReactNode {
+  return (
+    <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона вариантов">
+      {DIAGONAL_PAIR.map((mode) => {
+        const item = byMode.get(mode);
+        const geo = boardForMode(mode, level);
+        if (!item) {
+          return (
+            <tr key={mode}>
+              <td>{modeDef(mode).name}</td>
+              <td className="is-mono">
+                {geo.width}×{geo.height}
+              </td>
+              <td colSpan={DIAGONAL_HEAD.length - 2} className="adm-muted">
+                {running ? 'считаем' : 'нет данных'}
+              </td>
+            </tr>
+          );
+        }
+        return (
+          <tr key={mode}>
+            <td>{modeDef(mode).name}</td>
+            <td className="is-mono">
+              {geo.width}×{geo.height}
+            </td>
+            <td>{formatPercent(item.solvableShare, 1)}</td>
+            <td>{item.avgScore}</td>
+            <td>{item.avgSteps.toFixed(2)}</td>
+            <td>{item.avgCaptures.toFixed(2)}</td>
+            <td>{item.avgChoiceSteps.toFixed(2)}</td>
+            <td>
+              {item.uniqueLayouts} из {item.samples}
+              {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
+            </td>
+            <td>{formatPercent(item.layoutDistance, 1)}</td>
+            <td>{item.replayIndex}</td>
+          </tr>
+        );
+      })}
+    </Table>
+  );
+}
+
+function JamTable({ rows, levels, running }: { rows: JamMeasure[]; levels: number[]; running: boolean }): ReactNode {
+  return (
+    <Table
+      head={[
+        'Уровень',
+        'Поле',
+        'Фигур',
+        'План, ходы',
+        'Разброс',
+        'Решаемых',
+        'Сверх бюджета',
+        'Развилка',
+        'Прощение',
+        'Запас',
+        'Уникальных',
+        'Отличие досок',
+        'Сложность',
+        'Реиграбельность',
+      ]}
+      empty="Замер берёт расстановки тем же генератором, что выдаёт бою"
+    >
+      {levels.map((value) => {
+        const item = rows.find((row) => row.level === value);
+        if (!item) {
+          return (
+            <tr key={value}>
+              <td>{value}</td>
+              <td colSpan={13} className="adm-muted">
+                {running ? 'считаем' : 'нет данных'}
+              </td>
+            </tr>
+          );
+        }
+        return (
+          <tr key={value}>
+            <td>{value}</td>
+            <td className="is-mono">
+              {item.width}×{item.height}
+            </td>
+            <td>{item.avgPieces}</td>
+            <td className="is-mono">{item.avgCost}</td>
+            <td className="is-mono">
+              {item.minCost}-{item.maxCost}
+            </td>
+            <td>{formatPercent(item.solvedShare, 1)}</td>
+            <td className={item.overBudget > 0 ? 'is-warn' : undefined}>{item.overBudget}</td>
+            <td>{item.avgChoice}</td>
+            <td>{formatPercent(item.forgiveness, 0)}</td>
+            <td className="is-mono">
+              {item.slackAvg} из {item.budgetAvg}
+            </td>
+            <td>
+              {item.uniqueLayouts} из {item.samples}
+            </td>
+            <td>{formatPercent(item.layoutDistance, 1)}</td>
+            <td>{item.difficulty}</td>
+            <td>{item.replayIndex}</td>
+          </tr>
+        );
+      })}
+    </Table>
+  );
+}
+
+function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: number[]; running: boolean }): ReactNode {
+  return (
+    <Table
+      head={[
+        'Уровень',
+        'Ширина в конце',
+        'Ходов до нерешаемой',
+        'Разброс',
+        'Партия, ходов',
+        'Решаемых до конца',
+        'Взятий',
+        'Чем кончились',
+      ]}
+      empty="Прогон считает перебором: ход, после которого любой ответ фигур ведёт к смерти"
+    >
+      {levels.map((value) => {
+        const item = rows.find((row) => row.level === value);
+        if (!item) {
+          return (
+            <tr key={value}>
+              <td>{value}</td>
+              <td colSpan={7} className="adm-muted">
+                {running ? 'считаем' : 'нет данных'}
+              </td>
+            </tr>
+          );
+        }
+        return (
+          <tr key={value}>
+            <td>{value}</td>
+            <td className="is-mono">{item.widthEnd.toFixed(1)}</td>
+            <td className="is-mono">
+              {item.doomMedian} (в среднем {item.doomAvg.toFixed(1)})
+            </td>
+            <td className="is-mono">
+              {item.doomMin}-{item.doomMax}
+            </td>
+            <td className="is-mono">
+              {item.lengthMedian} (в среднем {item.lengthAvg.toFixed(1)})
+            </td>
+            <td>{formatPercent(1 - item.doomShare, 0)}</td>
+            <td>{item.capturesAvg.toFixed(1)}</td>
+            <td className="adm-muted">
+              {causesText(item.causes)}
+              {item.capped > 0 ? `, потолок ${item.capped}` : ''}
+            </td>
+          </tr>
+        );
+      })}
+    </Table>
   );
 }
 
@@ -557,7 +590,17 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
 
 /** Текст прогона «Гонок»: длина партии до нерешаемой позиции. */
 function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }): string {
-  const head = ['Уровень', 'Старт', 'Ширина в конце', 'До нерешаемой (медиана)', 'среднее', 'разброс', 'Партия (медиана)', 'Взятий', 'Чем кончились'];
+  const head = [
+    'Уровень',
+    'Старт',
+    'Ширина в конце',
+    'До нерешаемой (медиана)',
+    'среднее',
+    'разброс',
+    'Партия (медиана)',
+    'Взятий',
+    'Чем кончились',
+  ];
   const lines = [
     `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда; по ${meta.samples} забегов на уровень, зерно ${meta.seed}`,
     '',
@@ -597,9 +640,7 @@ function diagonalText(
         `${item.avgScore}`,
         item.avgSteps.toFixed(2),
         item.avgCaptures.toFixed(2),
-        item.avgEscapes.toFixed(2),
         item.avgChoiceSteps.toFixed(2),
-        `${(item.forcedShare * 100).toFixed(0)}%`,
         `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
         `${(item.layoutDistance * 100).toFixed(1)}%`,
         `${item.replayIndex}`,
@@ -608,7 +649,7 @@ function diagonalText(
   }
   lines.push('');
   lines.push(
-    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» и «форс» - развилки на пути решения; «реиграбельность» - сводный индекс.',
+    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» - средняя развилка на пути решения; «реиграбельность» - сводный индекс.',
   );
   return lines.join('\n');
 }

@@ -325,8 +325,8 @@ body {
   flex: 0 0 auto;
 }
 
-/* Карточка прогона: заголовок, пояснение, свои кнопки и своя таблица.
-   Рамка одна на всю карточку, чтобы три блока не читались как три колонки. */
+/* Одно окно прогонов: вкладки сверху, дальше заголовок, пояснение, кнопка
+   запуска и таблица того прогона, который выбран. Рамка одна на всё окно. */
 .adm-suite {
   display: flex;
   flex-direction: column;
@@ -335,6 +335,19 @@ body {
   border-radius: 2px;
   padding: 12px 14px 14px;
   background: var(--bg-soft);
+}
+
+.adm-suite-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.adm-suite-tabs .adm-label {
+  margin-right: 2px;
 }
 
 .adm-suite-head {
