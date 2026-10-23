@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   JAM_PIECE_GLYPH,
+  JAM_PIECE_NAME,
   jamAtEdge,
   jamExitMoves,
   jamIsExit,
@@ -125,9 +126,9 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   disabled={!interactive || (!piece && !target)}
                   aria-label={
                     piece
-                      ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${
-                          piece.type === 'rook' ? 'ладья' : piece.type === 'bishop' ? 'слон' : 'конь'
-                        }, клетка ${x + 1}, ${y + 1}${canExit ? ', может уйти с поля' : ''}`
+                      ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${JAM_PIECE_NAME[
+                          piece.type
+                        ].toLowerCase()}, клетка ${x + 1}, ${y + 1}${canExit ? ', может уйти с поля' : ''}`
                       : exitHere
                         ? `клетка ${x + 1}, ${y + 1}: сюда встанет край, фигура уйдёт с поля`
                         : target

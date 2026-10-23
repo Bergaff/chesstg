@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { applyJamAction, createJamPuzzle } from '../src/engine';
 import app from './app';
 import { ADMIN_TABLES, AUTH_TABLES, GAME_TABLES } from './schema';
 import type { WorkerEnv } from './types';
@@ -310,6 +311,258 @@ describe('старт забега', () => {
     const probe = await startRun({ mode: 'endless', repeat: true }, 4242);
     expect(probe.status).toBe(200);
     expect(probe.queries.some((sql) => sql.startsWith('SELECT seed FROM runs'))).toBe(false);
+  });
+});
+
+describe('свежий старт', () => {
+  it('fresh не возвращает активную партию, а закрывает её', async () => {
+    // Кнопка «Начать заново»: игрок уже видел, что это поле не прогрузилось,
+    // и second attempt на той же строке привёл бы к тому же экрану.
+    const initial = {
+      mode: 'campaign',
+      width: 3,
+      height: 4,
+      level: 1,
+      seed: 1,
+      tier: 1,
+      player: { x: 1, y: 0 },
+      enemies: [],
+      moves: 1,
+      score: 0,
+      skips: 2,
+      freeze: 0,
+      shield: 0,
+      status: 'playing',
+    };
+    const probe = await startRun({ mode: 'campaign', fresh: true }, null, {
+      initial_state: JSON.stringify(initial),
+      actions: '[]',
+      mode: 'campaign',
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(false);
+    expect(probe.queries.some((sql) => sql.startsWith('UPDATE runs SET status'))).toBe(true);
+  });
+
+  it('партию с журналом, который движок не проигрывает, закрывает, а не отдаёт', async () => {
+    // Поле подходящей формы, а шаг в журнале текущим правилам не отвечает:
+    // клиент получил бы «поле не загрузилось» и зациклился бы на «Повторить».
+    const probe = await startRun({ mode: 'campaign' }, null, {
+      initial_state: JSON.stringify({
+        mode: 'campaign',
+        width: 3,
+        height: 4,
+        level: 1,
+        seed: 1,
+        tier: 1,
+        player: { x: 1, y: 0 },
+        enemies: [],
+        moves: 1,
+        score: 0,
+        // Пропуски на этом уровне уже израсходованы: шаг журнала движок отвергнет.
+        skips: 2,
+        freeze: 0,
+        shield: 0,
+        status: 'playing',
+      }),
+      actions: JSON.stringify([{ type: 'skip' }]),
+      mode: 'campaign',
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.body.resumed).toBe(false);
+    expect(probe.queries.some((sql) => sql.startsWith('UPDATE runs SET status'))).toBe(true);
+  });
+});
+
+describe('подсказка за монеты', () => {
+  /**
+   * Оплата и запрос подсказки через один фейк базы: строка гранта, записанная
+   * на /api/bonus/use, обязана читаться на /api/run/:id/hint. Тесты движка этого
+   * не покрывают - они зовут jamHint напрямую, минуя списание монет, и в бою
+   * подсказка отвечала 402 «Подсказка не оплачена».
+   */
+  async function hintFlow() {
+    const guest = 'guest:b2d66a3b522c33cca95fb5325813b4f4';
+    const jam = createJamPuzzle(1, 7);
+    const grants: unknown[][] = [];
+    let grantRows: Array<{ kind: string; action_index: number; source: string }> = [];
+    const now = Date.now();
+    const runRow = {
+      id: 'run-1',
+      user_id: guest,
+      mode: 'jam',
+      level: 1,
+      seed: 7,
+      initial_state: JSON.stringify(jam),
+      actions: '[]',
+      moves: 0,
+      score: 0,
+      status: 'active',
+      result: null,
+      finish_id: null,
+      created_at: 0,
+      updated_at: 0,
+      finished_at: null,
+    };
+    const post = async (path: string, body: unknown) => {
+      const statement = (sql: string) => ({
+        bind: (...args: unknown[]) => ({
+          first: async () => {
+            if (sql.startsWith('SELECT 1 FROM users WHERE invite_code')) return null;
+            if (sql.includes('FROM users')) {
+              return {
+                id: guest,
+                tg_id: null,
+                first_name: 'Гость',
+                username: null,
+                is_guest: 1,
+                level: 8,
+                max_level: 8,
+                coins: 100,
+                lives: 5,
+                lives_at: now,
+                endless_best: 0,
+                endless_best_tier: 1,
+                endless_best_moves: 0,
+                ad_free: 0,
+                skins: 'classic',
+                skin: 'classic',
+                inv_hint: 0,
+                inv_freeze: 0,
+                inv_undo: 0,
+                invite_code: 'GUEST12',
+                referred_by: null,
+                created_at: now,
+                updated_at: now,
+                mode_levels: JSON.stringify({ campaign: 8, jam: 1, race: 1 }),
+              };
+            }
+            if (sql.startsWith('SELECT * FROM runs WHERE id = ?')) return runRow;
+            return null;
+          },
+          all: async () => {
+            if (sql.startsWith('SELECT kind, action_index, source FROM grants')) return { results: grantRows };
+            return { results: [] };
+          },
+          run: async () => {
+            if (sql.startsWith('INSERT INTO grants')) {
+              grants.push(args);
+              grantRows = [{ kind: String(args[2]), action_index: Number(args[3]), source: String(args[4]) }];
+            }
+            return { success: true, meta: { changes: 1, last_row_id: 1 } };
+          },
+          batch: async () => [],
+        }),
+      });
+      const db = {
+        prepare: (sql: string) => statement(sql),
+        batch: async () => [],
+      } as unknown as WorkerEnv['DB'];
+      const response = await app.fetch(
+        new Request(`https://pawn.test${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-guest-id': 'b2d66a3b522c33cca95fb5325813b4f4' },
+          body: JSON.stringify(body),
+        }),
+        env({}, { ...configured, ALLOW_GUESTS: 'true', DB: db }),
+        { waitUntil: () => undefined, passThroughOnException: () => undefined, props: {} },
+      );
+      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+    };
+
+    const use = await post('/api/bonus/use', { kind: 'hint', runId: 'run-1', at: 0 });
+    const hint = await post('/api/run/run-1/hint', { actions: [] });
+    return { use, hint, grants };
+  }
+
+  it('выдаёт ход после списания монет', async () => {
+    const { use, hint, grants } = await hintFlow();
+    expect(use.status).toBe(200);
+    expect(grants.length).toBe(1);
+    expect(grants[0][2]).toBe('hint');
+    expect(grants[0][3]).toBe(0);
+    expect(hint.status).toBe(200);
+    const move = hint.body.move as { type?: string; id?: string; to?: { x: number; y: number } } | undefined;
+    expect(move?.type).toBe('piece');
+    expect(typeof move?.id).toBe('string');
+    // Подсказанный ход обязан быть законным в текущем поле: иначе клиент
+    // подсветит клетку, на которую нельзя сходить.
+    const state = createJamPuzzle(1, 7);
+    expect(() => applyJamAction(state, move as never, Error)).not.toThrow();
+    expect(hint.body.total).toBe(state.total);
+  });
+
+  it('без оплаты ход не отдаёт', async () => {
+    const guest = 'guest:b2d66a3b522c33cca95fb5325813b4f4';
+    const now = Date.now();
+    const db = {
+      prepare: (sql: string) => ({
+        bind: () => ({
+          first: async () => {
+            if (sql.startsWith('SELECT 1 FROM users WHERE invite_code')) return null;
+            if (sql.includes('FROM users')) {
+              return {
+                id: guest,
+                tg_id: null,
+                first_name: 'Гость',
+                username: null,
+                is_guest: 1,
+                level: 8,
+                max_level: 8,
+                coins: 100,
+                lives: 5,
+                lives_at: now,
+                endless_best: 0,
+                endless_best_tier: 1,
+                endless_best_moves: 0,
+                ad_free: 0,
+                skins: 'classic',
+                skin: 'classic',
+                inv_hint: 0,
+                inv_freeze: 0,
+                inv_undo: 0,
+                invite_code: 'GUEST12',
+                referred_by: null,
+                created_at: now,
+                updated_at: now,
+                mode_levels: JSON.stringify({ campaign: 8, jam: 1, race: 1 }),
+              };
+            }
+            return {
+              id: 'run-1',
+              user_id: guest,
+              mode: 'jam',
+              level: 1,
+              seed: 7,
+              initial_state: JSON.stringify(createJamPuzzle(1, 7)),
+              actions: '[]',
+              moves: 0,
+              score: 0,
+              status: 'active',
+              result: null,
+              finish_id: null,
+              created_at: 0,
+              updated_at: 0,
+              finished_at: null,
+            };
+          },
+          all: async () => ({ results: [] }),
+          run: async () => ({ success: true, meta: { changes: 1 } }),
+          batch: async () => [],
+        }),
+      }),
+      batch: async () => [],
+    } as unknown as WorkerEnv['DB'];
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/run/run-1/hint', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-guest-id': 'b2d66a3b522c33cca95fb5325813b4f4' },
+        body: JSON.stringify({ actions: [] }),
+      }),
+      env({}, { ...configured, ALLOW_GUESTS: 'true', DB: db }),
+    );
+    expect(response.status).toBe(402);
+    expect(((await response.json()) as Record<string, unknown>).error).toBe('hint_not_paid');
   });
 });
 

@@ -37,9 +37,18 @@ export async function readJson(c: Context<AppEnv>): Promise<Record<string, unkno
  * а не новую: после поражения игрок выбирает, переигрывать поле или получить
  * сгенерированное заново.
  */
-export function parseStartOptions(value: unknown): { repeat: boolean } {
+/**
+ * Опции старта: `repeat` просит то же поле, `fresh` запрещает продолжение.
+ * Второе нужно как кнопка «Начать заново»: активная партия из прежней сборки
+ * может не восстанавливаться на текущем движке, и без явного сброса игрок
+ * упирался бы в экран «поле не загрузилось» с той же партией.
+ */
+export function parseStartOptions(value: unknown): { repeat: boolean; fresh: boolean } {
   const body = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  return { repeat: body.repeat === true || body.repeat === 'true' };
+  return {
+    repeat: body.repeat === true || body.repeat === 'true',
+    fresh: body.fresh === true || body.fresh === 'true',
+  };
 }
 
 /**

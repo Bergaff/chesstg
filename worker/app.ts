@@ -172,6 +172,22 @@ function replay(run: RunRow, actions: RunAction[]): AnyRunState {
   }
 }
 
+/**
+ * Продолжаема ли сохранённая партия: поле проходит проверку формы и весь журнал
+ * проигрывается без ошибки правил. Без этой проверки старт возвращал ту же
+ * строку снова и снова, и игрок оставался один на один с надписью «поле не
+ * загрузилось»: партия из прежней сборки клиенту не подходила, а выхода из
+ * экрана не было.
+ */
+function resumableByReplay(run: RunRow): boolean {
+  try {
+    replay(run, safeParseActions(run.actions));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function parseStartParam(value: unknown): string {
   if (typeof value !== 'string') return '';
   return value.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
@@ -532,13 +548,16 @@ app.post('/api/run/start', async (c) => {
     );
   }
 
+  const options = parseStartOptions(body);
   const existing = await c.env.DB.prepare(
     `SELECT * FROM runs WHERE user_id = ? AND mode = ? AND status = 'active' ORDER BY updated_at DESC LIMIT 1`,
   )
     .bind(user.id, mode)
     .first<RunRow>();
 
-  if (existing && resumableRun(existing)) {
+  // `fresh` (кнопка «Начать заново») не смотрит на старую строку вовсе: игрок
+  // уже решил, что continuация ему не нужна.
+  if (existing && !options.fresh && resumableRun(existing) && resumableByReplay(existing)) {
     return c.json({ resumed: true, run: serializeRun(existing) });
   }
   if (existing) {
@@ -560,7 +579,7 @@ app.post('/api/run/start', async (c) => {
     });
   }
 
-  const { repeat } = parseStartOptions(body);
+  const repeat = options.repeat;
   // Уровень берём из прогресса режима: у гонок он растёт от рядов, а не от побед.
   const level = isLevelMode(mode) ? modeProgress(user, mode).level : 0;
   let seed = randomSeed();
@@ -975,12 +994,16 @@ app.post('/api/bonus/use', async (c) => {
     fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price}`, { price, kind });
   }
 
-  if (kind === 'freeze') {
+  // Грант пишется на каждый бонус, который партия потом проверяет: заморозка
+  // сверяется на /move, подсказка «Парковки» - на /hint. Без строки гранта
+  // оплаченная подсказка превращалась в ошибку «Подсказка не оплачена», и
+  // монеты списывались впустую.
+  if (kind === 'freeze' || kind === 'hint') {
     await c.env.DB.prepare(
       `INSERT INTO grants (run_id, user_id, kind, action_index, source, created_at)
-       VALUES (?, ?, 'freeze', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-      .bind(run.id, user.id, at, source, now)
+      .bind(run.id, user.id, kind, at, source, now)
       .run();
   }
 

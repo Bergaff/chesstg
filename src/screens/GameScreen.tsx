@@ -203,12 +203,17 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
   // Повтор того же поля: флаг читается один раз при старте забега.
   const repeatRef = useRef(false);
+  // «Начать заново» после сбоя: сервер закрывает активную партию и выдаёт новую,
+  // иначе старт возвращает то же несовместимое поле и экран сбоя повторяется.
+  const freshRef = useRef(false);
 
   const start = useCallback(async () => {
     changePhase('loading');
     finishedRef.current = false;
     finishingRef.current = false;
     finalActionsRef.current = [];
+    const fresh = freshRef.current;
+    freshRef.current = false;
     exitAfterRef.current = false;
     setRun(null);
     runRef.current = null;
@@ -236,11 +241,16 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       repeatRef.current = false;
       const response = await api<StartRunResponse>('/api/run/start', {
         method: 'POST',
-        body: isWinLadder(mode) && repeat ? { mode, repeat: true } : { mode },
+        body:
+          isWinLadder(mode) && repeat
+            ? { mode, repeat: true }
+            : fresh
+              ? { mode, fresh: true }
+              : { mode },
       });
       const payload = response.run;
       if (isJamState(payload.initial)) {
-        setStartError('Этот режим открыт на другом экране. Вернитесь в меню.');
+        setStartError('Этот режим открыт на другом экране. «Начать заново» выдаст поле этого режима.');
         changePhase('loading');
         return;
       }
@@ -254,7 +264,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           current = applyAction(current, action);
         }
       } catch {
-        setStartError('Не удалось восстановить партию. Начни заново из меню.');
+        setStartError('Не удалось восстановить партию: её ходы не подходят текущим правилам. «Начать заново» закроет её и выдаст новое поле.');
         changePhase('loading');
         return;
       }
@@ -659,6 +669,12 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     if (status === 'failed') toast('Не удалось поделиться', 'error');
   }
 
+  function restartFresh() {
+    freshRef.current = true;
+    repeatRef.current = false;
+    void start();
+  }
+
   if (!state || !run) {
     return (
       <div className="screen game-screen game-loading">
@@ -669,8 +685,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
               <h2 className="modal-title" style={{ margin: '0 auto 8px' }}>Поле не загрузилось</h2>
               <p className="modal-text">{startError}</p>
               <div className="modal-actions" style={{ width: '100%' }}>
-                <button type="button" className="btn btn-primary" onClick={() => void start()}>
-                  Повторить
+                <button type="button" className="btn btn-primary" onClick={restartFresh}>
+                  Начать заново
                 </button>
                 <button type="button" className="btn btn-quiet" onClick={onExit}>
                   В меню

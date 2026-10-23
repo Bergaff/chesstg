@@ -1,5 +1,9 @@
 // «Парковка»: поле забито фигурами двух цветов, и их нужно увести.
 //
+// Набор фигур: ладья, слон, конь, плюс пешка и король. Последних двух держим у
+// их же края: они ходят на клетку, и в центре такая фигура тянулась бы к выходу
+// половину забега, тогда как задача в пробке - манёвр, а не подсчёт шагов.
+//
 // Ходит игрок: берёт любую фигуру и гонит её по её правилу. Фигура ушла, если
 // её ход встал на её край: белые на нулевой ряд, чёрные на последний. Отдельной
 // кнопки для ухода нет, это ровно тот же ход, что и любой другой, просто он
@@ -15,7 +19,7 @@
 import { mix32, Rng } from './rng';
 import type { Cell } from './types';
 
-export type JamPieceType = 'rook' | 'bishop' | 'knight';
+export type JamPieceType = 'rook' | 'bishop' | 'knight' | 'pawn' | 'king';
 export type JamSide = 'white' | 'black';
 
 export interface JamPiece {
@@ -69,12 +73,16 @@ export const JAM_PIECE_NAME: Record<JamPieceType, string> = {
   rook: 'Ладья',
   bishop: 'Слон',
   knight: 'Конь',
+  pawn: 'Пешка',
+  king: 'Король',
 };
 
 export const JAM_PIECE_GLYPH: Record<JamPieceType, string> = {
   rook: '♜',
   bishop: '♝',
   knight: '♞',
+  pawn: '♟',
+  king: '♚',
 };
 
 const TYPE_WEIGHTS: Array<[JamPieceType, number]> = [
@@ -197,6 +205,26 @@ function linesFor(type: JamPieceType): Array<[number, number]> {
   return [];
 }
 
+/** Король в «Парковке» ходит на любую соседнюю клетку; взятий нет, бить нечего. */
+const KING_STEPS: Array<[number, number]> = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [-1, 1],
+  [1, -1],
+  [-1, -1],
+];
+
+/**
+ * Шаг пешки: к своему краю, вбок она не сворачивает. Белые уходят на нулевой
+ * ряд, поэтому их пешка идёт вниз, чёрные на последний - их вверх.
+ */
+export function jamPawnStep(side: JamSide): [number, number] {
+  return [0, side === 'white' ? -1 : 1];
+}
+
 const KNIGHT_OFFSETS: Array<[number, number]> = [
   [1, 2],
   [2, 1],
@@ -221,6 +249,17 @@ export function jamPieceMoves(board: Board, piece: JamPiece, at?: Cell): Cell[] 
 
   if (piece.type === 'knight') {
     for (const [dx, dy] of KNIGHT_OFFSETS) {
+      if (free(from.x + dx, from.y + dy)) out.push({ x: from.x + dx, y: from.y + dy });
+    }
+    return out;
+  }
+
+  if (piece.type === 'pawn' || piece.type === 'king') {
+    // Оба хода на одну клетку, поэтому проверка одна: встать можно только на
+    // свободную клетку, а уход из неё следует из правила края.
+    const steps: Array<[number, number]> =
+      piece.type === 'pawn' ? [jamPawnStep(piece.side)] : KING_STEPS;
+    for (const [dx, dy] of steps) {
       if (free(from.x + dx, from.y + dy)) out.push({ x: from.x + dx, y: from.y + dy });
     }
     return out;
@@ -376,27 +415,108 @@ function cloneJamBoard(state: Pick<JamState, 'width' | 'height' | 'pieces'>): Bo
 }
 
 /**
+ * Сколько шагов до своего края у клетки `y`: белым нужен нулевой ряд, чёрным
+ * последний. По этому числу генератор решает, какая фигура встанет в клетку.
+ */
+function jamEdgeDistance(height: number, side: JamSide, y: number): number {
+  return side === 'white' ? y : height - 1 - y;
+}
+
+/**
+ * Сколько «коротких» фигур (пешка и король) кладёт генератор и в скольких рядов
+ * от своего края их держать. Доля задаётся долей фигур, а не числом: на 12
+ * фигурах это 4 штуки, на 32 - семь, и план от них не раздувается.
+ */
+export function jamShortShare(level: number): { share: number; reach: number } {
+  const reach = level <= 6 ? 2 : 3;
+  const share = level <= 6 ? 0.34 : level <= 16 ? 0.28 : 0.22;
+  return { share, reach };
+}
+
+/**
  * Расстановка: плотное поле, половина фигур белые, половина чёрные. Цвета не
  * перемешиваем порядам: иначе на первых уровнях обе стороны стоят вперемешку и
- * уходить мешает сосед, а не пробка.
+ * уходить мешает сосед, а не пробка. Белые занимают нижнюю половину, чёрные
+ * верхнюю, уходить каждой стороне нужно к своему краю, и пробка расходится с двух
+ * сторон. Крайние ряды пусты на старте: фигура на своём краю ушла бы первым же
+ * ходом, и задача превратилась бы в подсчёт фигур, а не в манёвр.
+ *
+ * Пешка и король ходят на одну клетку. В центре такая фигура шла бы к выходу
+ * половину забега, и план рос бы без всякой задачи, поэтому мелочь берёт клетки у
+ * СВОЕГО края, даже если по половому правилу эти ряды принадлежат другой стороне.
+ * Пешке нужна ещё и свободная колонка до края: вбок она не сворачивает, и зажатая
+ * пешка означала бы нерешаемое поле; вместо неё в такую клетку встаёт король.
  */
-function buildLayout(args: { width: number; height: number; total: number; rng: Rng }): JamPiece[] {
-  const { width, height, total, rng } = args;
+function buildLayout(args: { width: number; height: number; total: number; level: number; rng: Rng }): JamPiece[] {
+  const { width, height, total, level, rng } = args;
   const cells: Array<{ x: number; y: number }> = [];
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) cells.push({ x, y });
   rng.shuffle(cells);
-  const taken = cells.filter((cell) => cell.y !== 0 && cell.y !== height - 1);
-  const pieces: JamPiece[] = [];
-  let id = 0;
-  for (const cell of taken.slice(0, total)) {
-    // Белые занимают нижнюю половину, чёрные верхнюю: уходить каждой стороне
-    // нужно к своему краю, и пробка расходится с двух сторон. Крайние ряды при
-    // этом пусты на старте: фигура на своём краю ушла бы первым же ходом, и
-    // задача превратилась бы в подсчёт фигур, а не в манёвр.
-    const side: JamSide = cell.y < height / 2 ? 'black' : 'white';
-    pieces.push({ id: `p${id++}`, type: weightedType(rng), side, x: cell.x, y: cell.y });
+  const taken = cells.filter((cell) => cell.y !== 0 && cell.y !== height - 1).slice(0, total);
+
+  type Slot = { index: number; x: number; y: number; side: JamSide };
+  // Белые занимают нижнюю половину, чёрные верхнюю: уходить каждой стороне
+  // нужно к своему краю, и пробка расходится с двух сторон.
+  const slots: Slot[] = taken.map((cell, index) => ({
+    index,
+    x: cell.x,
+    y: cell.y,
+    side: (cell.y < height / 2 ? 'black' : 'white') as JamSide,
+  }));
+
+  const { share, reach } = jamShortShare(level);
+  const shortTarget = Math.min(slots.length, Math.max(2, Math.round(total * share)));
+  // Кандидаты на короткую фигуру: любая занятая клетка в `reach` рядах от края,
+  // и сторона у неё своя, краевая, а не та, что делит поле пополам.
+  const bySide: Record<JamSide, Array<{ slot: Slot; side: JamSide; distance: number }>> = {
+    white: [],
+    black: [],
+  };
+  for (const slot of slots) {
+    for (const side of ['white', 'black'] as JamSide[]) {
+      const distance = jamEdgeDistance(height, side, slot.y);
+      if (distance >= 1 && distance <= reach) bySide[side].push({ slot, side, distance });
+    }
   }
-  return pieces;
+  for (const side of ['white', 'black'] as JamSide[]) {
+    bySide[side].sort((a, b) => a.distance - b.distance || a.slot.index - b.slot.index);
+  }
+
+  const columnToEdgeIsClear = (slot: { index: number; x: number; y: number }, side: JamSide) =>
+    slots.every(
+      (other) =>
+        other.index === slot.index ||
+        other.x !== slot.x ||
+        (side === 'white' ? other.y > slot.y : other.y < slot.y),
+    );
+
+  const assignment = new Map<number, { side: JamSide; type: JamPieceType }>();
+  const pawnCap = Math.max(1, Math.round(shortTarget / 2));
+  let pawns = 0;
+  let turn: JamSide = 'white';
+  // Стороны чередуем: иначе вся мелочь липнет к одному краю, и вторая половина
+  // поля остаётся сплошь из фигур, которым идти пять рядов.
+  for (let step = 0; assignment.size < shortTarget && step < shortTarget * 2 + 4; step++) {
+    const side = turn;
+    turn = turn === 'white' ? 'black' : 'white';
+    const next = bySide[side].find((cand) => !assignment.has(cand.slot.index));
+    if (!next) continue;
+    const pawn = pawns < pawnCap && columnToEdgeIsClear(next.slot, side);
+    assignment.set(next.slot.index, { side, type: pawn ? 'pawn' : 'king' });
+    if (pawn) pawns += 1;
+  }
+
+  let id = 0;
+  return slots.map((slot) => {
+    const short = assignment.get(slot.index);
+    return {
+      id: `p${id++}`,
+      type: short?.type ?? weightedType(rng),
+      side: short?.side ?? slot.side,
+      x: slot.x,
+      y: slot.y,
+    };
+  });
 }
 
 /**
@@ -412,7 +532,7 @@ export function createJamPuzzle(level: number, seed: number, attempts = 24): Jam
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     const rng = new Rng(mix32(seed, attempt, 0x1a9c0de5, level, width, height));
-    const pieces = buildLayout({ width, height, total, rng });
+    const pieces = buildLayout({ width, height, total, level, rng });
     const plan = solveJamExits({ width, height, pieces }, { rng });
     if (!plan.ok || plan.moves.length < 3) continue;
     const quality = -Math.abs(plan.moves.length - target);
@@ -426,7 +546,7 @@ export function createJamPuzzle(level: number, seed: number, attempts = 24): Jam
     // 3 хода запаса, а админке по `lastEvent` видно, на каких уровнях генератор
     // откатился.
     const rng = new Rng(mix32(seed, attempts, 0x1a9c0de5, level, width, height));
-    const pieces = buildLayout({ width, height, total, rng });
+    const pieces = buildLayout({ width, height, total, level, rng });
     const plan = solveJamExits({ width, height, pieces }, { rng });
     return {
       version: 3,

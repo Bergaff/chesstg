@@ -19,12 +19,14 @@ const RULES: Record<PieceType, string> = {
   queen: 'Сочетает ладью и слона. Появляется на пятнадцатом уровне.',
 };
 
-const JAM_PIECES: JamPieceType[] = ['rook', 'bishop', 'knight'];
+const JAM_PIECES: JamPieceType[] = ['pawn', 'king', 'knight', 'bishop', 'rook'];
 
 const JAM_RULES: Record<JamPieceType, string> = {
-  rook: 'По горизонтали и вертикали на любое расстояние, пока путь свободен.',
-  bishop: 'По диагонали на любое расстояние, пока путь свободен.',
+  pawn: 'На одну клетку к своему краю: белые вниз, чёрные вверх. Вбок не сворачивает, поэтому мелочь стоит у своего края и уходит за один-два хода.',
+  king: 'На любую соседнюю клетку, в том числе по диагонали. Ход короткий, зато проходит там, где дальнобойная фигура упирается в стену.',
   knight: 'Буквой Г и перепрыгивает через соседей: единственная фигура, которой пробка не помеха.',
+  bishop: 'По диагонали на любое расстояние, пока путь свободен.',
+  rook: 'По горизонтали и вертикали на любое расстояние, пока путь свободен.',
 };
 
 /** В «Гонках» пул свой: номер волны решает, какая фигура приходит. */
@@ -202,7 +204,7 @@ export function RulesModal({
               <b>{jam ? JAM_PIECE_NAME[type as JamPieceType] : PIECE_NAME[type as PieceType]}</b>
               <p>{jam ? JAM_RULES[type as JamPieceType] : RULES[type as PieceType]}</p>
             </div>
-            <span className="rules-when">{jam ? 'в пробке' : race ? RACE_WHEN[type] : WHEN[type as PieceType]}</span>
+            <span className="rules-when">{jam ? 'у своего края' : race ? RACE_WHEN[type as PieceType] : WHEN[type as PieceType]}</span>
           </div>
         ))}
       </div>

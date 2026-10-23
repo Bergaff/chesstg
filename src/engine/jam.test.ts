@@ -10,6 +10,7 @@ import {
   jamDensity,
   jamExitMoves,
   jamExitRow,
+  jamShortShare,
   jamIsExit,
   jamHint,
   jamLegalActions,
@@ -235,6 +236,85 @@ describe('парковка: фигуры уходят с поля', () => {
     expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: -1 } })).toThrowError('За границей поля');
     expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: 6 } })).toThrowError('За границей поля');
     expect(apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: 0 } }).removed).toBe(1);
+  });
+
+  it('пешка идёт к своему краю и там же уходит, вбок она не сворачивает', () => {
+    const state = board({
+      height: 6,
+      pieces: [
+        { id: 'w', type: 'pawn', side: 'white', x: 2, y: 2 },
+        { id: 'b', type: 'pawn', side: 'black', x: 3, y: 3 },
+      ],
+      total: 2,
+    });
+    expect(jamPieceMoves(state, state.pieces[0])).toEqual([{ x: 2, y: 1 }]);
+    expect(jamExitMoves(state, state.pieces[0])).toEqual([]);
+    expect(jamPieceMoves(state, state.pieces[1])).toEqual([{ x: 3, y: 4 }]);
+    // Шаг на край - и фигуры нет: отдельного действия для ухода не существует.
+    const step = apply(state, { type: 'piece', id: 'w', to: { x: 2, y: 1 } });
+    expect(step.removed).toBe(0);
+    expect(apply(step, { type: 'piece', id: 'w', to: { x: 2, y: 0 } }).removed).toBe(1);
+    // Пешка не бьёт и не перепрыгивает: занятая клетка впереди означает, что
+    // ходить ей некуда вовсе.
+    const stuck = board({
+      height: 6,
+      pieces: [
+        { id: 'w', type: 'pawn', side: 'white', x: 2, y: 2 },
+        { id: 'x', type: 'rook', side: 'black', x: 2, y: 1 },
+      ],
+      total: 2,
+    });
+    expect(jamPieceMoves(stuck, stuck.pieces[0])).toEqual([]);
+    expect(jamLegalActions(stuck).some((action) => action.id === 'w')).toBe(false);
+  });
+
+  it('король в пробке ходит на восемь соседних клеток и уходит за один ход', () => {
+    const state = board({
+      height: 6,
+      pieces: [{ id: 'w', type: 'king', side: 'white', x: 2, y: 1 }],
+      total: 1,
+    });
+    expect(jamPieceMoves(state, state.pieces[0])).toEqual([
+      { x: 3, y: 1 },
+      { x: 1, y: 1 },
+      { x: 2, y: 2 },
+      { x: 2, y: 0 },
+      { x: 3, y: 2 },
+      { x: 1, y: 2 },
+      { x: 3, y: 0 },
+      { x: 1, y: 0 },
+    ]);
+    expect(jamAtEdge(state, state.pieces[0])).toBe(true);
+    expect(jamExitMoves(state, state.pieces[0]).length).toBe(3);
+    expect(apply(state, { type: 'piece', id: 'w', to: { x: 1, y: 0 } }).status).toBe('won');
+  });
+
+  it('генератор держит мелочь у своего края', () => {
+    const { reach } = jamShortShare(8);
+    for (const level of [1, 3, 8, 20]) {
+      let short = 0;
+      for (let seed = 0; seed < 6; seed++) {
+        const state = createJamPuzzle(level, 20261022 + seed * 7919);
+        const rows = state.height - 1;
+        for (const piece of state.pieces) {
+          const distance = piece.side === 'white' ? piece.y : rows - piece.y;
+          if (piece.type === 'pawn' || piece.type === 'king') {
+            short += 1;
+            // Ни одна пешка и ни один король не стоят в центре: иначе их путь
+            // до края длиннее всей задачи.
+            expect(distance, `L${level} ${piece.type} на ${piece.x},${piece.y}`).toBeLessThanOrEqual(reach);
+          }
+          // На краях фигур нет никогда: оттуда уходить нечего, задача кончалась
+          // подсчётом.
+          expect(distance).toBeGreaterThan(0);
+          // Пешка обязана иметь свободный ход к своему краю, иначе поле нерешаемо.
+          if (piece.type === 'pawn') {
+            expect(jamPieceMoves(state, piece).length, `пешка ${piece.x},${piece.y} зажата`).toBeGreaterThan(0);
+          }
+        }
+      }
+      expect(short, `L${level}`).toBeGreaterThan(0);
+    }
   });
 
   it('подсказка доводит поле до победы: она ведёт план, а не первый легальный ход', () => {

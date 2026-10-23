@@ -78,6 +78,9 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
   const finishedRef = useRef(false);
   const finishingRef = useRef(false);
   const repeatRef = useRef(false);
+  // «Начать заново» после сбоя: сервер закрывает активную партию и выдаёт новую,
+  // иначе старт возвращает то же несовместимое поле и экран сбоя повторяется.
+  const freshRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const endTimerRef = useRef<number | null>(null);
   const pendingSaveRef = useRef<JamAction[] | null>(null);
@@ -142,7 +145,10 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     changePhase('loading');
     finishedRef.current = false;
     finishingRef.current = false;
+    const repeat = repeatRef.current;
+    const fresh = freshRef.current;
     repeatRef.current = false;
+    freshRef.current = false;
     setRun(null);
     runRef.current = null;
     setJam(null);
@@ -165,11 +171,11 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     try {
       const response = await api<StartRunResponse>('/api/run/start', {
         method: 'POST',
-        body: repeatRef.current ? { mode: 'jam', repeat: true } : { mode: 'jam' },
+        body: repeat ? { mode: 'jam', repeat: true } : fresh ? { mode: 'jam', fresh: true } : { mode: 'jam' },
       });
       const nextRun = response.run;
       if (!isJamState(nextRun.initial)) {
-        setStartError('Сервер прислал поле прежнего забега, этот режим его не принимает. Нажмите «Повторить»: старый забег закроется, поле сгенерируется заново.');
+        setStartError('Сервер прислал поле прежнего забега, этот режим его не принимает. «Начать заново» закроет старый забег, и поле сгенерируется заново.');
         changePhase('loading');
         return;
       }
@@ -182,7 +188,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
           current = applyJamAction(current, action, Error);
         }
       } catch {
-        setStartError('Не удалось восстановить партию. Начните заново из меню.');
+        setStartError('Не удалось восстановить партию: её ходы не подходят текущим правилам. «Начать заново» закроет её и выдаст новое поле.');
         changePhase('loading');
         return;
       }
@@ -435,6 +441,13 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     void start();
   }
 
+  /** Аварийный путь из экрана сбоя: та же партия больше не предлагается. */
+  function restartFresh() {
+    freshRef.current = true;
+    repeatRef.current = false;
+    void start();
+  }
+
   async function shareResult() {
     const bot = config.botUsername;
     const level = result?.level ?? run?.level ?? profile.modes?.jam?.level ?? 1;
@@ -465,8 +478,8 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
               </h2>
               <p className="modal-text">{startError}</p>
               <div className="modal-actions" style={{ width: '100%' }}>
-                <button type="button" className="btn btn-primary" onClick={() => void start()}>
-                  Повторить
+                <button type="button" className="btn btn-primary" onClick={restartFresh}>
+                  Начать заново
                 </button>
                 <button type="button" className="btn btn-quiet" onClick={onExit}>
                   В меню
