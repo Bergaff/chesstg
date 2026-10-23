@@ -530,7 +530,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       <div className="board-area">
         <div className="goal-line">
-          <span>белые за нижний край, чёрные за верхний</span>
+          <span>белые на нижний ряд, чёрные на верхний</span>
           <span className="num">{selected ? 'выберите клетку' : 'троньте фигуру'}</span>
         </div>
         <JamBoard
@@ -597,8 +597,9 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
           </h2>
           <p className="modal-text">
             Пробка забита белыми и чёрными фигурами. Ходите любой: ладья ездит по прямым, слон по
-            диагоналям, конь перепрыгивает. Шаг за край фигуру с поля снимает: белые уходят за нижний
-            край, чёрные за верхний. Взятий нет, поэтому путь расчищать нечем - только объезжать.
+            диагоналям, конь перепрыгивает. Фигура ушла с поля, если её ход встал на её край: белые
+            идут на нижний ряд, чёрные на верхний, отдельной кнопки для ухода нет. Взятий не будет,
+            поэтому путь расчищать нечем - только объезжать.
           </p>
           <div className="pre-meta">
             <div>
@@ -607,7 +608,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
             </div>
             <div>
               <span>Фигур на поле</span>
-              <b>{jam.pieces.length}</b>
+              <b>{jam.total}</b>
             </div>
             <div>
               <span>Жизней в запасе</span>

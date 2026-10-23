@@ -181,6 +181,17 @@ beforeEach(() => {
           inviteLink: null,
         });
       }
+      if (url === '/api/bonus/use') {
+        return jsonResponse({
+          ok: true,
+          kind: 'hint',
+          source: 'coins',
+          price: 20,
+          coins: 80,
+          inventory: { ...profile.inventory },
+          grant: null,
+        });
+      }
       if (url === '/api/shop/bonus') {
         return jsonResponse({ profile: { ...profile, coins: 10, inventory: { ...profile.inventory, hint: 1 } } });
       }
@@ -289,13 +300,12 @@ describe('UI smoke', () => {
     expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(jamInitial.width * jamInitial.height);
     expect(screen.getByText(`ходов ${jamInitial.budget}`)).toBeTruthy();
     expect(screen.getByText(new RegExp(`уведено 0 из ${jamInitial.pieces.length}`))).toBeTruthy();
-    // Полосы ухода рисуются всегда, до выбора фигуры: иначе поле прыгало бы на
-    // каждом тапе, а с ним и вся доска.
-    const lanes = document.querySelectorAll('.jam-lane-cell');
-    expect(lanes.length).toBe(jamInitial.width * 2);
-    expect([...lanes].every((lane) => (lane as HTMLButtonElement).disabled)).toBe(
-      document.querySelectorAll('.jam-lane-cell.is-open').length === 0,
-    );
+    // Крайние ряды помечены всегда, до выбора фигуры: они и есть выход, и поле
+    // не должно менять геометрию на каждом тапе.
+    const edge = grid.querySelectorAll('.cell-edge-top, .cell-edge-bottom');
+    expect(edge.length).toBe(jamInitial.width * 2);
+    // Отдельных полос ухода нет: увод фигуры это обычный ход на свой край.
+    expect(document.querySelectorAll('.jam-lane-cell').length).toBe(0);
 
     // Тап по фигуре подсвечивает клетки, тап по клетке делает перестановку.
     const first = jamInitial.pieces.find((piece) => jamPieceMoves(jamInitial!, piece).length > 0)!;
@@ -332,14 +342,23 @@ describe('UI smoke', () => {
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('race');
     // Король ходит во все стороны, поэтому кнопок девять и «вперёд» среди них есть.
-    // Конвейерных меток ряда больше нет: ряд не едет, фигуры приходят сверху.
+    // Ряд бежит, но конвейерных меток прежней сборки на поле нет: вместо них
+    // отметка полосы притока сверху и линия уходящего ряда снизу.
     expect(screen.getByText('рекорд 14')).toBeTruthy();
     const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
     expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(RACE_WIDTH * RACE_ROWS);
     expect(grid.className).not.toContain('board-conveyor');
     expect(grid.querySelectorAll('.cell-pin').length).toBe(0);
+    expect(document.querySelectorAll('.flow-in').length).toBe(1);
+    expect(document.querySelectorAll('.flow-out').length).toBe(1);
 
     fireEvent.click(screen.getByText('Начать'));
+    // Подсказка в режиме без финиша ищет не путь, а следующий ход: за 20 монет
+    // она обязана подсветить клетки, а не выдавать «безопасного пути не видно».
+    fireEvent.click(screen.getByRole('button', { name: /Подсказка/ }));
+    await waitFor(() => expect(document.querySelectorAll('.cell-hint').length).toBeGreaterThan(0));
+    const hintCall = calls.find((call) => call.url === '/api/bonus/use');
+    expect((hintCall?.body as { kind?: string } | undefined)?.kind).toBe('hint');
     const pad = document.querySelector('.move-pad');
     const buttons = [...(pad?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
     expect(buttons.length).toBe(9);

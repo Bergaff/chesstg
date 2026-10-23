@@ -8,8 +8,9 @@ import {
   jamBoard,
   jamBudget,
   jamDensity,
-  jamExitCells,
+  jamExitMoves,
   jamExitRow,
+  jamIsExit,
   jamHint,
   jamLegalActions,
   jamPieces,
@@ -24,7 +25,7 @@ import {
 
 function board(over: Partial<JamState>): JamState {
   return {
-    version: 2,
+    version: 3,
     mode: 'jam',
     width: 5,
     height: 6,
@@ -59,6 +60,10 @@ describe('парковка: фигуры уходят с поля', () => {
       expect(jamLegalActions(state).length).toBeGreaterThan(0);
       expect(state.removed).toBe(0);
       expect(state.total).toBe(state.pieces.length);
+      // На своём краю фигура ушла бы первым ходом, поэтому генератор крайние
+      // ряды держит пустыми: задача начинается с манёвра, а не с подсчёта.
+      expect(state.pieces.filter((entry) => entry.side === 'white' && entry.y === 0).length).toBe(0);
+      expect(state.pieces.filter((entry) => entry.side === 'black' && entry.y === state.height - 1).length).toBe(0);
       expect(state.score).toBe(0);
       // План решателя обязан уложиться в бюджет: иначе «гарантия решаемости»
       // ничего не стоит.
@@ -120,7 +125,7 @@ describe('парковка: фигуры уходят с поля', () => {
     expect(JSON.stringify(createJamPuzzle(8, 100).pieces)).not.toBe(JSON.stringify(a.pieces));
   });
 
-  it('уход с поля снимает фигуру, перестановка внутри - нет', () => {
+  it('уход это ход на свой край, отдельного действия для него нет', () => {
     const state = createJamPuzzle(6, 1234);
     const shift = jamLegalActions(state).find((action) => action.to.y >= 0 && action.to.y < state.height);
     expect(apply(state, shift!).pieces.length).toBe(state.pieces.length);
@@ -132,19 +137,21 @@ describe('парковка: фигуры уходят с поля', () => {
       height: 6,
       total: 2,
       pieces: [
-        { id: 'w', type: 'rook', side: 'white', x: 1, y: 0 },
-        { id: 'b', type: 'rook', side: 'black', x: 3, y: 5 },
+        { id: 'w', type: 'rook', side: 'white', x: 1, y: 1 },
+        { id: 'b', type: 'rook', side: 'black', x: 3, y: 4 },
       ],
     });
-    expect(jamExitCells(exit, exit.pieces[0])).toEqual([{ x: 1, y: -1 }]);
-    expect(jamExitCells(exit, exit.pieces[1])).toEqual([{ x: 3, y: 6 }]);
-    const gone = apply(exit, { type: 'piece', id: 'w', to: { x: 1, y: -1 } });
+    expect(jamExitMoves(exit, exit.pieces[0])).toEqual([{ x: 1, y: 0 }]);
+    expect(jamExitMoves(exit, exit.pieces[1])).toEqual([{ x: 3, y: 5 }]);
+    expect(jamIsExit(exit, exit.pieces[0], { x: 1, y: 0 })).toBe(true);
+    expect(jamIsExit(exit, exit.pieces[0], { x: 1, y: 2 })).toBe(false);
+    const gone = apply(exit, { type: 'piece', id: 'w', to: { x: 1, y: 0 } });
     expect(gone.pieces.length).toBe(1);
     expect(gone.removed).toBe(1);
     expect(gone.score).toBe(1);
     expect(jamRemovedCount(gone)).toBe(1);
     expect(gone.lastEvent).toBe('exit');
-    const won = apply(gone, { type: 'piece', id: 'b', to: { x: 3, y: 6 } });
+    const won = apply(gone, { type: 'piece', id: 'b', to: { x: 3, y: 5 } });
     expect(won.status).toBe('won');
     expect(won.pieces.length).toBe(0);
   });
@@ -154,7 +161,7 @@ describe('парковка: фигуры уходят с поля', () => {
       pieces: [{ id: 'w', type: 'rook', side: 'white', x: 2, y: 3 }],
       total: 1,
     });
-    expect(jamExitCells(clear, clear.pieces[0])).toEqual([{ x: 2, y: -1 }]);
+    expect(jamExitMoves(clear, clear.pieces[0])).toEqual([{ x: 2, y: 0 }]);
 
     const blocked = board({
       pieces: [
@@ -163,26 +170,27 @@ describe('парковка: фигуры уходят с поля', () => {
       ],
       total: 2,
     });
-    expect(jamExitCells(blocked, blocked.pieces[0])).toEqual([]);
+    expect(jamExitMoves(blocked, blocked.pieces[0])).toEqual([]);
     expect(jamPieceMoves(blocked, blocked.pieces[0]).some((cell) => cell.x === 2 && cell.y === 2)).toBe(true);
     expect(jamPieceMoves(blocked, blocked.pieces[0]).some((cell) => cell.x === 2 && cell.y === 0)).toBe(false);
 
-    // Конь на row 1 уходит за край, с row 2 - нет: он не дотягивается до полосы.
+    // Конь с row 1 спрыгивает на нулевой ряд ходом (±2, -1), с row 3 не дотянется.
     const near = board({ pieces: [{ id: 'k', type: 'knight', side: 'white', x: 2, y: 1 }], total: 1 });
-    expect(jamExitCells(near, near.pieces[0]).length).toBeGreaterThan(0);
-    const far = board({ pieces: [{ id: 'k', type: 'knight', side: 'white', x: 2, y: 2 }], total: 1 });
-    expect(jamExitCells(far, far.pieces[0])).toEqual([]);
+    expect(jamExitMoves(near, near.pieces[0])).toEqual([
+      { x: 4, y: 0 },
+      { x: 0, y: 0 },
+    ]);
+    const far = board({ pieces: [{ id: 'k', type: 'knight', side: 'white', x: 2, y: 3 }], total: 1 });
+    expect(jamExitMoves(far, far.pieces[0])).toEqual([]);
     expect(jamAtEdge(near, near.pieces[0])).toBe(true);
     expect(jamAtEdge(far, far.pieces[0])).toBe(false);
 
-    // Слон уходит по диагонали, но не через боковую стенку: из колонки 0 на
-    // поле шириной 5 он доезжает до нижнего края только вправо.
+    // Слон встаёт на край по диагонали, и только туда, куда доезжает по клеткам
+    // поля: через боковую стенку путь не считается.
     const bishop = board({ pieces: [{ id: 's', type: 'bishop', side: 'white', x: 3, y: 2 }], total: 1 });
-    // Вниз-влево диагональ упирается в край полем ниже, вниз-вправо уходит за
-    // боковую стенку: полоса ухода только горизонтальная.
-    expect(jamExitCells(bishop, bishop.pieces[0])).toEqual([{ x: 0, y: -1 }]);
+    expect(jamExitMoves(bishop, bishop.pieces[0])).toEqual([{ x: 1, y: 0 }]);
     const wall = board({ pieces: [{ id: 's', type: 'bishop', side: 'white', x: 0, y: 1 }], total: 1 });
-    expect(jamExitCells(wall, wall.pieces[0])).toEqual([{ x: 2, y: -1 }]);
+    expect(jamExitMoves(wall, wall.pieces[0])).toEqual([{ x: 1, y: 0 }]);
   });
 
   it('направление ухода зависит от цвета: свои края, а не один на всех', () => {
@@ -190,17 +198,22 @@ describe('парковка: фигуры уходят с поля', () => {
       height: 6,
       pieces: [
         { id: 'w', type: 'rook', side: 'white', x: 0, y: 0 },
-        { id: 'b', type: 'rook', side: 'black', x: 0, y: 5 },
+        { id: 'b', type: 'rook', side: 'black', x: 1, y: 5 },
       ],
       total: 2,
     });
-    expect(jamExitRow(state, 'white')).toBe(-1);
-    expect(jamExitRow(state, 'black')).toBe(6);
-    // Белая ладья на своей линии: вниз уход, вверх - не выход.
-    expect(jamExitCells(state, state.pieces[0])).toEqual([{ x: 0, y: -1 }]);
-    expect(jamExitCells(state, state.pieces[1])).toEqual([{ x: 0, y: 6 }]);
-    // Чёрная ладья в том же столбце обязана идти вверх: вниз её не пускаем.
-    expect(() => apply(state, { type: 'piece', id: 'b', to: { x: 0, y: -1 } })).toThrowError('Фигура не может уйти с этого поля');
+    expect(jamExitRow(state, 'white')).toBe(0);
+    expect(jamExitRow(state, 'black')).toBe(5);
+    // Белая ладья стоит на своём краю: любой ход вдоль ряда её и снимает.
+    expect(jamExitMoves(state, state.pieces[0]).length).toBeGreaterThan(0);
+    expect(jamExitMoves(state, state.pieces[1]).length).toBeGreaterThan(0);
+    // Чёрной нулевой ряд не дом: она встанет туда как на обычную клетку.
+    const visit = apply(state, { type: 'piece', id: 'b', to: { x: 1, y: 0 } });
+    expect(visit.pieces.length).toBe(2);
+    expect(visit.removed).toBe(0);
+    expect(visit.pieces[1]).toMatchObject({ x: 1, y: 0 });
+    // А назад на свой ряд она уходит: это тот же ход, просто край её цвета.
+    expect(apply(visit, { type: 'piece', id: 'b', to: { x: 1, y: 5 } }).removed).toBe(1);
   });
 
   it('правила запрещают невозможные ходы', () => {
@@ -215,10 +228,33 @@ describe('парковка: фигуры уходят с поля', () => {
     expect(() => apply(state, { type: 'piece', id: piece.id, to: { x: occupied!.x, y: occupied!.y } })).toThrowError(
       /Фигура так не ходит|Клетка занята/,
     );
-    // Вне зависимости от края нельзя прыгнуть в середину поля через фигуры.
-    const empty = board({ pieces: [{ id: 'x', type: 'rook', side: 'white', x: 0, y: 0 }], total: 1 });
-    expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 1, y: 1 } })).toThrowError('Фигура так не ходит');
-    expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 1, y: -1 } })).toThrowError('Фигура не может уйти с этого поля');
+    // Клетка вне поля не принимается: журнал живёт внутри доски, уход это ход
+    // на край, а не шаг в несуществующую клетку.
+    const empty = board({ pieces: [{ id: 'x', type: 'rook', side: 'white', x: 0, y: 1 }], total: 1 });
+    expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 1, y: 2 } })).toThrowError('Фигура так не ходит');
+    expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: -1 } })).toThrowError('За границей поля');
+    expect(() => apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: 6 } })).toThrowError('За границей поля');
+    expect(apply(empty, { type: 'piece', id: 'x', to: { x: 0, y: 0 } }).removed).toBe(1);
+  });
+
+  it('подсказка доводит поле до победы: она ведёт план, а не первый легальный ход', () => {
+    // Regression: подсказка читала план с нулевого шага, ранний ход коня через
+    // несколько ходов снова становился легальным, и игрок зацикливался на нём,
+    // сжигая бюджет. Теперь план привязан к счётчику ходов.
+    for (const level of [1, 8, 20]) {
+      for (const seed of [7, 4242]) {
+        let state = createJamPuzzle(level, seed);
+        let guard = 0;
+        while (state.status === 'playing' && guard++ < 400) {
+          const hint = jamHint(state);
+          if (!hint) break;
+          state = apply(state, hint);
+        }
+        expect(state.status, `L${level} seed ${seed}`).toBe('won');
+        expect(state.removed).toBe(state.total);
+        expect(state.moves).toBeLessThanOrEqual(state.budget);
+      }
+    }
   });
 
   it('бюджет кончается поражением, подсказка отдаёт легальный ход', () => {
@@ -241,7 +277,7 @@ describe('парковка: фигуры уходят с поля', () => {
     }
   });
 
-  it('состояние старой версии на половину поля не принимается', () => {
+  it('состояние прежних сборок не принимается', () => {
     const legacy = {
       mode: 'jam',
       version: 1,
@@ -256,7 +292,11 @@ describe('парковка: фигуры уходят с поля', () => {
       level: 1,
       seed: 1,
     };
+    // Сборка 19 успела пожить с полосами ухода: полей у неё тех достаточно, но
+    // журнал лежит вне доски, поэтому решает именно версия.
+    const lanes = { ...legacy, version: 2, mid: undefined, removed: 0 };
     expect(isJamState(legacy)).toBe(false);
+    expect(isJamState(lanes)).toBe(false);
     expect(isJamState(createJamPuzzle(2, 5))).toBe(true);
   });
 

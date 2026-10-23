@@ -10,6 +10,7 @@ import {
   capturesLeft,
   createJamLevel,
   createRaceLevel,
+  enemyMoves,
   createSpecialLevel,
   difficultyBand,
   enumeratePlacements,
@@ -80,11 +81,20 @@ describe('правила режимов', () => {
   });
 
   it('в «Гонках» фигура бьёт по своей линии, а с линии можно уйти', () => {
-    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
+    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 2 }] });
     // Шаг вдоль ряда: король остаётся на колонке ладьи, и его снимают.
     expect(applyAction(lined, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
     // Тот же ход в сторону с линии - ладье нужен ход на перестроение.
     expect(applyAction(lined, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
+
+    // Дальность скользящего хода в «Гонках» ограничена двумя клетками (`slideCap`),
+    // поэтому ладья с трёх рядов до короля не долетает: у игрока есть ход, чтобы
+    // уйти с линии, и он видит прилёт заранее, а не получает смерть за один ход.
+    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 0 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
+    expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 0)).toBe(false);
+    expect(applyAction(outOfReach, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
+    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 0 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 2 }] });
+    expect(enemyMoves(inReach, inReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 0)).toBe(true);
 
     // Никакого «рядового падения» нет: фигура тратит ходы по своему правилу.
     const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 0 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 4 }] });

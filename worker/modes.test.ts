@@ -143,7 +143,7 @@ describe('активная партия и поле прежней сборки'
   /** Головоломка «Парковки»: фигуры и счёт уведённых, пешки нет. */
   const puzzle = {
     mode: 'jam',
-    version: 2,
+    version: 3,
     width: 5,
     height: 7,
     pieces: [{ id: 'w1', type: 'rook', x: 0, y: 0, side: 'white' }],
@@ -199,12 +199,14 @@ describe('активная партия и поле прежней сборки'
     expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 1, y: 1 } }]) }))).toBe(true);
   });
 
-  it('уход за край попадает в журнал и партию не ломает', () => {
-    // Клетка y = -1 вне поля: валидатор обязан её пропускать, иначе ход
-    // «увести фигуру» сервер посчитал бы битым журналом и партию закрыл.
-    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: -1 } }]) }))).toBe(true);
-    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: 7 } }]) }))).toBe(true);
+  it('увод фигуры на свой край попадает в журнал и партию не ломает', () => {
+    // Ухода отдельной клеткой больше нет: фигура становится на ряд своего края,
+    // то есть журнал состоит только из клеток поля. Нулевой ряд в поле 7 рядов
+    // это и есть уход, а всё, что вылезает за рамку, валидатор отбивает.
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: 0 } }]) }))).toBe(true);
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 2, y: 6 } }]) }))).toBe(true);
     expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: -1, y: 0 } }]) }))).toBe(false);
+    expect(resumableRun(runRow({ actions: JSON.stringify([{ type: 'piece', id: 'w1', to: { x: 0, y: 42 } }]) }))).toBe(false);
   });
 
   it('битое поле и пустая строка не продолжаются, но и не падают', () => {

@@ -10,8 +10,11 @@ import {
   legalMoves,
   raceCoinReward,
   raceLevelForMoves,
+  raceScrollEvery,
   raceSpawnEvery,
+  raceSpawnWidth,
   rulesFor,
+  survivalHint,
   type GameState,
   type MoveDx,
   type MoveDy,
@@ -101,12 +104,13 @@ describe('Гонки: король против фигур сверху', () => 
   });
 
   it('фигура, вставшая на клетку короля, заканчивает забег', () => {
-    // Ладья на той же линии, что и король, и путь свободен: король остаётся на
-    // линии - его снимают за ход, ничего другого движку не остаётся.
+    // Ладья стоит в двух клетках по ряду короля: за ход она доезжает ровно на
+    // клетку короля, дальше её путь не пускает ограничение дальности скользящего
+    // хода (`slideCap: 2` в правилах «Гонок»).
     const lined: GameState = {
       ...createRaceLevel(1, 777),
       player: { x: 3, y: 4 },
-      enemies: [{ id: 'r', type: 'rook', x: 0, y: 4 }],
+      enemies: [{ id: 'r', type: 'rook', x: 2, y: 4 }],
     };
     const stuck = move(lined, 1, 0);
     expect(stuck.status).toBe('lost');
@@ -115,17 +119,128 @@ describe('Гонки: король против фигур сверху', () => 
     expect(move(lined, 1, 1).status).toBe('playing');
   });
 
-  it('приток приходит в верхние ряды, по такту и не подставляет фигуру королю под ногу', () => {
+  it('приток приходит по такту, а не каждый ход', () => {
     const state: GameState = { ...createRaceLevel(1, 2024), player: { x: 0, y: 0 }, enemies: [] };
     const every = raceSpawnEvery(state.tier);
     let current = state;
-    for (let turn = 0; turn < every; turn++) {
+    for (let turn = 1; turn < every; turn++) {
       current = move(current, 0, 1);
+      // Пока такт не наступил, новых фигур на поле нет: иначе узкая полоса
+      // превращалась бы в стену за три хода.
+      expect(current.enemies.filter((enemy) => enemy.id.startsWith('s')).length).toBe(0);
     }
-    expect(current.enemies.length).toBeGreaterThan(0);
-    for (const enemy of current.enemies) {
+    current = move(current, 0, 1);
+    expect(current.moves).toBe(every);
+    expect(current.enemies.some((enemy) => enemy.id.startsWith(`s${every}-`))).toBe(true);
+  });
+
+  it('фигура рождается в верхних рядах, а не на голове у короля', () => {
+    // Заморозка держит и поле, и ходы фигур: на этом ходу появляется только
+    // приток, поэтому клетки рождения видно как есть.
+    const every = raceSpawnEvery(1);
+    const state: GameState = {
+      ...createRaceLevel(1, 2024),
+      player: { x: 0, y: 0 },
+      enemies: [],
+      freeze: 1,
+      moves: every - 1,
+    };
+    const next = move(state, 1, 0);
+    const born = next.enemies.filter((enemy) => enemy.id.startsWith(`s${every}-`));
+    expect(born.length).toBeGreaterThan(0);
+    for (const enemy of born) {
       expect(enemy.y).toBeGreaterThanOrEqual(RACE_ROWS - RACE_SPAWN_ROWS);
+      expect(enemy.y).toBeLessThan(RACE_ROWS);
+      expect(enemy.x === 0 && enemy.y === 0).toBe(false);
     }
+  });
+
+  it('на длинной серии ходов король не выпадает за поле и не выигрывает', () => {
+    // Бродим по легальным клеткам: нужно не умение выживать, а то, что бегущее
+    // поле не ломает партию. Финиша в забеге нет, поэтому «won» здесь быть не
+    // может по определению: верхний ряд это линия рождения фигур.
+    let current: GameState = createRaceLevel(1, 2024);
+    for (let turn = 0; turn < 60 && current.status === 'playing'; turn++) {
+      const options = legalMoves(current);
+      if (options.length === 0) break;
+      const step = options[turn % options.length]!;
+      current = move(current, (step.x - current.player.x) as MoveDx, (step.y - current.player.y) as MoveDy);
+      expect(current.player.y).toBeGreaterThanOrEqual(0);
+      expect(current.player.y).toBeLessThan(RACE_ROWS);
+      for (const enemy of current.enemies) {
+        expect(enemy.y).toBeGreaterThanOrEqual(0);
+        expect(enemy.y).toBeLessThan(RACE_ROWS);
+      }
+      expect(current.status).not.toBe('won');
+    }
+  });  it('полоса притока растёт с волной: три колонки в начале, вся доска с шестой', () => {
+    expect(raceSpawnWidth(1)).toBe(3);
+    expect(raceSpawnWidth(3)).toBe(5);
+    expect(raceSpawnWidth(RACE_WIDTH - 2)).toBe(RACE_WIDTH);
+    expect(raceSpawnWidth(40)).toBe(RACE_WIDTH);
+    // Стартовая пробка стоит в полосе первой волны: фланги свободны, и король
+    // с первого хода видит, куда уходить.
+    const state = createRaceLevel(1, 31337);
+    const left = Math.floor((RACE_WIDTH - raceSpawnWidth(1)) / 2);
+    expect(state.enemies.length).toBeGreaterThan(0);
+    for (const enemy of state.enemies) {
+      expect(enemy.x).toBeGreaterThanOrEqual(left);
+      expect(enemy.x).toBeLessThan(left + raceSpawnWidth(1));
+    }
+  });
+
+  it('поле бежит: нижний ряд уходит за край, короля сдвиг не трогает', () => {
+    const base: GameState = {
+      ...createRaceLevel(1, 4242),
+      moves: raceScrollEvery(1) - 1,
+      player: { x: 0, y: 0 },
+      enemies: [
+        { id: 'b', type: 'bishop', x: 2, y: 0 },
+        { id: 'r', type: 'rook', x: 7, y: RACE_ROWS - 1 },
+      ],
+    };
+    const next = move(base, 1, 0);
+    expect(next.player).toEqual({ x: 1, y: 0 });
+    expect(next.moves).toBe(raceScrollEvery(1));
+    // Слон стоял на уходящем ряду: его унесло.
+    expect(next.enemies.some((enemy) => enemy.id === 'b')).toBe(false);
+    // Ладья уехала на ряд вниз и осталась в поле.
+    const rook = next.enemies.find((enemy) => enemy.id === 'r');
+    expect(rook).toBeDefined();
+    expect(rook!.y).toBeLessThan(RACE_ROWS - 1);
+    // Заморозка держит поле: на такте заморозки ряд не едет.
+    const frozen = move({ ...base, freeze: 1 }, 1, 0);
+    expect(frozen.enemies.some((enemy) => enemy.id === 'b')).toBe(true);
+  });
+
+  it('фигура, спущенная рядом на клетку короля, ловит его', () => {
+    const base: GameState = {
+      ...createRaceLevel(1, 4242),
+      moves: raceScrollEvery(1) - 1,
+      player: { x: 3, y: 0 },
+      enemies: [{ id: 'r', type: 'rook', x: 3, y: 1 }],
+    };
+    expect(move(base, 1, 0).status).toBe('lost');
+    expect(move(base, 1, 0).lastEvent).toBe('captured');
+  });
+
+  it('подсказка в забеге отдаёт клетки, а не пустоту', () => {
+    // Перебор «до верха» здесь бесполезен: финиша нет, а ветвление короля
+    // сжигает лимит узлов, и подсказка возвращала пустой список.
+    for (let seed = 0; seed < 10; seed++) {
+      const state = createRaceLevel(1 + seed, 4242 + seed * 31);
+      const cells = survivalHint(state, 2);
+      expect(cells.length, `seed ${seed}`).toBeGreaterThan(0);
+      for (const cell of cells) {
+        expect(cell.x).toBeGreaterThanOrEqual(0);
+        expect(cell.x).toBeLessThan(RACE_WIDTH);
+        expect(cell.y).toBeGreaterThanOrEqual(0);
+        expect(cell.y).toBeLessThan(RACE_ROWS);
+      }
+    }
+    // На пустом поле подсказка не выдумывает ход.
+    const empty: GameState = { ...createRaceLevel(1, 5), enemies: [], status: 'lost' };
+    expect(survivalHint(empty, 2)).toEqual([]);
   });
 
   it('выживающий бот не умирает в первые ходы и доживает до среднего забега', () => {

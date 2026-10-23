@@ -292,7 +292,7 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
   if (mode === 'jam') {
     // Версия входит в проверку: задача «разойтись половинами» тоже была
     // `mode: 'jam'`, и на её состоянии новый экран падает на первом же шаге.
-    return value.version === 2 && Array.isArray(value.pieces) && typeof value.removed === 'number';
+    return value.version === 3 && Array.isArray(value.pieces) && typeof value.removed === 'number';
   }
   const shaped =
     typeof value.width === 'number' &&

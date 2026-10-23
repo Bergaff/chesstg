@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   JAM_PIECE_GLYPH,
-  jamExitCells,
-  jamExitRow,
+  jamAtEdge,
+  jamExitMoves,
+  jamIsExit,
   jamPieceMoves,
   type Cell,
   type JamState,
@@ -22,14 +23,12 @@ interface JamBoardProps {
 
 const FRAME_PAD = 8;
 const GAP = 2;
-/** Полоса ухода: столько же клеток, сколько рядов поля, но ниже. */
-const LANE_HEIGHT = 22;
 
 /**
- * Доска «Парковки»: те же клетки, что и в пешечных режимах, но фигур много,
- * и у них есть цвет. Сверху и снизу поля - полосы ухода: чёрные уходят за
- * верхний край, белые за нижний. Полосы рисуются всегда, иначе поле прыгало бы
- * при каждом выборе фигуры.
+ * Доска «Парковки»: те же клетки, что и в пешечных режимах, но фигур много, и у
+ * них есть цвет. Отдельных полос ухода нет: фигура уходит тем же ходом, каким
+ * просто встала бы на свой край, поэтому крайние ряды подкрашены, а клетки
+ * выхода помечены стрелкой.
  */
 export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }: JamBoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -40,7 +39,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
     if (!element) return;
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
-      if (rect) setBox({ width: rect.width, height: rect.height - LANE_HEIGHT * 2 });
+      if (rect) setBox({ width: rect.width, height: rect.height });
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -59,49 +58,13 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
 
   const active = state.pieces.find((piece) => piece.id === selected);
   const targets = active && interactive ? jamPieceMoves(state, active) : [];
-  const exits = active && interactive ? jamExitCells(state, active) : [];
+  const exits = active && interactive ? jamExitMoves(state, active) : [];
   const ready = new Set(
-    interactive ? state.pieces.filter((piece) => jamExitCells(state, piece).length > 0).map((piece) => piece.id) : [],
+    interactive ? state.pieces.filter((piece) => jamAtEdge(state, piece)).map((piece) => piece.id) : [],
   );
   const isTarget = (x: number, y: number) => targets.some((target) => target.x === x && target.y === y);
-  const laneOpen = (side: 'white' | 'black', x: number) =>
-    exits.some((exit) => exit.x === x && exit.y === jamExitRow(state, side));
-
-  const lane = (side: 'white' | 'black') => {
-    const y = jamExitRow(state, side);
-    return (
-      <div className="jam-lane" style={{ height: LANE_HEIGHT, gap: GAP }}>
-        {Array.from({ length: cols }).map((_, colIndex) => {
-          const open = laneOpen(side, colIndex);
-          // Подсказка вполне может сказать «уводи»: тогда отметка стоит на
-          // полосе, а не на клетке поля.
-          const hintHere = hint !== null && hint.to.y === y && hint.to.x === colIndex;
-          return (
-            <button
-              key={`${side}-${colIndex}`}
-              type="button"
-              className={cn('jam-lane-cell', open && 'is-open', hintHere && 'cell-hint')}
-              style={{ width: cell || undefined, height: LANE_HEIGHT }}
-              disabled={!open}
-              aria-label={
-                open
-                  ? `увести фигуру ${side === 'white' ? 'за нижний' : 'за верхний'} край, колонка ${colIndex + 1}`
-                  : `полоса ухода, колонка ${colIndex + 1}: сейчас здесь уходить нечему`
-              }
-              onClick={() => {
-                if (open && active) onPlace({ x: colIndex, y });
-              }}
-            >
-              {hintHere && <span className="hint-no">1</span>}
-              <span className="jam-lane-mark" aria-hidden="true">
-                {side === 'white' ? '↓' : '↑'}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    );
-  };
+  const isExit = (x: number, y: number) => exits.some((exit) => exit.x === x && exit.y === y);
+  const exitRow = (y: number) => (y === 0 ? 'white' : y === rows - 1 ? 'black' : null);
 
   return (
     <div className="board-measure" ref={wrapRef}>
@@ -109,18 +72,17 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
         className={cn('board-frame', 'jam-frame', state.status === 'lost' && 'board-lost')}
         style={{
           width: boardWidth > 0 ? boardWidth + FRAME_PAD * 2 : undefined,
-          height: boardHeight > 0 ? boardHeight + FRAME_PAD * 2 + LANE_HEIGHT * 2 : undefined,
+          height: boardHeight > 0 ? boardHeight + FRAME_PAD * 2 : undefined,
           opacity: cell > 0 ? 1 : 0,
         }}
       >
-        {lane('black')}
         <div
           className="board jam-board"
           style={{
             width: boardWidth || undefined,
             height: boardHeight || undefined,
             gap: GAP,
-            fontSize: cell ? Math.round(cell * 0.62) : undefined,
+            fontSize: cell ? Math.round(cell * 0.6) : undefined,
             gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
             gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
           }}
@@ -134,10 +96,13 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
               const dark = (x + y) % 2 === 0;
               const piece = state.pieces.find((entry) => entry.x === x && entry.y === y);
               const target = isTarget(x, y);
+              const exitHere = isExit(x, y);
+              const side = exitRow(y);
               const canExit = piece ? ready.has(piece.id) : false;
               const hintHere = hint && hint.to.x === x && hint.to.y === y;
               const hintPiece = hint && piece && hint.id === piece.id;
               const fromLast = state.lastMove && state.lastMove.to.x === x && state.lastMove.to.y === y;
+              const leftHere = fromLast && state.lastEvent === 'exit';
 
               return (
                 <button
@@ -147,9 +112,12 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   className={cn(
                     'cell',
                     dark ? 'cell-dark' : 'cell-light',
-                    piece?.side === 'white' ? 'cell-half-bottom' : 'cell-half-top',
+                    side === 'white' && 'cell-edge-bottom',
+                    side === 'black' && 'cell-edge-top',
                     target && interactive && 'cell-move',
+                    exitHere && 'cell-exit',
                     fromLast && 'cell-flash',
+                    leftHere && 'cell-left',
                     hintHere && 'cell-hint',
                     hintPiece && 'cell-hint-source',
                   )}
@@ -160,9 +128,13 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                       ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${
                           piece.type === 'rook' ? 'ладья' : piece.type === 'bishop' ? 'слон' : 'конь'
                         }, клетка ${x + 1}, ${y + 1}${canExit ? ', может уйти с поля' : ''}`
-                      : target
-                        ? `клетка ${x + 1}, ${y + 1}: сюда можно поставить фигуру`
-                        : `клетка ${x + 1}, ${y + 1}`
+                      : exitHere
+                        ? `клетка ${x + 1}, ${y + 1}: сюда встанет край, фигура уйдёт с поля`
+                        : target
+                          ? `клетка ${x + 1}, ${y + 1}: сюда можно поставить фигуру`
+                          : leftHere
+                            ? `клетка ${x + 1}, ${y + 1}: отсюда фигура ушла`
+                            : `клетка ${x + 1}, ${y + 1}`
                   }
                   onClick={() => {
                     if (!interactive) return;
@@ -174,6 +146,16 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   }}
                 >
                   {hintHere && <span className="hint-no">1</span>}
+                  {exitHere && (
+                    <span className="exit-mark" aria-hidden="true">
+                      {active && jamIsExit(state, active, { x, y }) ? (active.side === 'white' ? '↓' : '↑') : ''}
+                    </span>
+                  )}
+                  {leftHere && (
+                    <span className="left-mark" aria-hidden="true">
+                      ↧
+                    </span>
+                  )}
                   {piece && (
                     <span
                       className={cn(
@@ -185,6 +167,9 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                       )}
                     >
                       <span className="piece-glyph">{JAM_PIECE_GLYPH[piece.type]}</span>
+                      <span className="jam-side-mark" aria-hidden="true">
+                        {piece.side === 'white' ? '↓' : '↑'}
+                      </span>
                     </span>
                   )}
                 </button>
@@ -192,7 +177,6 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
             }),
           )}
         </div>
-        {lane('white')}
       </div>
       {cell === 0 && <div className="board-placeholder" />}
     </div>

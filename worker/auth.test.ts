@@ -190,9 +190,13 @@ describe('значения с плюсиками', () => {
   it('не ломает base64 со знаком плюс', async () => {
     const instance = 'Q+Zk/abc==';
     const user = encodeURIComponent(USER);
-    const check = `auth_date=${'1792560000'}\nchat_instance=${instance}\nuser=${user}`;
+    // Отметку времени берём текущую: валидатор отбрасывает устаревшие данные,
+    // и любая зафиксированная дата превращала тест в бомбу замедленного
+    // действия - через несколько дней он падал бы по причине «слишком старые».
+    const authDate = Math.floor(Date.now() / 1000) - 60;
+    const check = `auth_date=${authDate}\nchat_instance=${instance}\nuser=${user}`;
     const hash = await signOver(check, TOKEN);
-    const result = await validateInitData(`auth_date=1792560000&chat_instance=${instance}&user=${user}&hash=${hash}`, TOKEN);
+    const result = await validateInitData(`auth_date=${authDate}&chat_instance=${instance}&user=${user}&hash=${hash}`, TOKEN);
     expect(result.reason).toBeNull();
     expect(result.check?.user.id).toBe(777);
   });

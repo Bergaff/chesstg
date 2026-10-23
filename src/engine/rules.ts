@@ -1,6 +1,6 @@
 import { cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
-import { RACE_SPAWN_ROWS, raceLevelForMoves, raceSpawnPool } from './race';
+import { RACE_SPAWN_ROWS, raceLevelForMoves, raceScrollEvery, raceSpawnPool, raceSpawnWidth } from './race';
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
@@ -41,12 +41,17 @@ function spawnPhase(state: GameState): void {
   const rng = new Rng(state.rng || 1);
   const rows = Math.max(1, Math.min(rules.spawnRows || 1, state.height - 1));
   const pool: readonly string[] = rules.player === 'king' ? raceSpawnPool(state.tier) : SPAWN_POOL;
+  // Приток занимает полосу по центру: на первой волне три колонки, дальше
+  // полоса растёт и с шестой волны держит всю ширину поля.
+  const band = rules.player === 'king' ? raceSpawnWidth(state.tier) : state.width;
+  const left = Math.max(0, Math.floor((state.width - band) / 2));
+  const span = Math.max(1, Math.min(band, state.width));
   const taken = (x: number, y: number) =>
     state.enemies.some((e) => e.x === x && e.y === y) || (state.player.x === x && state.player.y === y);
   for (let spawned = 0; spawned < perTurn; spawned++) {
     let placed = false;
     for (let attempt = 0; attempt < 8 && !placed; attempt++) {
-      const x = rng.int(state.width);
+      const x = left + rng.int(span);
       const y = state.height - 1 - rng.int(rows);
       if (taken(x, y)) continue;
       const type = pickSpawnType(pool, rng);
@@ -70,8 +75,47 @@ function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][
   return pool[rng.int(pool.length)] as GameState['enemies'][number]['type'];
 }
 
+/**
+ * Такт поля в бегущих режимах: нижний ряд уходит за край и уносит всё, что на
+ * нём стояло, остальных сдвигает на ряд вниз. Короля сдвиг не трогает: он
+ * «двигается, но остаётся» на своём ряду, а ряды протекают мимо. Фигура,
+ * спущенная на клетку короля, ловит его на месте, поэтому проверка стоит здесь,
+ * а не в шахматном ходе.
+ */
+function scrollPhase(state: GameState): void {
+  const rules = rulesFor(state.mode);
+  // Заморозка держит всё поле, а не только шахматные ходы фигур: иначе она
+  // стоила бы тридцати монет за передышку в один ход.
+  if (!rules.scroll || state.freeze > 0 || state.status !== 'playing') return;
+  const every = Math.max(1, raceScrollEvery(state.tier));
+  if (state.moves % every !== 0) return;
+
+  const kept: typeof state.enemies = [];
+  let swept = 0;
+  for (const enemy of state.enemies) {
+    const y = enemy.y - 1;
+    if (y < 0) {
+      swept += 1;
+      continue;
+    }
+    if (y === state.player.y && enemy.x === state.player.x) {
+      state.status = 'lost';
+      state.capturedBy = enemy.type;
+      state.lastEvent = 'captured';
+      state.enemies = state.enemies.map((e) => (e.id === enemy.id ? { ...e, y } : e));
+      return;
+    }
+    kept.push({ ...enemy, y });
+  }
+  state.enemies = kept;
+  if (swept > 0) state.lastEvent = 'swept';
+}
+
 function enemyPhase(state: GameState): void {
   const rules = rulesFor(state.mode);
+  // Партия могла кончиться на такте поля: ответ фигур тогда не пишется в
+  // журнал, чтобы `lastEvent` остался причиной конца забега.
+  if (state.status !== 'playing') return;
   if (state.freeze > 0) {
     state.freeze -= 1;
     if (state.shield > 0) state.shield -= 1;
@@ -218,8 +262,9 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.
   const waitingForNothing = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && noMovesLeft(state);
   const before = waitingForNothing ? boardSignature(state) : '';
-  enemyPhase(state);
+  scrollPhase(state);
   spawnPhase(state);
+  enemyPhase(state);
 
   // Тупик: если после хода фигур и притока ходить нечем, а режима не даёт
   // ни победы по верхнему ряду, ни осмысленного ожидания, партия проиграна.

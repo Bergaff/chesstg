@@ -119,6 +119,13 @@ export function canSkip(state: GameState): boolean {
  */
 export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
   const moves: Cell[] = [];
+  // Дальность скользящего хода. В режимах на выживание она ограничена: иначе
+  // ладья перелетает с верхнего края на ряд игрока за один ход, и игрок
+  // проигрывает раньше, чем успевает прочитать поле.
+  const maxSlide = Math.min(
+    rulesFor(state.mode).slideCap ?? Number.POSITIVE_INFINITY,
+    Math.max(state.width, state.height) - 1,
+  );
   const tryAdd = (x: number, y: number) => {
     if (!inside(state, x, y)) return false;
     if (enemyAt(state, x, y, enemy.id)) return false;
@@ -152,7 +159,7 @@ export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
         [0, -1],
       ];
       for (const [dx, dy] of dirs) {
-        for (let step = 1; step < Math.max(state.width, state.height); step++) {
+        for (let step = 1; step <= maxSlide; step++) {
           const x = enemy.x + dx * step;
           const y = enemy.y + dy * step;
           if (!inside(state, x, y)) break;
@@ -174,7 +181,7 @@ export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
         [-1, -1],
       ];
       for (const [dx, dy] of dirs) {
-        for (let step = 1; step < Math.max(state.width, state.height); step++) {
+        for (let step = 1; step <= maxSlide; step++) {
           const x = enemy.x + dx * step;
           const y = enemy.y + dy * step;
           if (!inside(state, x, y)) break;
@@ -200,7 +207,7 @@ export function enemyMoves(state: GameState, enemy: Enemy): Cell[] {
         [-1, -1],
       ];
       for (const [dx, dy] of dirs) {
-        for (let step = 1; step < Math.max(state.width, state.height); step++) {
+        for (let step = 1; step <= maxSlide; step++) {
           const x = enemy.x + dx * step;
           const y = enemy.y + dy * step;
           if (!inside(state, x, y)) break;

@@ -1,15 +1,16 @@
 // «Парковка»: поле забито фигурами двух цветов, и их нужно увести.
 //
-// Ходит игрок: берёт любую фигуру и гонит её по её правилу. Шаг за край поля
-// фигуру снимает навсегда, и тогда к этому краю можно подвести другую. Белые
-// уходят за нижний край, чёрные за верхний: обе стороны едут от чужой половины,
+// Ходит игрок: берёт любую фигуру и гонит её по её правилу. Фигура ушла, если
+// её ход встал на её край: белые на нулевой ряд, чёрные на последний. Отдельной
+// кнопки для ухода нет, это ровно тот же ход, что и любой другой, просто он
+// привёл фигуру домой, и после него фигуры на поле не остаётся. Оба края свои,
 // поэтому пробка расходится с двух сторон и не превращается в гонку к одному
 // ряду. Взятий нет: чужую фигуру нельзя съесть, можно только обойти.
 //
-// Решаемость здесь не «собирается из решённой позиции обратными ходами», как
-// это было у задачи «разойтись половинами»: уход с поля необратим, поэтому
-// обратный след построить нельзя. Вместо него генератор ищет план самим
-// решателем (`solveJamExits`), и от него же считаются бюджет ходов и подсказка.
+// Решаемость здесь не «собирается из решённой позиции обратными ходами»: уход
+// необратим, обратный след построить нельзя. Вместо этого генератор ищет план
+// самим решателем (`solveJamExits`), и от него же считаются бюджет ходов и
+// подсказка.
 
 import { mix32, Rng } from './rng';
 import type { Cell } from './types';
@@ -32,7 +33,13 @@ export interface JamAction {
 }
 
 export interface JamState {
-  version: 2;
+  /**
+   * 3: уход по достижению своего края, без клетки за доской. Версия стоит в
+   * проверке формы не для красоты: активная партия прежней сборки держит журнал
+   * с клетками вне поля, и новый движок их не примет, поэтому такую партию
+   * проще закрыть, чем чинить.
+   */
+  version: 3;
   mode: 'jam';
   width: number;
   height: number;
@@ -127,21 +134,29 @@ export function isJamState(state: unknown): state is JamState {
   const candidate = state as { mode?: unknown; pieces?: unknown; removed?: unknown; version?: unknown };
   return (
     candidate.mode === 'jam' &&
-    candidate.version === 2 &&
+    candidate.version === 3 &&
     Array.isArray(candidate.pieces) &&
     typeof candidate.removed === 'number'
   );
 }
 
-/** За какой край уходит фигура: белые за нижний, чёрные за верхний. */
+/**
+ * Край фигуры: белые уходят с нулевого ряда, чёрные с последнего. Это ряд поля,
+ * а не клетка за ним: уход это обычный ход на свой край, и журнал хранит
+ * обычную клетку.
+ */
 export function jamExitRow(state: Pick<JamState, 'height'>, side: JamSide): number {
-  return side === 'white' ? -1 : state.height;
+  return side === 'white' ? 0 : state.height - 1;
 }
 
-/** Ряд, где фигура уже у края и может сойти с поля прямым шагом. */
-export function jamAtEdge(state: Pick<JamState, 'height'>, piece: JamPiece): boolean {
-  const edge = jamExitRow(state, piece.side);
-  return piece.side === 'white' ? piece.y <= 1 : piece.y >= state.height - 2;
+/** Вел ли ход фигуру на её край: значит фигура уходит с поля. */
+export function jamIsExit(state: Pick<JamState, 'height'>, piece: Pick<JamPiece, 'side'>, to: Cell): boolean {
+  return to.y === jamExitRow(state, piece.side);
+}
+
+/** Готова ли фигура уйти с поля одним ходом. */
+export function jamAtEdge(state: JamState, piece: JamPiece): boolean {
+  return jamExitMoves(state, piece).length > 0;
 }
 
 export function jamSolved(state: Pick<JamState, 'pieces'>): boolean {
@@ -195,8 +210,8 @@ const KNIGHT_OFFSETS: Array<[number, number]> = [
 
 /**
  * Куда может уехать фигура. Ладья и слон скользят до первой занятой клетки,
- * конь перепрыгивает. Все ходы внутри поля, уход за край считается отдельно
- * (`jamExitCells`), чтобы у клетки выхода был свой адрес в журнале.
+ * конь перепрыгивает. Все ходы внутри поля: уход не отдельное действие, а ход,
+ * вставший на край фигуры (`jamExitMoves`).
  */
 export function jamPieceMoves(board: Board, piece: JamPiece, at?: Cell): Cell[] {
   const from = at ?? piece;
@@ -225,54 +240,17 @@ export function jamPieceMoves(board: Board, piece: JamPiece, at?: Cell): Cell[] 
 }
 
 /**
- * Клетки ухода: куда фигура staje, чтобы покинуть поле. Считаем по тому же
- * правилу движения, что и обычные ходы, но стоп-клеткой считаем выход за
- * горизонталь края. Угол поля слон проходит по диагонали, конь перепрыгивает
- * строку, ладья съезжает по колонке.
+ * Ходы, которые ведут фигуру с поля: подмножество её обычных ходов, встающее на
+ * её край. Отдельных клеток «за доской» нет, поэтому проверка легальности одна
+ * на всё, а снятие фигуры следует из того же хода.
  */
-export function jamExitCells(board: Board, piece: JamPiece, at?: Cell): Cell[] {
-  const from = at ?? piece;
-  const edge = jamExitRow(board, piece.side);
-  const toward = piece.side === 'white' ? -1 : 1;
-  const insideColumn = (x: number) => x >= 0 && x < board.width;
-  const blocked = (x: number, y: number) => pieceAt(board.pieces, x, y, piece.id) !== undefined;
-  const out: Cell[] = [];
-
-  if (piece.type === 'knight') {
-    for (const [dx, dy] of KNIGHT_OFFSETS) {
-      if (Math.sign(dy) !== toward) continue;
-      const x = from.x + dx;
-      const y = from.y + dy;
-      // Прыжок считается уходом, только если конь пересекает горизонталь края,
-      // а не сваливается за боковую стенку.
-      if (!insideColumn(x)) continue;
-      if (toward < 0 ? y > edge : y < edge) continue;
-      out.push({ x, y: edge });
-    }
-    return out;
-  }
-
-  for (const [dx, dy] of linesFor(piece.type)) {
-    if (Math.sign(dy) !== toward) continue;
-    const reach = Math.max(board.width, board.height) + 2;
-    for (let step = 1; step < reach; step++) {
-      const x = from.x + dx * step;
-      const y = from.y + dy * step;
-      // За боковую стенку уходить нельзя: край для нас горизонталь.
-      if (!insideColumn(x)) break;
-      if (y === edge) {
-        out.push({ x, y: edge });
-        break;
-      }
-      if (blocked(x, y)) break;
-    }
-  }
-  return out;
+export function jamExitMoves(board: Board, piece: JamPiece, at?: Cell): Cell[] {
+  return jamPieceMoves(board, piece, at).filter((cell) => jamIsExit(board, piece, cell));
 }
 
-/** Все клетки, доступные фигуре за один ход: и внутрь поля, и на выход. */
+/** Все клетки, доступные фигуре за один ход: уход это одна из них, а не отдельный список. */
 export function jamPieceTargets(board: Board, piece: JamPiece): Cell[] {
-  return [...jamPieceMoves(board, piece), ...jamExitCells(board, piece)];
+  return jamPieceMoves(board, piece);
 }
 
 export function jamLegalActions(state: JamState): JamAction[] {
@@ -330,7 +308,7 @@ function jamPathToExit(board: Board, piece: JamPiece, maxNodes = 4000): JamActio
 
   while (queue.length > 0 && nodes++ < maxNodes) {
     const node = queue.shift() as PathNode;
-    const exits = jamExitCells(board, piece, node);
+    const exits = jamExitMoves(board, piece, node);
     if (exits.length > 0) {
       const moves: JamAction[] = [{ type: 'piece', id: piece.id, to: exits[0] }];
       for (let step = node; step.parent; step = step.parent) {
@@ -380,13 +358,17 @@ export function solveJamExits(
     costs.push(chosen.path.length);
     const index = pieces.findIndex((piece) => piece.id === chosen.id);
     const last = chosen.path[chosen.path.length - 1];
-    // Последняя клетка пути за краем: фигуру снимаем, она больше не стена.
-    if (last.to.y < 0 || last.to.y >= state.height) pieces.splice(index, 1);
+    // Последняя клетка пути стоит на краю фигуры: её снимаем, она больше не стена.
+    if (jamIsExit(state, pieceById(pieces, chosen.id) ?? { side: 'white' }, last.to)) pieces.splice(index, 1);
     else {
       pieces[index] = { ...pieces[index], x: last.to.x, y: last.to.y };
     }
   }
   return { ok: true, moves, costs };
+}
+
+function pieceById(pieces: JamPiece[], id: string): Pick<JamPiece, 'side'> | undefined {
+  return pieces.find((piece) => piece.id === id);
 }
 
 function cloneJamBoard(state: Pick<JamState, 'width' | 'height' | 'pieces'>): Board {
@@ -403,12 +385,14 @@ function buildLayout(args: { width: number; height: number; total: number; rng: 
   const cells: Array<{ x: number; y: number }> = [];
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) cells.push({ x, y });
   rng.shuffle(cells);
-  const taken = cells.slice(0, Math.min(total, cells.length));
+  const taken = cells.filter((cell) => cell.y !== 0 && cell.y !== height - 1);
   const pieces: JamPiece[] = [];
   let id = 0;
-  for (const cell of taken) {
+  for (const cell of taken.slice(0, total)) {
     // Белые занимают нижнюю половину, чёрные верхнюю: уходить каждой стороне
-    // нужно к своему краю, и пробка расходится с двух сторон.
+    // нужно к своему краю, и пробка расходится с двух сторон. Крайние ряды при
+    // этом пусты на старте: фигура на своём краю ушла бы первым же ходом, и
+    // задача превратилась бы в подсчёт фигур, а не в манёвр.
     const side: JamSide = cell.y < height / 2 ? 'black' : 'white';
     pieces.push({ id: `p${id++}`, type: weightedType(rng), side, x: cell.x, y: cell.y });
   }
@@ -445,7 +429,7 @@ export function createJamPuzzle(level: number, seed: number, attempts = 24): Jam
     const pieces = buildLayout({ width, height, total, rng });
     const plan = solveJamExits({ width, height, pieces }, { rng });
     return {
-      version: 2,
+      version: 3,
       mode: 'jam',
       width,
       height,
@@ -465,7 +449,7 @@ export function createJamPuzzle(level: number, seed: number, attempts = 24): Jam
 
   const cost = best.plan.moves.length;
   return {
-    version: 2,
+    version: 3,
     mode: 'jam',
     width,
     height,
@@ -493,13 +477,19 @@ export function jamHint(state: JamState): JamAction | null {
   const board = cloneJamBoard(state);
   const positions = new Map(state.pieces.map((piece) => [piece.id, piece]));
 
-  for (const move of state.plan ?? []) {
-    const piece = positions.get(move.id);
-    if (!piece) continue;
-    const targets = jamPieceTargets(board, piece);
-    if (targets.some((cell) => cell.x === move.to.x && cell.y === move.to.y)) return move;
-    // План разошёлся с позицией: дальше пробуем пересобрать, а не угадывать.
-    break;
+  // План привязан к счётчику ходов: пока игрок слушает подсказку, `moves` это и
+  // есть индекс следующего шага. Читать план с нуля нельзя - ранний шаг коня
+  // через несколько ходов снова легален, подсказка зацикливается на нём, и
+  // игрок, который ей доверился, сжигает бюджет на месте.
+  const steps = state.plan;
+  if (steps && steps.length > state.moves) {
+    for (let index = state.moves; index < steps.length; index++) {
+      const move = steps[index];
+      const piece = positions.get(move.id);
+      if (!piece) continue; // фигуру уже увели с поля
+      const targets = jamPieceTargets(board, piece);
+      if (targets.some((cell) => cell.x === move.to.x && cell.y === move.to.y)) return move;
+    }
   }
 
   const plan = solveJamExits(board);
@@ -525,12 +515,14 @@ export function applyJamAction(previous: JamState, action: JamAction, RuleErrorC
   const piece = state.pieces.find((entry) => entry.id === action.id);
   if (!piece) throw new RuleErrorCtor('Фигуры с таким id нет');
 
-  const exiting = action.to.y < 0 || action.to.y >= state.height;
-  if (action.to.x < 0 || action.to.x >= state.width) throw new RuleErrorCtor('За границей поля');
-  const legal = exiting
-    ? jamExitCells(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y)
-    : jamPieceMoves(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y);
-  if (!legal) throw new RuleErrorCtor(exiting ? 'Фигура не может уйти с этого поля' : 'Фигура так не ходит');
+  if (action.to.x < 0 || action.to.x >= state.width || action.to.y < 0 || action.to.y >= state.height) {
+    throw new RuleErrorCtor('За границей поля');
+  }
+  // Проверка одна для всех ходов: уход это ход на свой край, а не отдельное
+  // действие, поэтому и отказ один: «так не ходит».
+  const legal = jamPieceMoves(state, piece).some((cell) => cell.x === action.to.x && cell.y === action.to.y);
+  if (!legal) throw new RuleErrorCtor('Фигура так не ходит');
+  const exiting = jamIsExit(state, piece, action.to);
 
   const from = { x: piece.x, y: piece.y };
   if (exiting) {

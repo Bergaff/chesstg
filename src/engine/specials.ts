@@ -1,7 +1,15 @@
 import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
 import { auditState, difficultyBand, SURVIVAL_DEPTH, survivalTargetFor } from './audit';
 import { boardForMode, isSurvivalGoal, piecesFor, rulesFor, type ModeId } from './modes';
-import { RACE_KING_ROW, RACE_PREFILL, RACE_ROWS, RACE_SPAWN_ROWS, RACE_WIDTH, raceSpawnPool } from './race';
+import {
+  RACE_KING_ROW,
+  RACE_PREFILL,
+  RACE_ROWS,
+  RACE_SPAWN_ROWS,
+  RACE_WIDTH,
+  raceSpawnPool,
+  raceSpawnWidth,
+} from './race';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
 import { availablePieceTypes, createCampaignLevel } from './level';
@@ -96,12 +104,22 @@ export function createRaceLevel(level: number, seed: number): GameState {
   const width = RACE_WIDTH;
   const height = RACE_ROWS;
   const rng = new Rng(mix32(seed, level, 0x9ac3, width, height));
+  // Полоса первой волны и стартовая колонка короля: король выходит вне полосы,
+  // иначе ладья из пробки приезжает по его колонке за один ход, и забег
+  // кончается раньше, чем игрок успевает увидеть, что поле бежит.
+  const band = Math.min(width, raceSpawnWidth(1));
+  const bandLeft = Math.max(0, Math.floor((width - band) / 2));
+  const free: number[] = [];
+  for (let x = 0; x < width; x++) {
+    if (x < bandLeft || x >= bandLeft + band) free.push(x);
+  }
+  const startColumn = free.length > 0 ? free[rng.int(free.length)] : rng.int(width);
   const state: GameState = {
     version: 1,
     mode: 'race',
     width,
     height,
-    player: { x: rng.int(width), y: RACE_KING_ROW },
+    player: { x: startColumn, y: RACE_KING_ROW },
     enemies: [],
     status: 'playing',
     moves: 0,
@@ -114,11 +132,14 @@ export function createRaceLevel(level: number, seed: number): GameState {
     seed,
   };
   const pool = raceSpawnPool(1);
-  const target = Math.min(RACE_PREFILL, RACE_SPAWN_ROWS * width - 1);
+  // Стартовая пробка стоит в той же полосе, что и будущий приток: иначе начало
+  // забега выглядело бы шире, чем оно есть на первой волне.
+  const left = bandLeft;
+  const target = Math.min(RACE_PREFILL, RACE_SPAWN_ROWS * band - 1);
   let placed = 0;
   let guard = 0;
   while (placed < target && guard++ < 300) {
-    const x = rng.int(width);
+    const x = left + rng.int(band);
     const y = height - 1 - rng.int(RACE_SPAWN_ROWS);
     if (state.enemies.some((e) => e.x === x && e.y === y)) continue;
     if (x === state.player.x && y === state.player.y) continue;

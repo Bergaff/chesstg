@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import {
   PIECE_GLYPH,
   SKINS,
+  RACE_SPAWN_ROWS,
   endlessViewport,
+  raceSpawnWidth,
   enemyAttacksCell,
   rulesFor,
   type Cell,
@@ -102,6 +104,13 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
   const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
   const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
 
+  // Бегущее поле: полоса, откуда приходит приток, и линия, за которой ряд
+  // уходит. Рисуются поверх доски, чтобы геометрия поля не менялась.
+  const flow = Boolean(rules.scroll) && cell > 0;
+  const band = flow ? Math.min(state.width, raceSpawnWidth(state.tier)) : 0;
+  const bandLeft = flow ? Math.floor((state.width - band) / 2) : 0;
+  const spawnRows = Math.max(1, Math.min(rules.spawnRows ?? RACE_SPAWN_ROWS, state.height - 1));
+
   const playerGlyph = king ? '♚' : (SKINS[skin]?.pawn ?? '♟');
   const playerSlide =
     playerBefore !== null && (playerBefore.x !== state.player.x || playerBefore.y !== state.player.y)
@@ -119,11 +128,12 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
         }}
       >
         <div
-          className="board"
+          className={cn('board', flow && 'board-flow')}
           style={{
             width: boardWidth || undefined,
             height: boardHeight || undefined,
             gap,
+            position: 'relative',
             fontSize: cell ? Math.round(cell * 0.56) : undefined,
             gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
             gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
@@ -249,6 +259,19 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
             }),
           )}
         </div>
+          {flow && (
+            <div className="flow-marks" aria-hidden="true">
+              <span
+                className="flow-in"
+                style={{
+                  left: bandLeft * (cell + gap),
+                  width: band * cell + (band - 1) * gap,
+                  height: spawnRows * cell + (spawnRows - 1) * gap,
+                }}
+              />
+              <span className="flow-out" />
+            </div>
+          )}
       </div>
       {settling && <div className="board-turn-flag">{king ? 'фигуры идут' : 'ход фигур'}</div>}
       {cell === 0 && <div className="board-placeholder" />}

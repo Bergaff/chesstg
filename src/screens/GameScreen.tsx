@@ -23,7 +23,10 @@ import {
   modeDef,
   rulesFor,
   projectHint,
+  survivalHint,
+  raceScrollEvery,
   raceSpawnEvery,
+  raceSpawnWidth,
   type BonusId,
   type Cell,
   type GameAction,
@@ -453,8 +456,13 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
   async function useHint() {
     if (!state || !canPlay || bonusBusy) return;
-    const analysis = analyzeState(state, { maxDepth: 6, maxNodes: 3000 });
-    const cells = projectHint(state, analysis.path, 2);
+    // У режимов на выживание финиша нет, поэтому там подсказка ищет не путь, а
+    // лучший следующий ход. Перебор до верхнего ряда на них только сжигает лимит
+    // узлов и возвращает пустоту, из-за чего подсказка «не работала».
+    const cells =
+      rulesFor(state.mode).goal === 'survive'
+        ? survivalHint(state, 2)
+        : projectHint(state, analyzeState(state, { maxDepth: 6, maxNodes: 3000 }).path, 2);
     if (!cells.length) {
       toast('Безопасного пути не видно. Попробуй другой ход.', 'info');
       return;
@@ -694,6 +702,11 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   // поле заполняется не каждый ход.
   const raceEvery = isRace ? raceSpawnEvery(state.tier) : 0;
   const raceElapsed = isRace ? state.moves % raceEvery : 0;
+  // Такт поля и ширина притока: первое отвечает на вопрос «ряд уходит сейчас или
+  // через ход», второе на «сколько колонок заняты рождением фигур».
+  const raceRows = isRace ? Math.max(1, raceScrollEvery(state.tier)) : 0;
+  const raceRowElapsed = isRace ? state.moves % raceRows : 0;
+  const raceBand = isRace ? Math.min(run.initial.width, raceSpawnWidth(state.tier)) : 0;
   // Король: у «Гонок» игрок ходит на клетку в любую сторону, поэтому кнопок
   // девять, а не три.
   const king = rules.player === 'king';
@@ -749,6 +762,27 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
                   <i key={index} className={index < raceElapsed ? 'on' : undefined} />
                 ))}
               </span>
+            </span>
+          </>
+        )}
+        {isRace && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className="status-item">
+              ряд через {raceRows - raceRowElapsed}
+              <span className="race-ticks" aria-hidden="true">
+                {Array.from({ length: raceRows }).map((_, index) => (
+                  <i key={index} className={index < raceRowElapsed ? 'on' : undefined} />
+                ))}
+              </span>
+            </span>
+          </>
+        )}
+        {isRace && (
+          <>
+            <span className="status-sep" aria-hidden="true">/</span>
+            <span className={cn('status-item', raceBand >= run.initial.width && 'off')}>
+              приток в {raceBand} из {run.initial.width}
             </span>
           </>
         )}
