@@ -62,6 +62,14 @@ describe('правила режимов', () => {
     expect(MODE_RULES.race.goal).toBe('survive');
     // Взятия королю не лимитируем: снимать фигуры это единственный способ дышать.
     expect(MODE_RULES.race.captureQuota).toBe(0);
+    // Поле «Гонок» растёт вширь, и доска сверяется с этим флагом: без него рост
+    // выглядел бы как смена масштаба поля.
+    expect(MODE_RULES.race.grow).toBe(true);
+    expect(MODE_RULES.campaign.grow ?? false).toBe(false);
+    expect(MODE_RULES.jam.grow ?? false).toBe(false);
+    // Вариант на уклонение сравнивает правила на статичной ширине.
+    expect(MODE_RULES.raceDodge.grow).toBe(false);
+    expect(MODE_RULES.raceDodge.scroll).toBe(false);
   });
 
   it('геометрия кампании идёт из режима', () => {

@@ -9,6 +9,10 @@ WEBHOOK_SECRET=
 # WEBAPP_URL=
 # BOT_USERNAME=
 # ALLOW_GUESTS=true
+# Вечные сердца для проверки механики: список Telegram id через запятую.
+# В боле задаётся только секретом (wrangler secret put QA_LIVES_IDS), иначе его
+# сотрёт следующий билд. Гостевым аккаунтам список не выдаётся.
+# QA_LIVES_IDS=
 # Локально удобно включить демо-рекламу и приём вебхука без секрета:
 # DEV_MODE=true
 # ADSGRAM_SRC=https://sad.adsgram.ai/js/sad.min.js

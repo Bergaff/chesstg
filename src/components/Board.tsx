@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   PIECE_GLYPH,
+  RACE_WIDTH,
   SKINS,
   endlessViewport,
   enemyAttacksCell,
@@ -122,11 +123,15 @@ export function Board({
   const gap = 2;
   const availableWidth = Math.max(0, box.width - FRAME_PAD * 2);
   const availableHeight = Math.max(0, box.height - FRAME_PAD * 2);
+  // Растущее поле держит размер клетки по полной ширине доски, а не по текущей:
+  // иначе каждая добавленная колонка пересчитывала бы клетки, и рост читался бы
+  // как «доска съехала», а не как «поле стало шире».
+  const sizeCols = rules.grow ? Math.max(cols, RACE_WIDTH) : cols;
   const cell =
     availableWidth > 0 && availableHeight > 0
       ? Math.floor(
           Math.min(
-            (availableWidth - gap * (cols - 1)) / cols,
+            (availableWidth - gap * (sizeCols - 1)) / sizeCols,
             (availableHeight - gap * (rows - 1)) / rows,
           ),
         )
