@@ -689,7 +689,9 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
 }
 
 export const JAM_VARIANTS: ModeId[] = ['jam', 'jamExit2', 'jamExit4'];
-export const RACE_VARIANTS: ModeId[] = ['race', 'raceDodge'];
+// «Уклонение» - прежний лабораторный режим, `raceNoStrike` - тот же бой без
+// права на выпад: на этой паре правило проверяется цифрами.
+export const RACE_VARIANTS: ModeId[] = ['race', 'raceDodge', 'raceNoStrike'];
 export const DIAGONAL_VARIANTS: ModeId[] = ['campaign', 'campaignStrictDiag', 'jam', 'jamStrictDiag'];
 
 /** Прогон нескольких вариантов на одном уровне. Возвращает отчёты в том же порядке. */

@@ -34,6 +34,8 @@ describe('прогон сравнений', () => {
     expect(rulesFor('jamExit2')).toMatchObject({ motion: 'exit', exitDirections: 2, freeDiagonal: true });
     expect(rulesFor('jamExit4').exitDirections).toBe(4);
     expect(rulesFor('raceDodge')).toMatchObject({ goal: 'survive', motion: 'greedy', spawnPerTurn: 1 });
+    // Поле без выпада отличается одним флагом: генератор, приток и полоса те же.
+    expect(rulesFor('raceNoStrike')).toMatchObject({ strike: 0, kingRows: 2, exitAtBottom: true });
     expect(rulesFor('campaignStrictDiag').freeDiagonal).toBe(false);
     expect(rulesFor('jamStrictDiag')).toMatchObject({ freeDiagonal: false, motion: 'static' });
     // Варианты живут в том же словаре, значит генератор и лаборатория видят их наравне.
@@ -162,6 +164,21 @@ describe('прогон сравнений', () => {
     // Ни один забег не кончился победой: режим без финиша.
     for (const row of rows) expect(row.causes.won ?? 0).toBe(0);
     expect(RACE_KING_ROWS).toBe(2);
+  }, 120_000);
+
+  it('сравнение с полем без выпада добавляет колонку, а не меняет прогон', () => {
+    const plain = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120 })[0];
+    expect(plain.noStrike).toBeUndefined();
+    const compared = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120, compare: true })[0];
+    // Тот же набор зёрен и тот же потолок: база обязана совпасть цифра в цифру,
+    // иначе «прирост от правила» считается по разным партиям.
+    expect(compared.doomMedian).toBe(plain.doomMedian);
+    expect(compared.lengthMedian).toBe(plain.lengthMedian);
+    expect(compared.noStrike).toBeDefined();
+    expect(compared.noStrike!.samples).toBe(compared.samples);
+    // Без права бить через линию взятий меньше либо столько же - правило ровно
+    // про это, и замер обязан показать направление, а не шум.
+    expect(compared.noStrike!.capturesAvg).toBeLessThanOrEqual(compared.capturesAvg);
   }, 120_000);
 
   it('замер парковки считает развилки и разнообразие расстановок', () => {
