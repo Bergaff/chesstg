@@ -1089,6 +1089,15 @@ app.post('/api/ads/reward', async (c) => {
   const authCtx = auth(c);
   if (authCtx.user.ad_free) fail(403, 'ad_free', 'Реклама отключена, награды за просмотр недоступны');
 
+  // Пока ADSGRAM_BLOCK_ID не вписан, наградывать нечем: ролик не показан, а
+  // начислять за него жизнь или монеты значит открыть ферму без рекламы.
+  // Гейт стоит до разбора kind, чтобы клиент и тесты могли проверить его
+  // безопасной пробой: запрос с заведомо неизвестным kind ничего не начисляет
+  // и по коду ответа говорит, включена ли реклама.
+  if (!publicConfig(c.env).adsEnabled) {
+    fail(503, 'ads_not_configured', 'Реклама ещё не настроена: награды за просмотр включим вместе с Adsgram');
+  }
+
   const body = await readJson(c);
   const kind = body.kind;
   if (kind !== 'life' && kind !== 'coins' && kind !== 'shield') fail(400, 'bad_ad_reward');

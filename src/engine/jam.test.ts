@@ -128,7 +128,12 @@ describe('парковка: фигуры уходят с поля', () => {
 
   it('уход это ход на свой край, отдельного действия для него нет', () => {
     const state = createJamPuzzle(6, 1234);
-    const shift = jamLegalActions(state).find((action) => action.to.y >= 0 && action.to.y < state.height);
+    // Любой ход внутри поля, но не уход: у пешки с первого ряда единственный
+    // ход как раз выход, поэтому первым попавшимся действием не обойтись.
+    const shift = jamLegalActions(state).find((action) => {
+      const piece = state.pieces.find((item) => item.id === action.id);
+      return piece !== undefined && !jamIsExit(state, piece, action.to);
+    });
     expect(apply(state, shift!).pieces.length).toBe(state.pieces.length);
     // Поля взятий у парковки нет вообще: бить нечего и некем.
     expect((apply(state, shift!) as unknown as { captures?: number }).captures).toBeUndefined();

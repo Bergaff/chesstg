@@ -13,6 +13,9 @@ import {
   raceScrollEvery,
   raceSpawnEvery,
   raceSpawnWidth,
+  raceTierForMoves,
+  RACE_TIER_MOVES,
+  RACE_SPAWN_MIN_WIDTH,
   rulesFor,
   survivalHint,
   type GameState,
@@ -92,15 +95,54 @@ describe('Гонки: король против фигур сверху', () => 
   });
 
   it('взятие короля работает и вперёд, и назад, фигура уходит с поля', () => {
-    const base: GameState = { ...createRaceLevel(1, 4242), player: { x: 3, y: 2 }, enemies: [] };
-    const forward = move({ ...base, enemies: [{ id: 'r', type: 'rook', x: 4, y: 3 }] }, 1, 1);
+    const base: GameState = { ...createRaceLevel(1, 4242), player: { x: 3, y: RACE_KING_ROW }, enemies: [] };
+    // Вперёд: фигурабита с клетки рядом, а сам король возвращается на свой ряд.
+    const forward = move({ ...base, enemies: [{ id: 'r', type: 'rook', x: 4, y: RACE_KING_ROW + 1 }] }, 1, 1);
     expect(forward.enemies.length).toBe(0);
-    expect(forward.player).toEqual({ x: 4, y: 3 });
+    expect(forward.player).toEqual({ x: 4, y: RACE_KING_ROW });
     expect(forward.captures).toBe(1);
 
-    const backward = move({ ...base, enemies: [{ id: 'b', type: 'bishop', x: 2, y: 1 }] }, -1, -1);
+    // Назад: на нулевой ряд можно отступить, и поле за королём не едет - иначе
+    // «оттягивать волну» было бы вечным безопасным ходом.
+    const backward = move({ ...base, enemies: [{ id: 'b', type: 'bishop', x: 2, y: 0 }] }, -1, -1);
     expect(backward.enemies.length).toBe(0);
-    expect(backward.player).toEqual({ x: 2, y: 1 });
+    expect(backward.player).toEqual({ x: 2, y: 0 });
+  });
+
+  it('конвейер: шаг вперёд придвигает поле, а король остаётся на втором ряду', () => {
+    // Заморозка выключает такт поля и ход фигур, поэтому сдвиг в один ряд виден
+    // отдельно: его сделал сам игрок, а не очередь конвейера.
+    const home: GameState = {
+      ...createRaceLevel(1, 99),
+      player: { x: 3, y: RACE_KING_ROW },
+      enemies: [{ id: 'r', type: 'rook', x: 5, y: 5 }],
+      freeze: 1,
+    };
+    const forward = move(home, 0, 1);
+    expect(forward.player).toEqual({ x: 3, y: RACE_KING_ROW });
+    expect(forward.enemies.find((e) => e.id === 'r')!.y).toBe(4);
+
+    const back = move(home, 0, -1);
+    expect(back.player).toEqual({ x: 3, y: 0 });
+    expect(back.enemies.find((e) => e.id === 'r')!.y).toBe(5);
+
+    // Фигура с нулевого ряда при сдвиге уходит за край: конвейер не копит хвост.
+    const edge: GameState = { ...home, enemies: [{ id: 'r', type: 'rook', x: 5, y: 0 }] };
+    const sweptByShift = move(edge, 0, 1);
+    // Отдельный `lastEvent: 'swept'` тут перекрывает ответ фигур (поле на
+    // заморозке), поэтому проверяем сам факт: фигуры за краем на поле нет.
+    expect(sweptByShift.enemies.find((e) => e.id === 'r')).toBeUndefined();
+  });
+
+  it('волна растёт каждые RACE_TIER_MOVES ходов и доходит до всей доски', () => {
+    expect(raceTierForMoves(0)).toBe(1);
+    expect(raceTierForMoves(RACE_TIER_MOVES - 1)).toBe(1);
+    expect(raceTierForMoves(RACE_TIER_MOVES)).toBe(2);
+    expect(raceSpawnWidth(1)).toBe(RACE_SPAWN_MIN_WIDTH);
+    expect(raceSpawnWidth(2)).toBe(RACE_SPAWN_MIN_WIDTH + 1);
+    // К сорока ходам приток держит всю ширину: забег жадного бота (35 ходов)
+    // успевает показать рост, а не одну и ту же полосу.
+    expect(raceSpawnWidth(raceTierForMoves(40))).toBe(RACE_WIDTH);
   });
 
   it('фигура, вставшая на клетку короля, заканчивает забег', () => {
@@ -283,7 +325,7 @@ describe('Гонки: король против фигур сверху', () => 
       b = move(b, dx, dy);
     }
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-    expect(a.tier).toBe(raceLevelForMoves(a.score));
+    expect(a.tier).toBe(raceTierForMoves(a.score));
   });
 
   it('уровень режима растёт от пережитых ходов, награда ограничена сверху', () => {

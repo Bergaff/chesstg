@@ -1,6 +1,6 @@
 import { cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
-import { RACE_SPAWN_ROWS, raceLevelForMoves, raceScrollEvery, raceSpawnPool, raceSpawnWidth } from './race';
+import { RACE_KING_ROW, RACE_SPAWN_ROWS, raceScrollEvery, raceSpawnPool, raceSpawnWidth, raceTierForMoves } from './race';
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
@@ -108,6 +108,44 @@ function scrollPhase(state: GameState): void {
     kept.push({ ...enemy, y });
   }
   state.enemies = kept;
+  if (swept > 0) state.lastEvent = 'swept';
+}
+
+/**
+ * Конвейер: король живёт на своём втором ряду. Шаг вперёд придвигает всё поле на
+ * ряд ближе и уносит то, что свалилось за нижний край; сам король при этом
+ * возвращается на свой ряд, поэтому «поле едет, а король стоит» видно с первого
+ * хода. Назад отступить можно на нулевой ряд и оставить там: поле не едет следом
+ * за королём вверх, иначе «оттягивать волну» было бы вечным безопасным ходом и
+ * счёт перестал бы что-то значить. Фигура, которую сдвиг посадил на клетку
+ * короля, ловит его: та же логика, что и с уносимым рядом.
+ */
+function conveyorPhase(state: GameState): void {
+  const rules = rulesFor(state.mode);
+  if (!rules.scroll || state.status !== 'playing') return;
+  const delta = state.player.y - RACE_KING_ROW;
+  if (delta <= 0) return;
+
+  const kept: typeof state.enemies = [];
+  let swept = 0;
+  for (const enemy of state.enemies) {
+    const y = enemy.y - delta;
+    if (y < 0) {
+      swept += 1;
+      continue;
+    }
+    if (y === RACE_KING_ROW && enemy.x === state.player.x) {
+      state.status = 'lost';
+      state.capturedBy = enemy.type;
+      state.lastEvent = 'captured';
+      state.enemies = state.enemies.map((e) => (e.id === enemy.id ? { ...e, y } : e));
+      state.player = { ...state.player, y: RACE_KING_ROW };
+      return;
+    }
+    kept.push({ ...enemy, y });
+  }
+  state.enemies = kept;
+  state.player = { ...state.player, y: RACE_KING_ROW };
   if (swept > 0) state.lastEvent = 'swept';
 }
 
@@ -224,7 +262,9 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   state.score = modeRules.goal === 'survive' ? state.moves : Math.max(state.score, state.player.y);
 
   if (modeRules.goal === 'survive' && modeRules.player === 'king') {
-    const tension = raceLevelForMoves(state.score);
+    // Волна считается по своим ходам, а не по уровню режима: уровню нужен
+    // сопоставимый рекорд, а игре - чтобы рост полосы притока был виден за забег.
+    const tension = raceTierForMoves(state.score);
     if (tension > state.tier) {
       state.tier = tension;
       state.lastEvent = 'tension';
@@ -262,6 +302,7 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.
   const waitingForNothing = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && noMovesLeft(state);
   const before = waitingForNothing ? boardSignature(state) : '';
+  conveyorPhase(state);
   scrollPhase(state);
   spawnPhase(state);
   enemyPhase(state);

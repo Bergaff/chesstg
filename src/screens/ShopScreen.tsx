@@ -295,14 +295,16 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
               paying={paying === 'lives'}
               owned={false}
             />
-            <ProductCard
-              sku="noads"
-              disabled={profile.adFree || paying !== null}
-              note={profile.adFree ? 'Реклама уже отключена' : 'Никаких роликов и предложений навсегда'}
-              onBuy={() => void buyProduct('noads')}
-              paying={paying === 'noads'}
-              owned={profile.adFree}
-            />
+            {config.adsEnabled && (
+              <ProductCard
+                sku="noads"
+                disabled={profile.adFree || paying !== null}
+                note={profile.adFree ? 'Реклама уже отключена' : 'Никаких роликов и предложений навсегда'}
+                onBuy={() => void buyProduct('noads')}
+                paying={paying === 'noads'}
+                owned={profile.adFree}
+              />
+            )}
             <ProductCard
               sku="skins"
               disabled={ownedSet || paying !== null}

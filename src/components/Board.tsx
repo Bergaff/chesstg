@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import {
   PIECE_GLYPH,
   SKINS,
-  RACE_SPAWN_ROWS,
   endlessViewport,
-  raceSpawnWidth,
   enemyAttacksCell,
   rulesFor,
   type Cell,
@@ -12,6 +10,7 @@ import {
   type MoveDx,
   type MoveDy,
   type MoveOption,
+  type PieceType,
   type SkinId,
 } from '../engine';
 import { cn } from '../lib/format';
@@ -20,6 +19,18 @@ export interface MovedPiece {
   id: string;
   from: Cell;
   to: Cell;
+}
+
+/**
+ * Фигура, которую на этом ходу унесло за нижний край. Её уже нет в состоянии,
+ * поэтому она рисуется призраком поверх поля и съезжает с доски: без этого ряда
+ * конвейер не читается, фигуры просто исчезают.
+ */
+export interface SweptPiece {
+  id: string;
+  type: PieceType;
+  x: number;
+  y: number;
 }
 
 interface BoardProps {
@@ -32,6 +43,13 @@ interface BoardProps {
   turn: number;
   /** Куда переставились фигуры последним ходом: нужно для показа хода врага. */
   moved?: MovedPiece[];
+  /** Фигуры, унесенные рядом: нужны, чтобы показать уход ряда. */
+  swept?: SweptPiece[];
+  /**
+   * Куда игрок хотел сходить этим ходом. Если клетка не изменилась, значит поле
+   * приехало под него (конвейер), и шаг показывается импульсом.
+   */
+  playerStep?: { moves: number; dx: number; dy: number } | null;
   /** Идёт ход фигур, ввод заблокирован. */
   settling?: boolean;
 }
@@ -50,7 +68,19 @@ const KING_GLYPH: Record<string, string> = {
   '1:-1': '↘',
 };
 
-export function Board({ state, moves, hint, skin, interactive, onMove, turn, moved = [], settling = false }: BoardProps): ReactNode {
+export function Board({
+  state,
+  moves,
+  hint,
+  skin,
+  interactive,
+  onMove,
+  turn,
+  moved = [],
+  swept = [],
+  playerStep = null,
+  settling = false,
+}: BoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
 
@@ -104,18 +134,25 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
   const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
   const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
 
-  // Бегущее поле: полоса, откуда приходит приток, и линия, за которой ряд
-  // уходит. Рисуются поверх доски, чтобы геометрия поля не менялась.
+  // Бегущее поле показывается движением, а не линиями: приходящие фигуры
+  // въезжают сверху, уходящий ряд съезжает за край. Полосу притока раньше
+  // обводили рамкой - игрок читал её как случайные линии поля, и ничего больше.
   const flow = Boolean(rules.scroll) && cell > 0;
-  const band = flow ? Math.min(state.width, raceSpawnWidth(state.tier)) : 0;
-  const bandLeft = flow ? Math.floor((state.width - band) / 2) : 0;
-  const spawnRows = Math.max(1, Math.min(rules.spawnRows ?? RACE_SPAWN_ROWS, state.height - 1));
 
   const playerGlyph = king ? '♚' : (SKINS[skin]?.pawn ?? '♟');
   const playerSlide =
     playerBefore !== null && (playerBefore.x !== state.player.x || playerBefore.y !== state.player.y)
       ? playerBefore
       : null;
+  // Конвейер: игрок сходил вперёд, поле приехало на ряд ближе, король вернулся на
+  // свою клетку. Без импульса такой ход выглядит бездействием.
+  const playerPulse =
+    flow &&
+    playerStep !== null &&
+    playerStep.moves === state.moves &&
+    playerBefore !== null &&
+    playerBefore.x === state.player.x &&
+    playerBefore.y === state.player.y;
 
   return (
     <div className="board-measure" ref={wrapRef}>
@@ -128,7 +165,7 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
         }}
       >
         <div
-          className={cn('board', flow && 'board-flow')}
+          className="board"
           style={{
             width: boardWidth || undefined,
             height: boardHeight || undefined,
@@ -233,15 +270,25 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
                   )}
                   {isPlayer && (
                     <span
-                      key={`player-${x}-${y}`}
-                      className={cn('piece player-piece', `skin-${skin}`, playerSlide && 'player-slide')}
+                      key={`player-${x}-${y}-${playerPulse ? state.moves : 0}`}
+                      className={cn(
+                        'piece player-piece',
+                        `skin-${skin}`,
+                        playerSlide && 'player-slide',
+                        playerPulse && 'player-pulse',
+                      )}
                       style={
-                        playerSlide
+                        playerPulse
                           ? ({
-                              '--from-x': `${(playerSlide.x - state.player.x) * (cell + gap)}px`,
-                              '--from-y': `${(playerSlide.y - state.player.y) * (cell + gap)}px`,
+                              '--to-x': `${(playerStep?.dx ?? 0) * (cell + gap)}px`,
+                              '--to-y': `${-(playerStep?.dy ?? 0) * (cell + gap)}px`,
                             } as CSSProperties)
-                          : undefined
+                          : playerSlide
+                            ? ({
+                                '--from-x': `${(playerSlide.x - state.player.x) * (cell + gap)}px`,
+                                '--from-y': `${(playerSlide.y - state.player.y) * (cell + gap)}px`,
+                              } as CSSProperties)
+                            : undefined
                       }
                     >
                       <span className="player-mark">
@@ -259,17 +306,23 @@ export function Board({ state, moves, hint, skin, interactive, onMove, turn, mov
             }),
           )}
         </div>
-          {flow && (
-            <div className="flow-marks" aria-hidden="true">
-              <span
-                className="flow-in"
-                style={{
-                  left: bandLeft * (cell + gap),
-                  width: band * cell + (band - 1) * gap,
-                  height: spawnRows * cell + (spawnRows - 1) * gap,
-                }}
-              />
-              <span className="flow-out" />
+          {flow && swept.length > 0 && (
+            <div className="board-ghosts" aria-hidden="true">
+              {swept.map((piece) => (
+                <span
+                  key={`${piece.id}-${turn}`}
+                  className="piece enemy-piece piece-swept"
+                  style={{
+                    left: piece.x * (cell + gap),
+                    top: (viewport.to - 1 - piece.y) * (cell + gap),
+                    width: cell,
+                    height: cell,
+                    fontSize: Math.round(cell * 0.56),
+                  }}
+                >
+                  <span className="piece-glyph">{PIECE_GLYPH[piece.type]}</span>
+                </span>
+              ))}
             </div>
           )}
       </div>

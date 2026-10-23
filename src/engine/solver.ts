@@ -130,8 +130,15 @@ function rankSurvival(state: GameState, next: GameState): number {
   return score;
 }
 
-function bestSurvivalStep(state: GameState): GameState | null {
-  let best: GameState | null = null;
+/**
+ * Лучший следующий шаг в режиме на выживание: и состояние после него, и клетку,
+ * по которой игрок должен пройти. Клетка нужна отдельная, потому что бегущее поле
+ * возвращает короля на его ряд: шаг вперёд не меняет позицию на доске, и
+ * ориентироваться на `next.player` было бы нельзя - подсказка подсвечивала бы
+ * клетку под ногами.
+ */
+function bestSurvivalStep(state: GameState): { state: GameState; cell: Cell } | null {
+  let best: { state: GameState; cell: Cell } | null = null;
   let bestRank = -Infinity;
   for (const move of legalMoves(state)) {
     const action: GameAction = { type: 'move', dx: move.dx, dy: move.dy ?? 1 };
@@ -144,7 +151,7 @@ function bestSurvivalStep(state: GameState): GameState | null {
     const rank = rankSurvival(state, next);
     if (rank > bestRank) {
       bestRank = rank;
-      best = next;
+      best = { state: next, cell: { x: state.player.x + move.dx, y: state.player.y + (move.dy ?? 1) } };
     }
   }
   return best;
@@ -162,8 +169,8 @@ export function survivalHint(state: GameState, steps = 2): Cell[] {
   for (let step = 0; step < steps; step++) {
     const next = bestSurvivalStep(current);
     if (!next) break;
-    cells.push({ ...next.player });
-    current = next;
+    cells.push(next.cell);
+    current = next.state;
     if (current.status !== 'playing') break;
   }
   return cells;

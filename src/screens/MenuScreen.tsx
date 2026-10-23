@@ -269,7 +269,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
 
       {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
 
-      {!profile.adFree && (
+      {config.adsEnabled && !profile.adFree && (
         <button
           type="button"
           className="ad-row"

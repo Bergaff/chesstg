@@ -59,6 +59,8 @@ export interface AppConfig {
   allowGuests: boolean;
   devMode: boolean;
   demoAds: boolean;
+  /** Реклама включена: задан блок Adsgram или играет демо-ролик локальной сборки. */
+  adsEnabled: boolean;
   paymentsEnabled: boolean;
   environment: string;
   adsgram: {

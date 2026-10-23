@@ -35,21 +35,6 @@ import {
   type MoveDx,
   type MoveDy,
 } from '../engine';
-/**
- * Порядок кнопок короля: верхняя строка это «вперёд», центр ничего не значит.
- * Все девять кнопок рисуются всегда, недоступные выключены.
- */
-const KING_DIRS: Array<{ dx: MoveDx; dy: MoveDy; glyph: string; label: string; short: string }> = [
-  { dx: -1, dy: 1, glyph: '↖', label: 'влево-вперёд', short: 'вперёд' },
-  { dx: 0, dy: 1, glyph: '↑', label: 'вперёд', short: 'вперёд' },
-  { dx: 1, dy: 1, glyph: '↗', label: 'вправо-вперёд', short: 'вперёд' },
-  { dx: -1, dy: 0, glyph: '←', label: 'влево', short: 'влево' },
-  { dx: 0, dy: 0, glyph: '·', label: 'на месте', short: '·' },
-  { dx: 1, dy: 0, glyph: '→', label: 'вправо', short: 'вправо' },
-  { dx: -1, dy: -1, glyph: '↙', label: 'влево-назад', short: 'назад' },
-  { dx: 0, dy: -1, glyph: '↓', label: 'назад', short: 'назад' },
-  { dx: 1, dy: -1, glyph: '↘', label: 'вправо-назад', short: 'назад' },
-];
 
 /** Темп хода фигур: столько игрок видит, куда встала каждая фигура. */
 const ENEMY_BEAT_MS = 700;
@@ -68,7 +53,7 @@ import type {
   RunPayload,
   StartRunResponse,
 } from '../lib/types';
-import { Board } from '../components/Board';
+import { Board, type SweptPiece } from '../components/Board';
 import { HeartsRow } from '../components/Hud';
 import { Modal } from '../components/Modal';
 import { RulesModal } from '../components/RulesModal';
@@ -358,19 +343,33 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   // Куда переставились фигуры после последнего хода: без этого ход врага
   // выглядит телепортом, и игрок не понимает, что его поймали.
   const enemiesBefore = useRef<GameState['enemies']>([]);
-  const moved = useMemo(() => {
-    if (!state) return [];
+  // Куда переставили фигуры и что унесло рядом: первое нужно, чтобы ход читался
+  // перестановкой, второе - чтобы конвейер был виден (ряд уезжает за край).
+  const turnShift = useMemo(() => {
+    const empty = { moved: [] as Array<{ id: string; from: Cell; to: Cell }>, swept: [] as SweptPiece[] };
+    if (!state) return empty;
     const before = new Map(enemiesBefore.current.map((e) => [e.id, e]));
-    const result: Array<{ id: string; from: Cell; to: Cell }> = [];
+    const moved: Array<{ id: string; from: Cell; to: Cell }> = [];
     for (const enemy of state.enemies) {
       const old = before.get(enemy.id);
       if (old && (old.x !== enemy.x || old.y !== enemy.y)) {
-        result.push({ id: enemy.id, from: { x: old.x, y: old.y }, to: { x: enemy.x, y: enemy.y } });
+        moved.push({ id: enemy.id, from: { x: old.x, y: old.y }, to: { x: enemy.x, y: enemy.y } });
+      }
+    }
+    const swept: SweptPiece[] = [];
+    if (rulesFor(state.mode).scroll) {
+      const alive = new Set(state.enemies.map((e) => e.id));
+      for (const [id, old] of before) {
+        if (alive.has(id) || old.y !== 0) continue;
+        // Фигуру на клетке короля снял он сам, это взятие, а не уход ряда.
+        if (state.player.x === old.x && state.player.y === old.y) continue;
+        swept.push({ id, type: old.type, x: old.x, y: old.y });
       }
     }
     enemiesBefore.current = state.enemies.map((e) => ({ ...e }));
-    return result;
+    return { moved, swept };
   }, [state]);
+  const moved = turnShift.moved;
 
   // Пауза на ход фигур: 700 мс анимации, в это время кнопки не отвечают.
   // Реагируем только на настоящий ход: при первой отрисовке (продолжение партии,
@@ -436,9 +435,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     }, next.status === 'lost' ? 700 : 450);
   }
 
+  // Последний запрошенный шаг игрока. Нужен «Гонокам»: там ход вперёд часто не
+  // меняет клетку короля (поле под него уезжает), и без импульса шаг не видно.
+  const [playerStep, setPlayerStep] = useState<{ moves: number; dx: number; dy: number } | null>(null);
+
   function handleMove(dx: MoveDx, dy: MoveDy = 1) {
     const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === dy);
     if (!option) return;
+    setPlayerStep({ moves: (stateRef.current?.moves ?? 0) + 1, dx, dy: dy ?? 1 });
     performAction(dy === 1 ? { type: 'move', dx } : { type: 'move', dx, dy });
   }
 
@@ -850,6 +854,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           onMove={handleMove}
           turn={state.moves}
           moved={moved}
+          swept={turnShift.swept}
+          playerStep={playerStep}
           settling={settling}
         />
       </div>
@@ -899,40 +905,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           </button>
         </div>
 
-        {king ? (
-          <div className="move-pad" role="group" aria-label="Ход короля">
-            {KING_DIRS.map((dir) => {
-              const center = dir.dx === 0 && dir.dy === 0;
-              // Кнопки не появляются и не исчезают: недоступный ход только
-              // выключен, иначе поле прыгало бы на каждом ходу.
-              const option = center
-                ? undefined
-                : moves.find((move) => move.dx === dir.dx && (move.dy ?? 1) === dir.dy);
-              const available = canPlay && option !== undefined;
-              return (
-                <button
-                  key={`${dir.dx}:${dir.dy}`}
-                  type="button"
-                  className={cn('pad-btn', center && 'pad-center', available && 'is-on', option?.takes && 'move-take', !available && 'off')}
-                  disabled={!available}
-                  aria-label={
-                    option?.takes
-                      ? `${dir.label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
-                      : center
-                        ? 'на месте'
-                        : dir.label
-                  }
-                  onClick={() => handleMove(dir.dx, dir.dy)}
-                >
-                  <span className="move-glyph-lg" aria-hidden="true">
-                    {dir.glyph}
-                  </span>
-                  <span className="move-label">{option?.takes ? 'взять' : center ? '·' : dir.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : (
+        {!king ? (
           <div className="move-row">
             {([-1, 0, 1] as MoveDx[]).map((dx) => {
               const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
@@ -959,7 +932,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
               );
             })}
           </div>
-        )}
+        ) : null}
         <div className="side-row">
           {doubleStep && canPlay ? (
             <button type="button" className="skip-btn" onClick={() => handleMove(0, 2)}>
@@ -980,7 +953,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             : settling
               ? 'Фигуры идут на короля.'
               : king
-                ? 'Король: шаг и взятие в любую из восьми сторон, назад включительно. Клетка с фигурой доступна, если её можно взять.'
+                ? isRace
+                  ? 'Король: шаг в любую из восьми сторон. Ходить - по клеткам поля, они подсвечены. Шаг вперёд придвигает поле на ряд ближе, шаг назад оставляет вас в уносимом ряду.'
+                  : 'Король: шаг и взятие в любую из восьми сторон, назад включительно. Клетка с фигурой доступна, если её можно взять.'
                 : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
       </div>
@@ -997,7 +972,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
               : isRace
-                ? 'Вы король: один шаг и одно взятие в любую сторону. Фигуры выходят из двух верхних рядов и ходят по своим шахматным правилам. Считаются пережитые ходы: каждые двенадцать волна ускоряется, на столько же растёт уровень режима.'
+                ? 'Вы король: один шаг и одно взятие в любую сторону. Фигуры выходят из двух верхних рядов и ходят по своим шахматным правилам. Поле бежит: снизу ряд уходит, сверху приходит новый, а король всегда остаётся на втором ряду. Считаются пережитые ходы: каждые восемь волна шире и быстрее, каждые двенадцать растёт уровень режима.'
                 : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 

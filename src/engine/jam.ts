@@ -1,6 +1,6 @@
 // «Парковка»: поле забито фигурами двух цветов, и их нужно увести.
 //
-// Набор фигур: ладья, слон, конь, плюс пешка и король. Последних двух держим у
+// Набор фигур: ладья, слон, конь, ферзь, плюс пешка и король. Последних двух держим у
 // их же края: они ходят на клетку, и в центре такая фигура тянулась бы к выходу
 // половину забега, тогда как задача в пробке - манёвр, а не подсчёт шагов.
 //
@@ -19,7 +19,7 @@
 import { mix32, Rng } from './rng';
 import type { Cell } from './types';
 
-export type JamPieceType = 'rook' | 'bishop' | 'knight' | 'pawn' | 'king';
+export type JamPieceType = 'rook' | 'bishop' | 'knight' | 'queen' | 'pawn' | 'king';
 export type JamSide = 'white' | 'black';
 
 export interface JamPiece {
@@ -73,6 +73,7 @@ export const JAM_PIECE_NAME: Record<JamPieceType, string> = {
   rook: 'Ладья',
   bishop: 'Слон',
   knight: 'Конь',
+  queen: 'Ферзь',
   pawn: 'Пешка',
   king: 'Король',
 };
@@ -81,14 +82,19 @@ export const JAM_PIECE_GLYPH: Record<JamPieceType, string> = {
   rook: '♜',
   bishop: '♝',
   knight: '♞',
+  queen: '♛',
   pawn: '♟',
   king: '♚',
 };
 
+// Веса дальнобойных фигур: короткая мелочь (пешка, король) сюда не входит, её
+// расставляет генератор отдельно и у своего края. Ферзь весит меньше ладьи: он
+// доезжает до края и по диагонали, с ним пробка расходится легче.
 const TYPE_WEIGHTS: Array<[JamPieceType, number]> = [
-  ['rook', 0.45],
-  ['bishop', 0.3],
-  ['knight', 0.25],
+  ['rook', 0.36],
+  ['bishop', 0.26],
+  ['knight', 0.24],
+  ['queen', 0.14],
 ];
 
 /** Геометрия поля. Ширина растёт медленнее высоты: ряды и есть «пробка». */
@@ -196,6 +202,20 @@ function linesFor(type: JamPieceType): Array<[number, number]> {
   }
   if (type === 'bishop') {
     return [
+      [1, 1],
+      [-1, 1],
+      [1, -1],
+      [-1, -1],
+    ];
+  }
+  if (type === 'queen') {
+    // Ферзь = ладья + слон: восемь лучей, и в пробке он доезжает до края там,
+    // куда ладье или слону не дотянуться.
+    return [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
       [1, 1],
       [-1, 1],
       [1, -1],

@@ -58,6 +58,7 @@ const config: AppConfig = {
   allowGuests: true,
   devMode: true,
   demoAds: false,
+  adsEnabled: true,
   paymentsEnabled: false,
   environment: 'test',
   adsgram: { blockId: '', src: '' },
@@ -330,7 +331,7 @@ describe('UI smoke', () => {
     expect((saved?.body as { actions?: unknown[] } | undefined)?.actions?.length).toBe(1);
   });
 
-  it('«Гонки» дают девять кнопок хода и считают пережитые ходы', async () => {
+  it('«Гонки» ходят по клеткам поля и считают пережитые ходы', async () => {
     profile.maxLevel = 6;
     profile.modes.campaign = { level: 6, maxLevel: 6, unlocked: true, unlockAtLevel: 1 };
     profile.modes.race = { level: 2, maxLevel: 2, unlocked: true, unlockAtLevel: 5, best: 14, bestMoves: 16 };
@@ -341,16 +342,16 @@ describe('UI smoke', () => {
     expect(await screen.findByText('Начать')).toBeTruthy();
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('race');
-    // Король ходит во все стороны, поэтому кнопок девять и «вперёд» среди них есть.
-    // Ряд бежит, но конвейерных меток прежней сборки на поле нет: вместо них
-    // отметка полосы притока сверху и линия уходящего ряда снизу.
+    // Поле то же, что и было: восемь колонок и двенадцать рядов, король на
+    // втором ряду от низа.
     expect(screen.getByText('рекорд 14')).toBeTruthy();
     const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
-    expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(RACE_WIDTH * RACE_ROWS);
-    expect(grid.className).not.toContain('board-conveyor');
-    expect(grid.querySelectorAll('.cell-pin').length).toBe(0);
-    expect(document.querySelectorAll('.flow-in').length).toBe(1);
-    expect(document.querySelectorAll('.flow-out').length).toBe(1);
+    expect(grid.querySelectorAll('[role=\"gridcell\"]').length).toBe(RACE_WIDTH * RACE_ROWS);
+    // Нижней навигации в «Гонках» больше нет: ходят тапом по подсвеченной клетке.
+    // Полосу притока и линию уходящего ряда тоже убрали - вместо них движение.
+    expect(document.querySelectorAll('.move-pad').length).toBe(0);
+    expect(document.querySelectorAll('.flow-in, .flow-out').length).toBe(0);
+    expect(document.querySelectorAll('.cell-pin').length).toBe(0);
 
     fireEvent.click(screen.getByText('Начать'));
     // Подсказка в режиме без финиша ищет не путь, а следующий ход: за 20 монет
@@ -359,37 +360,19 @@ describe('UI smoke', () => {
     await waitFor(() => expect(document.querySelectorAll('.cell-hint').length).toBeGreaterThan(0));
     const hintCall = calls.find((call) => call.url === '/api/bonus/use');
     expect((hintCall?.body as { kind?: string } | undefined)?.kind).toBe('hint');
-    const pad = document.querySelector('.move-pad');
-    const buttons = [...(pad?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
-    expect(buttons.length).toBe(9);
-    // Недоступный ход не убирается: кнопка стоит на месте и только выключена,
-    // поэтому геометрия поля не зависит от того, куда король может пойти.
-    expect(buttons.some((button) => button.disabled)).toBe(true);
     expect(screen.getByText('Ходы 0')).toBeTruthy();
 
-    // Кнопки пад-а стоят в фиксированном порядке, поэтому ход выбираем не по
-    // подписи, а по индексу: подпись меняется, когда ход взятие.
-    const ORDER: Array<[number, number]> = [
-      [-1, 1],
-      [0, 1],
-      [1, 1],
-      [-1, 0],
-      [0, 0],
-      [1, 0],
-      [-1, -1],
-      [0, -1],
-      [1, -1],
-    ];
     const options = legalMoves(initial);
-    // Берём боковой или обратный шаг: он отличается от хода вперёд только
-    // полем dy, и именно по нему сервер сверяет партию.
+    // Клетка хода берётся по координатам, а не по подписи: подпись меняется,
+    // когда ход взятие. Ряды в разметке идут сверху вниз, поэтому индекс ряда
+    // считается от верхнего края поля.
     const picked = options.find((move) => (move.dy ?? 1) !== 1) ?? options[0];
-    const index = ORDER.findIndex(([dx, dy]) => dx === picked.dx && dy === (picked.dy ?? 1));
-    expect(index).toBeGreaterThanOrEqual(0);
-    expect(buttons[index].disabled).toBe(false);
-    fireEvent.click(buttons[index]);
+    const target = { x: initial.player.x + picked.dx, y: initial.player.y + (picked.dy ?? 1) };
+    const cells = [...grid.querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
+    const cell = cells[(RACE_ROWS - 1 - target.y) * RACE_WIDTH + target.x];
+    expect(cell.disabled).toBe(false);
+    fireEvent.click(cell);
     await waitFor(() => expect(screen.getByText('Ходы 1')).toBeTruthy());
-    expect([...(document.querySelectorAll('.move-pad button') ?? [])].length).toBe(9);
     // Журнал уходит на сервер пачкой с задержкой: ждём именно вызов сохранения.
     await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
     const sent = calls.filter((call) => call.url.endsWith('/save')).at(-1);

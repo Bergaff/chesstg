@@ -19,6 +19,21 @@ function makeClient() {
   };
 }
 
+/**
+ * Награду за ролик сервер выдаёт, только когда реклама включена: задан блок
+ * Adsgram или играет демо-ролик. Локальный воркер блока не видит и отвечает 503,
+ * поэтому тесты на награду спрашивают у сервера, а не у своего `.dev.vars`.
+ * Проба сделана неизвестным kind: она упирается в валидацию и ничего не начисляет.
+ */
+async function adsReady(api: ReturnType<typeof makeClient>): Promise<boolean> {
+  const probe = await api('/api/ads/reward', { method: 'POST', body: JSON.stringify({ kind: 'probe' }) });
+  if (probe.status === 503) {
+    expect(probe.data.error).toBe('ads_not_configured');
+    return false;
+  }
+  return true;
+}
+
 describe.runIf(apiReachable)('API integration', () => {
   it('полный цикл кампании и бонусов', async () => {
     const api = makeClient();
@@ -94,6 +109,8 @@ describe.runIf(apiReachable)('API integration', () => {
 
   it('бонус без гранта отклоняется, а с грантом работает', async () => {
     const api = makeClient();
+    // Грант щита выдаётся только за ролик: без настроенной рекламы проверять нечего.
+    if (!(await adsReady(api))) return;
     const run = (await api('/api/run/start', { method: 'POST', body: JSON.stringify({ mode: 'campaign' }) })).data.run;
     const initial = run.initial as GameState;
     const win = analyzeState(initial, { maxDepth: 8, maxNodes: 10000 });
@@ -126,6 +143,7 @@ describe.runIf(apiReachable)('API integration', () => {
 
   it('жизни: реклама и нехватка жизней', async () => {
     const api = makeClient();
+    if (!(await adsReady(api))) return;
     const session = await api('/api/session', { method: 'POST', body: '{}' });
     if (session.data.profile.lives >= 5) {
       const full = await api('/api/ads/reward', { method: 'POST', body: JSON.stringify({ kind: 'life' }) });

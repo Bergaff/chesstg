@@ -25,12 +25,17 @@ export const REFERRAL_BONUS = 25;
 export function publicConfig(env: WorkerEnv) {
   const devMode = env.DEV_MODE === 'true';
   const blockId = env.ADSGRAM_BLOCK_ID?.trim() ?? '';
+  const demoAds = devMode && !blockId;
   return {
     botUsername: env.BOT_USERNAME?.trim() ?? '',
     webappUrl: env.WEBAPP_URL?.trim() ?? '',
     allowGuests: env.ALLOW_GUESTS === 'true',
     devMode,
-    demoAds: devMode && !blockId,
+    demoAds,
+    // Рекламу включаем, только когда есть что показывать: блок Adsgram задан
+    // либо играет демо-ролик локальной сборки. Кнопка «посмотреть рекламу» не
+    // должна обещать награду, пока владелец не впишет ADSGRAM_BLOCK_ID.
+    adsEnabled: Boolean(blockId) || demoAds,
     paymentsEnabled: Boolean(env.BOT_TOKEN?.trim()),
     // Переменная ENVIRONMENT задаётся в wrangler.jsonc (production) и в .dev.vars (development).
     environment: env.ENVIRONMENT?.trim() || 'development',

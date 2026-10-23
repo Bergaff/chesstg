@@ -346,8 +346,9 @@ describe('переключатели вариантов', () => {
     expect(state.player.y).toBe(0);
     expect(state.lastEvent).toBe('wrap');
     // Боевые «Гонки» перелива не дают: король ходит назад сам, ему это не нужно.
+    // И конвейер его держит: шаг вверх возвращает на второй ряд, а поле сдвигает.
     const kingTurn = applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 });
-    expect(kingTurn.player.y).toBe(5);
+    expect(kingTurn.player.y).toBe(1);
     expect(kingTurn.lastEvent).not.toBe('wrap');
   });
 

@@ -71,12 +71,15 @@ export function NoLivesModal({
       </div>
 
       <div className="modal-actions">
-        {!profile.adFree && (
+        {config.adsEnabled && !profile.adFree && (
           <button type="button" className="btn btn-primary" onClick={watchAd} disabled={loading}>
             {loading ? 'Загрузка' : 'Смотреть рекламу за жизнь'}
           </button>
         )}
         {profile.adFree && <p className="modal-note">Реклама отключена, ждать придётся естественным путём.</p>}
+        {!config.adsEnabled && (
+          <p className="modal-note">Реклама ещё не включена, поэтому жизнь только за ждани или за звёзды.</p>
+        )}
         <button type="button" className="btn btn-outline" onClick={onShop}>
           Магазин: пять жизней за 25 звёзд
         </button>
