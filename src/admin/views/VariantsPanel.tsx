@@ -52,6 +52,7 @@ const DIAGONAL_PAIR: ModeId[] = ['campaignFreeDiag', 'campaignStrictDiag'];
 const LEVELS_LADDER = '1,3,8,12,20,30,40';
 
 const DIAGONAL_HEAD = [
+  'Уровень',
   'Режим',
   'Поле',
   'С решением',
@@ -79,8 +80,12 @@ interface RunMeta {
   stopped: boolean;
 }
 
-/** Как называть единицу прогона и на что она делится - в заголовке отчёта. */
-const BOARD_WORD: Record<SuiteId, string> = { diagonal: 'досок', jam: 'полей', race: 'забегов' };
+/** Как называть единицу прогона (с формами склонения) и на что она делится. */
+const BOARD_FORMS: Record<SuiteId, [string, string, string]> = {
+  diagonal: ['доска', 'доски', 'досок'],
+  jam: ['поле', 'поля', 'полей'],
+  race: ['забег', 'забега', 'забегов'],
+};
 const PER_WORD: Record<SuiteId, string> = {
   diagonal: 'на вариант',
   jam: 'на уровень',
@@ -106,9 +111,9 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   diagonal: {
     tab: 'Диагональ',
     title: 'Кампания: диагональ только бить или свободно',
-    note: 'Один генератор, две версии права на пустую диагональ. Если «только бить» не хуже по цифрам, правило можно оставлять как есть.',
+    note: 'Один генератор, две версии права на пустую диагональ, и считаются все уровни лесенки: поле растёт с 3x4 до 6x9, и правило надо проверять на всём росте, а не на одном 4x6. Если «только бить» не хуже по цифрам на каждом поле, правило можно оставлять как есть. Тяжёлые уровни (30-40) считают заметно дольше: если нужен быстрый ответ, оставь 1,8,20.',
     run: 'Сравнить диагональ',
-    bigEta: '~45 с',
+    bigEta: '~45 с на уровень',
     footnote:
       '«Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10% отсутствия безальтернативных ходов. «Выбор» - средняя развилка на пути решения.',
   },
@@ -165,8 +170,11 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     [levels],
   );
 
-  const byMode = useMemo(() => new Map(reports.map((report) => [report.mode, report])), [reports]);
-  const conclusion = useMemo(() => diagonalConclusion(reports), [reports]);
+  /**
+   * Лестница уровней для всех трёх прогонов. Пустое поле ввода - не ошибка:
+   * кампания тогда считает свой текущий уровень, а не весь прогон падает.
+   */
+  const ladder = useMemo(() => (parsedLevels.length > 0 ? parsedLevels : [level]), [parsedLevels, level]);
   const meta = SUITE[active];
 
   /** Один прогон за раз: кнопка блокируется, а результат предыдущего остаётся. */
@@ -195,12 +203,23 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
    */
   function suiteDiagonal(count: number): Promise<void> {
     setReports([]);
-    setProgress(`${modeDef(DIAGONAL_PAIR[0]).name}: 0 из ${count}`);
+    // Каждая строка лесенки даёт две пары: тот же уровень, два правила. Порядком
+    // идут уровни, внутри уровня - вариант, поэтому прогресс показывает и то, и
+    // другое: на 30-м уровне ждать заметно дольше, и без уровня в подписи это
+    // выглядит как зависший прогон.
+    const jobs = ladder.flatMap((jobLevel) => DIAGONAL_PAIR.map((mode) => ({ mode, level: jobLevel })));
+    let finished = 0;
+    setProgress(`Пар 0 из ${jobs.length}`);
     const suite = runVariantSuite(
-      { modes: DIAGONAL_PAIR, level, samples: count, seed },
+      { jobs, samples: count, seed },
       {
-        onSample: (mode, done, total) => setProgress(`${modeDef(mode).name}: ${done} из ${total}`),
-        onReport: (item) => setReports((current) => [...current, item]),
+        onSample: (mode, jobLevel, done, total) =>
+          setProgress(`${modeDef(mode).name}, уровень ${jobLevel}: ${done} из ${total}`),
+        onReport: (item) => {
+          finished += 1;
+          setReports((current) => [...current, item]);
+          setProgress(`Готово ${finished} из ${jobs.length} (уровень ${item.level})`);
+        },
       },
     );
     suiteRef.current = suite;
@@ -209,9 +228,9 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
 
   function suiteJam(count: number): Promise<void> {
     setJamRows([]);
-    setProgress(`Уровень 0 из ${parsedLevels.length}`);
+    setProgress(`Уровень 0 из ${ladder.length}`);
     const suite = runJamSuite(
-      { levels: parsedLevels, samples: count, seed },
+      { levels: ladder, samples: count, seed },
       {
         onRow: (row, done, total) => {
           setJamRows((current) => [...current, row]);
@@ -225,10 +244,10 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
 
   function suiteRace(count: number): Promise<void> {
     setRaceRows([]);
-    setProgress(`Уровень 0 из ${parsedLevels.length}`);
+    setProgress(`Уровень 0 из ${ladder.length}`);
     const suite = runRaceSuite(
       {
-        levels: parsedLevels,
+        levels: ladder,
         samples: count,
         seed,
         // Тот же набор зёрен без права на выпад: иначе таблица не отвечает на
@@ -253,8 +272,11 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     setRunMeta({ suite: active, finishedAt: Date.now(), seconds, samples: count, seed, scope, big, stopped });
     setNote(
       stopped
-        ? `Прогон остановлен: в отчёте только то, что успело сосчитаться (${count} ${BOARD_WORD[active]} ${PER_WORD[active]}).`
-        : `Готово: ${count} ${BOARD_WORD[active]} ${PER_WORD[active]} за ${seconds} с. Отчёт с выводами лежит ниже, «Скопировать» забирает его целиком.`,
+        ? `Прогон остановлен: в отчёте только то, что успело сосчитаться (${count} ${declension(
+          count,
+          BOARD_FORMS[active],
+        )} ${PER_WORD[active]}).`
+        : `Готово: ${count} ${declension(count, BOARD_FORMS[active])} ${PER_WORD[active]} за ${seconds} с. Отчёт с выводами лежит ниже, «Скопировать» забирает его целиком.`,
     );
   }
 
@@ -264,8 +286,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
    * было переслать без подписей «что за колонки».
    */
   const runSuite = (count: number, big: boolean) => {
-    if (active !== 'diagonal' && parsedLevels.length === 0) return;
-    const scope = active === 'diagonal' ? `уровень ${level}` : `уровни ${parsedLevels.join(',')}`;
+    const scope = ladder.length === 1 ? `уровень ${ladder[0]}` : `уровни ${ladder.join(',')}`;
     start(async () => {
       const startedAt = Date.now();
       try {
@@ -289,14 +310,13 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   };
 
   const count = active === 'diagonal' ? reports.length : active === 'jam' ? jamRows.length : raceRows.length;
-  const canRun = active === 'diagonal' || parsedLevels.length > 0;
 
   /** Markdown-таблицы активного прогона с их же заголовком про зерно и доски. */
   const tableText = (): string => {
     const ran = runMeta?.samples ?? samples;
     const usedSeed = runMeta?.seed ?? seed;
     return active === 'diagonal'
-      ? diagonalText(reports, { level, samples: ran, seed: usedSeed })
+      ? diagonalText(reports, { levels: ladder, samples: ran, seed: usedSeed })
       : active === 'jam'
         ? jamText(jamRows, { samples: ran, seed: usedSeed })
         : raceText(raceRows, { samples: ran, seed: usedSeed });
@@ -319,7 +339,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     const head = own
       ? [
           `Отчёт лаборатории: ${meta.title}`,
-          `${formatDateTime(own.finishedAt)} · ${own.scope} · ${own.samples} ${BOARD_WORD[own.suite]} ${PER_WORD[own.suite]}${own.big ? ` · тяжёлый расчёт на ${BIG_SAMPLES} досок, считалось ${own.seconds} с` : ` · считалось ${own.seconds} с`}${own.stopped ? ' · прогон остановлен, считали не все уровни' : ''}`,
+          `${formatDateTime(own.finishedAt)} · ${own.scope} · ${own.samples} ${declension(own.samples, BOARD_FORMS[own.suite])} ${PER_WORD[own.suite]}${own.big ? ` · тяжёлый расчёт на ${BIG_SAMPLES} досок, считалось ${own.seconds} с` : ` · считалось ${own.seconds} с`}${own.stopped ? ' · прогон остановлен, считали не все уровни' : ''}`,
           '',
         ].join('\n')
       : '';
@@ -327,6 +347,9 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     const tail = findings.length > 0 ? `\n\nВыводы:\n${findings.map((line) => `- ${line}`).join('\n')}` : '';
     return `${head}${tableText()}${tail}`.trim();
   };
+
+  /** Выводы считаются из строк прогона: они живут и под таблицей, и в отчёте. */
+  const findings = reportFindings();
 
   const copy = async () => {
     const ok = await writeClipboard(reportText());
@@ -336,7 +359,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   return (
     <Panel
       title="Прогоны: кампания, парковка, гонки"
-      note={`Уровень ${level} задаёт доску и число фигур для кампании, «Парковка» и «Гонки» считают свою лестницу уровней. Перебор живёт в воркере, поэтому вкладка не замирает`}
+      note={`Лестница уровней задаёт поле и число фигур для всех трёх прогонов: кампания растёт с 3x4 до 6x9, у «Парковки» и «Гонок» своё расписание. Пустое поле - не ошибка: тогда считается текущий уровень ${level}. Перебор живёт в воркере, поэтому вкладка не замирает`}
     >
       <div className="adm-row-actions">
         <label className="adm-field is-inline">
@@ -365,7 +388,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
           />
         </label>
         <label className="adm-field is-inline">
-          <span className="adm-label">Уровни для «Парковки» и «Гонок»</span>
+          <span className="adm-label">Лестница уровней</span>
           <input
             type="text"
             value={levels}
@@ -418,17 +441,15 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             type="button"
             className="btn btn-outline"
             onClick={runActive}
-            disabled={running || !canRun}
+            disabled={running}
           >
-            {running && progress
-              ? progress
-              : `${meta.run}${active === 'diagonal' ? '' : ` (${parsedLevels.length})`}`}
+            {running && progress ? progress : `${meta.run} (${ladder.length})`}
           </button>
           <button
             type="button"
             className="btn btn-quiet"
             onClick={runBig}
-            disabled={running || !canRun}
+            disabled={running}
             title={`Тот же прогон на ${BIG_SAMPLES} досок и отчёт с выводами: его можно переслать как есть. Ориентир по времени - ${meta.bigEta}`}
           >
             {running && progress ? `считаем: ${BIG_SAMPLES} досок` : `Расчёт на ${BIG_SAMPLES} досок · ${meta.bigEta}`}
@@ -443,12 +464,19 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         {error && <StatusLine kind="error">{error}</StatusLine>}
         {note && <StatusLine kind="ok">{note}</StatusLine>}
 
-        {active === 'diagonal' && <DiagonalTable reports={reports} byMode={byMode} level={level} running={running} />}
-        {active === 'jam' && <JamTable rows={jamRows} levels={parsedLevels} running={running} />}
-        {active === 'race' && <RaceTable rows={raceRows} levels={parsedLevels} running={running} />}
+        {active === 'diagonal' && <DiagonalTable rows={reports} levels={ladder} running={running} />}
+        {active === 'jam' && <JamTable rows={jamRows} levels={ladder} running={running} />}
+        {active === 'race' && <RaceTable rows={raceRows} levels={ladder} running={running} />}
+
+        {findings.length > 0 && (
+          <ul className="adm-suite-findings">
+            {findings.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
 
         <p className="adm-suite-note">{meta.footnote}</p>
-        {conclusion && active === 'diagonal' && <p className="adm-suite-note">{conclusion}</p>}
         {count > 0 && <pre className="adm-code adm-copyable">{reportText()}</pre>}
       </section>
     </Panel>
@@ -456,55 +484,69 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
 }
 
 function DiagonalTable({
-  reports,
-  byMode,
-  level,
+  rows,
+  levels,
   running,
 }: {
-  reports: VariantReport[];
-  byMode: Map<ModeId, VariantReport>;
-  level: number;
+  rows: VariantReport[];
+  levels: number[];
   running: boolean;
 }): ReactNode {
+  const byJob = new Map(rows.map((row) => [`${row.level}:${row.mode}`, row]));
   return (
-    <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона вариантов">
-      {DIAGONAL_PAIR.map((mode) => {
-        const item = byMode.get(mode);
-        const geo = boardForMode(mode, level);
-        if (!item) {
+    <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона пар «уровень + правило»">
+      {levels.flatMap((value) =>
+        DIAGONAL_PAIR.map((mode) => {
+          const item = byJob.get(`${value}:${mode}`);
+          const geo = boardForMode(mode, value);
+          const key = `${value}:${mode}`;
+          const cells = item ? DIAGONAL_CELLS(item) : null;
+          if (!item || !cells) {
+            return (
+              <tr key={key}>
+                <td>{value}</td>
+                <td>{modeDef(mode).name}</td>
+                <td className="is-mono">
+                  {geo.width}×{geo.height}
+                </td>
+                <td colSpan={DIAGONAL_HEAD.length - 3} className="adm-muted">
+                  {running ? 'считаем' : 'нет данных'}
+                </td>
+              </tr>
+            );
+          }
           return (
-            <tr key={mode}>
+            <tr key={key}>
+              <td>{value}</td>
               <td>{modeDef(mode).name}</td>
               <td className="is-mono">
                 {geo.width}×{geo.height}
               </td>
-              <td colSpan={DIAGONAL_HEAD.length - 2} className="adm-muted">
-                {running ? 'считаем' : 'нет данных'}
-              </td>
+              {cells}
             </tr>
           );
-        }
-        return (
-          <tr key={mode}>
-            <td>{modeDef(mode).name}</td>
-            <td className="is-mono">
-              {geo.width}×{geo.height}
-            </td>
-            <td>{formatPercent(item.solvableShare, 1)}</td>
-            <td>{item.avgScore}</td>
-            <td>{item.avgSteps.toFixed(2)}</td>
-            <td>{item.avgCaptures.toFixed(2)}</td>
-            <td>{item.avgChoiceSteps.toFixed(2)}</td>
-            <td>
-              {item.uniqueLayouts} из {item.samples}
-              {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
-            </td>
-            <td>{formatPercent(item.layoutDistance, 1)}</td>
-            <td>{item.replayIndex}</td>
-          </tr>
-        );
-      })}
+        }),
+      )}
     </Table>
+  );
+}
+
+/** Колонки сравнения после «уровень / режим / поле»: одни и те же для строки-заглушки и строки с данными. */
+function DIAGONAL_CELLS(item: VariantReport): ReactNode {
+  return (
+    <>
+      <td>{formatPercent(item.solvableShare, 1)}</td>
+      <td>{item.avgScore}</td>
+      <td>{item.avgSteps.toFixed(2)}</td>
+      <td>{item.avgCaptures.toFixed(2)}</td>
+      <td>{item.avgChoiceSteps.toFixed(2)}</td>
+      <td>
+        {item.uniqueLayouts} из {item.samples}
+        {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
+      </td>
+      <td>{formatPercent(item.layoutDistance, 1)}</td>
+      <td>{item.replayIndex}</td>
+    </>
   );
 }
 
@@ -627,25 +669,6 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
   );
 }
 
-/** Короткий вывод по двум вариантам диагонали: что лучше, и насколько. */
-function diagonalConclusion(reports: VariantReport[]): string {
-  if (reports.length < 2) return '';
-  const byIndex = [...reports].sort((a, b) => b.replayIndex - a.replayIndex);
-  const best = byIndex[0];
-  const worst = byIndex[byIndex.length - 1];
-  const delta = +(best.replayIndex - worst.replayIndex).toFixed(3);
-  if (delta < 0.02) {
-    return `Разницы по реиграбельности почти нет (${delta}): вариант с диагональю можно выбирать по вкусу, а не по цифрам.`;
-  }
-  const steps = best.avgSteps - worst.avgSteps;
-  return (
-    `Выигрыш у «${modeDef(best.mode).name}» (+${delta} к реиграбельности, решение ${
-      best.avgSteps
-    } хода против ${worst.avgSteps}, ${steps >= 0 ? 'длиннее' : 'короче'}). ` +
-    `Разных досок: ${best.uniqueLayouts}/${best.samples} против ${worst.uniqueLayouts}/${worst.samples}.`
-  );
-}
-
 /** Причины конца забега человеческим языком: ключи `lastEvent` админу ничего не говорят. */
 const CAUSE_NAME: Record<string, string> = {
   captured: 'поимка',
@@ -734,7 +757,7 @@ function raceFindings(rows: RaceMeasure[]): string[] {
     .map(([cause, count]) => `${CAUSE_NAME[cause] ?? cause} ${count}`)
     .join(', ');
   out.push(
-    `Исходы ${total} забегов: ${names || 'нет данных'}. В ${formatPercent(
+    `Исходы ${total} ${declension(total, ['забега', 'забегов', 'забегов'])}: ${names || 'нет данных'}. В ${formatPercent(
       doomShare / rows.length,
       0,
     )} партий конец наступает там, где перебор уже не оставляет хода${
@@ -782,7 +805,12 @@ function jamFindings(rows: JamMeasure[]): string[] {
   );
 
   const unique = rows.reduce((sum, row) => sum + row.uniqueLayouts, 0);
-  out.push(`Разнообразие генератора: ${unique} различных расстановок из ${runs} - повторов он не даёт.`);
+  out.push(
+    `Разнообразие генератора: ${unique} ${declension(
+      unique,
+      ['расстановка', 'расстановки', 'расстановок'],
+    )} из ${runs} - повторов он не даёт.`,
+  );
 
   const forgiveness = rows.map((row) => row.forgiveness);
   out.push(
@@ -794,36 +822,109 @@ function jamFindings(rows: JamMeasure[]): string[] {
   return out;
 }
 
-/** Выводы сравнения диагонали: чем объясняется падение решаемости. */
+/** Выводы сравнения диагонали: по всей лесенке уровней, а не по одному полю. */
 function diagonalFindings(reports: VariantReport[]): string[] {
-  const free = reports.find((report) => report.mode === 'campaignFreeDiag');
-  const strict = reports.find((report) => report.mode === 'campaignStrictDiag');
-  if (!free || !strict) return [];
-  const ratio = strict.avgChoiceSteps > 0 ? free.avgChoiceSteps / strict.avgChoiceSteps : 0;
-  const drop = (free.solvableShare - strict.solvableShare) * 100;
-  const out = [
-    `Выбор на пути решения: ${free.avgChoiceSteps.toFixed(2)} против ${strict.avgChoiceSteps.toFixed(
-      2,
-    )}${ratio > 0 ? ` - со строгой диагональю развилок в ${ratio.toFixed(1)} раза меньше` : ''}.`,
+  const levels = [...new Set(reports.map((report) => report.level))].sort((a, b) => a - b);
+  const rows = levels
+    .map((value) => ({
+      level: value,
+      free: reports.find((report) => report.level === value && report.mode === 'campaignFreeDiag'),
+      strict: reports.find((report) => report.level === value && report.mode === 'campaignStrictDiag'),
+    }))
+    .filter(
+      (row): row is { level: number; free: VariantReport; strict: VariantReport } => !!row.free && !!row.strict,
+    );
+  if (rows.length === 0) return [];
+
+  const avg = (pick: (row: (typeof rows)[number]) => number) =>
+    rows.reduce((sum, row) => sum + pick(row), 0) / rows.length;
+  const fields = [
+    ...new Set(
+      rows.map((row) => {
+        const geo = boardForMode(row.free.mode, row.level);
+        return `${geo.width}x${geo.height}`;
+      }),
+    ),
   ];
+  const perVariant = Math.round(rows.reduce((sum, row) => sum + row.strict.samples, 0) / rows.length);
+  const out = [
+    `Сравнение снято на ${rows.length} ${declension(rows.length, ['уровне', 'уровнях', 'уровнях'])} - поля ${fields.join(
+      ', ',
+    )}, на вариант по ${perVariant} ${declension(perVariant, ['доска', 'доски', 'досок'])}. Правило смотрят по всему росту поля: на 3x4 и 6x9 оно работает по-разному, один уровень этого не покажет.`,
+  ];
+
+  const freeChoice = avg((row) => row.free.avgChoiceSteps);
+  const strictChoice = avg((row) => row.strict.avgChoiceSteps);
+  const ratio = strictChoice > 0 ? freeChoice / strictChoice : 0;
   out.push(
-    strict.fallbacks > 0 && drop > 1
-      ? `Решаемость падает на ${drop.toFixed(
-          1,
-        )} п.п., но генератор отдал ${strict.fallbacks} досок из ${strict.samples} без отбора: почти всё падение объясняется воронкой генератора, а не правилом. Цифра «с решением» смешивает «доска нерешаемая» и «генератор сдался» - смотри на откаты рядом.`
-      : `Решаемость ${formatPercent(free.solvableShare, 1)} против ${formatPercent(
-          strict.solvableShare,
-          1,
-        )} при откатах ${free.fallbacks} и ${strict.fallbacks}.`,
+    `Выбор на пути решения: ${freeChoice.toFixed(2)} против ${strictChoice.toFixed(2)}` +
+      (ratio > 1
+        ? ` - со строгой диагональю развилок в ${ratio.toFixed(1)} раза меньше, задача превращается в одну нитку.`
+        : ' - за весь прогон строгой диагонали развилок не стало меньше.'),
   );
-  const better = free.replayIndex >= strict.replayIndex ? 'свободная' : 'строгая';
+
+  const drop = avg((row) => (row.free.solvableShare - row.strict.solvableShare) * 100);
+  const fallbacks = rows.reduce((sum, row) => sum + row.strict.fallbacks, 0);
+  const boards = rows.reduce((sum, row) => sum + row.strict.samples, 0);
   out.push(
-    `Реиграбельность ${Math.round(free.replayIndex * 100)} против ${Math.round(
-      strict.replayIndex * 100,
-    )}, различных досок ${free.uniqueLayouts}/${free.samples} против ${strict.uniqueLayouts}/${strict.samples}: выигрывает ${better} диагональ, её и оставляем.` +
-      (free.samples < 64 ? ` На ${free.samples} досках разница в пару пунктов - шум, для вывода нужно 64+.` : ''),
+    fallbacks > 0 && drop > 1
+      ? `Решаемость падает в среднем на ${drop.toFixed(1)} п.п., но генератор отдал ${fallbacks} ${declension(
+          fallbacks,
+          ['доску', 'доски', 'досок'],
+        )} из ${boards} без отбора: почти всё падение объясняется воронкой генератора, а не правилом. Цифра «с решением» смешивает «доска нерешаемая» и «генератор сдался» - смотри на откаты рядом.`
+      : `Решаемость ${formatPercent(avg((row) => row.free.solvableShare), 1)} против ${formatPercent(
+          avg((row) => row.strict.solvableShare),
+          1,
+        )} при откатах ${fallbacks} из ${boards}: откатов почти нет, значит падение - настоящее, а не воронка генератора.`,
   );
+
+  const freeIndex = Math.round(avg((row) => row.free.replayIndex));
+  const strictIndex = Math.round(avg((row) => row.strict.replayIndex));
+  const gaps = rows.map((row) => row.free.replayIndex - row.strict.replayIndex);
+  const unique = rows.reduce((sum, row) => sum + row.free.uniqueLayouts + row.strict.uniqueLayouts, 0);
+  const better = freeIndex >= strictIndex ? 'свободная' : 'строгая';
+  out.push(
+    `Реиграбельность ${freeIndex} против ${strictIndex}, по уровням разница от ${Math.round(Math.min(...gaps))} до ${Math.round(
+      Math.max(...gaps),
+    )}; различных досок ${unique} из ${boards * 2}. Выигрывает ${better} диагональ - её и оставляем.` +
+      (perVariant < 64
+        ? ` По ${perVariant} ${declension(
+            perVariant,
+            ['доска', 'доски', 'досок'],
+          )} на вариант разница в пару пунктов рождается сама: для вывода нужно 64+.`
+        : ` По ${perVariant} ${declension(
+            perVariant,
+            ['доски', 'досок', 'досок'],
+          )} на вариант это уже не шум.`),
+  );
+
+  const byGap = [...rows].sort(
+    (a, b) =>
+      Math.abs(a.free.replayIndex - a.strict.replayIndex) - Math.abs(b.free.replayIndex - b.strict.replayIndex),
+  );
+  const calmest = byGap[0];
+  const angriest = byGap[byGap.length - 1];
+  if (rows.length > 1) {
+    const calmGeo = boardForMode(calmest.free.mode, calmest.level);
+    const angryGeo = boardForMode(angriest.free.mode, angriest.level);
+    out.push(
+      `Меньше всего уровни расходятся на ${calmest.level}-м (поле ${calmGeo.width}x${calmGeo.height}, ${Math.round(
+        Math.abs(calmest.free.replayIndex - calmest.strict.replayIndex),
+      )} пункта), больше всего на ${angriest.level}-м (поле ${angryGeo.width}x${angryGeo.height}, ${Math.round(
+        Math.abs(angriest.free.replayIndex - angriest.strict.replayIndex),
+      )}). Если правило и возвращать, то только там, где оно на что-то влияет.`,
+    );
+  }
   return out;
+}
+
+/** Русское склонение при числе: «81 доска», «75 досок», «2 уровня». */
+function declension(value: number, forms: [string, string, string]): string {
+  const last = Math.abs(Math.round(value)) % 100;
+  const one = last % 10;
+  if (one === 1 && last !== 11) return forms[0];
+  if (one >= 2 && one <= 4 && (last < 12 || last > 14)) return forms[1];
+  return forms[2];
 }
 
 /** Знак в выводах словами: «плюс 1.2 хода» читается быстрее, чем «1.2». */
@@ -853,7 +954,12 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
   ];
   // Как и в гонках: сколько полей реально прогналось, а не что стоит в поле ввода.
   const ran = rows[0]?.samples ?? meta.samples;
-  const lines = [`Замер генератора «Парковки», по ${ran} полей на уровень, зерно ${meta.seed}`, ''];
+  const lines = [
+    `Замер генератора «Парковки», по ${ran} ${declension(ran, ['поле', 'поля', 'полей'])} на уровень, зерно ${
+      meta.seed
+    }`,
+    '',
+  ];
   lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
   for (const row of rows) {
     lines.push(
@@ -885,7 +991,7 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
   // что реально прогналось, - на случай отмены и округлений в запросе.
   const ran = rows[0]?.samples ?? meta.samples;
   const lines = [
-    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${ran} забегов на уровень и на правило, зерно ${meta.seed}`,
+    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${ran} ${declension(ran, ['забег', 'забега', 'забегов'])} на уровень и на правило, зерно ${meta.seed}`,
     '',
     `| ${head.join(' | ')} |`,
     `| ${head.map(() => '---').join(' | ')} |`,
@@ -903,37 +1009,49 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
 }
 
 /** Текст сравнения диагонали в markdown. */
-function diagonalText(
-  reports: VariantReport[],
-  meta: { level: number; samples: number; seed: number },
-): string {
+function diagonalText(reports: VariantReport[], meta: { levels: number[]; samples: number; seed: number }): string {
   const ran = reports[0]?.samples ?? meta.samples;
+  const fields = [...new Set(meta.levels.map((value) => boardForMode('campaign', value)))].map(
+    (geo) => `${geo.width}x${geo.height}`,
+  );
   const lines = [
-    `Кампания: диагональ свободно или только бить, уровень ${meta.level}, по ${ran} досок на вариант, зерно ${meta.seed}`,
+    `Кампания: диагональ свободно или только бить, уровни ${meta.levels.join(',')} (поля ${fields.join(', ')}), по ${ran} ${declension(
+      ran,
+      ['доска', 'доски', 'досок'],
+    )} на вариант, зерно ${meta.seed}`,
     '',
     `| ${DIAGONAL_HEAD.join(' | ')} |`,
     `| ${DIAGONAL_HEAD.map(() => '---').join(' | ')} |`,
   ];
-  for (const item of reports) {
-    const geo = boardForMode(item.mode, meta.level);
-    lines.push(
-      `| ${[
-        modeDef(item.mode).name,
-        `${geo.width}x${geo.height}`,
-        `${(item.solvableShare * 100).toFixed(1)}%`,
-        `${item.avgScore}`,
-        item.avgSteps.toFixed(2),
-        item.avgCaptures.toFixed(2),
-        item.avgChoiceSteps.toFixed(2),
-        `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
-        `${(item.layoutDistance * 100).toFixed(1)}%`,
-        `${item.replayIndex}`,
-      ].join(' | ')} |`,
-    );
+  const byJob = new Map(reports.map((row) => [`${row.level}:${row.mode}`, row]));
+  for (const value of meta.levels) {
+    for (const mode of DIAGONAL_PAIR) {
+      const geo = boardForMode(mode, value);
+      const item = byJob.get(`${value}:${mode}`);
+      if (!item) {
+        lines.push(`| ${value} | ${modeDef(mode).name} | ${geo.width}x${geo.height} | нет данных |`);
+        continue;
+      }
+      lines.push(
+        `| ${[
+          value,
+          modeDef(mode).name,
+          `${geo.width}x${geo.height}`,
+          `${(item.solvableShare * 100).toFixed(1)}%`,
+          `${item.avgScore}`,
+          item.avgSteps.toFixed(2),
+          item.avgCaptures.toFixed(2),
+          item.avgChoiceSteps.toFixed(2),
+          `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
+          `${(item.layoutDistance * 100).toFixed(1)}%`,
+          `${item.replayIndex}`,
+        ].join(' | ')} |`,
+      );
+    }
   }
   lines.push('');
   lines.push(
-    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» - средняя развилка на пути решения; «реиграбельность» - сводный индекс.',
+    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» - средняя развилка на пути решения; «реиграбельность» - сводный индекс. Строки идут парами: на уровне сначала свободная диагональ, затем строгая - и те же доски, и то же зерно.',
   );
   return lines.join('\n');
 }

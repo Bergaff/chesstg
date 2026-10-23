@@ -380,6 +380,19 @@ body {
   color: var(--dim);
 }
 
+/* Выводы прогона: их считает панель из цифр, и они должны читаться как список,
+   а не как ещё одна таблица - тот же текст уходит в отчёт. */
+.adm-suite-findings {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.adm-suite-findings li + li {
+  margin-top: 4px;
+}
+
 .adm-check.is-group {
   font-size: 12px;
   color: var(--text);

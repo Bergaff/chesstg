@@ -354,7 +354,8 @@ describe('админка', () => {
     expect(screen.getByRole('button', { name: 'Парковка' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Гонки' })).toBeTruthy();
     expect(screen.getByText('Кампания: диагональ только бить или свободно')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Сравнить диагональ' })).toBeTruthy();
+    // Подпись запуска показывает длину лесенки: сравнение считает все уровни.
+    expect(screen.getByRole('button', { name: /^Сравнить диагональ \(7\)/ })).toBeTruthy();
     // Две другие таблицы скрыты, пока на них не перешли: окон больше одного нет.
     expect(screen.queryByText('Парковка: сложность и реиграбельность')).toBeNull();
     expect(screen.queryByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeNull();
@@ -376,16 +377,25 @@ describe('админка', () => {
     fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
-    // Минимум досок: прогон обязан закончиться внутри теста.
+    // Два уровня и минимум досок: прогон обязан закончиться внутри теста.
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Сравнить диагональ' }));
+    fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '6,20' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^Сравнить диагональ \(2\)/ }));
 
     // Отчёт начинается с шапки, а строки таблиц ищутся внутри неё.
-    const text = await screen.findByText(/^Отчёт лаборатории: Кампания/, undefined, { timeout: 30_000 });
+    const text = await screen.findByText(/^Отчёт лаборатории: Кампания/, undefined, { timeout: 60_000 });
     expect(text.textContent).toContain('Кампания: диагональ свободно или только бить');
-    expect(text.textContent).toContain('| Режим | Поле | С решением |');
-    expect(text.textContent).toContain('Кампания, диагональ свободна');
-    expect(text.textContent).toContain('Кампания, диагональ только для взятия');
+    expect(text.textContent).toContain('уровни 6,20');
+    expect(text.textContent).toContain('| Уровень | Режим | Поле | С решением |');
+    // Правило сравнивается на каждом уровне лесенки: две строки на уровень,
+    // поле 6-го уровня - 4x6, поле 20-го - 5x8, а не одно 4x6 на весь прогон.
+    expect(text.textContent).toMatch(/\| 6 \| Кампания, диагональ свободна \| 4x6 \|/);
+    expect(text.textContent).toMatch(/\| 20 \| Кампания, диагональ только для взятия \| 5x8 \|/);
+    // Выводы панель показывает и под таблицей списком, и в отчёте - проверяем
+    // именно список: он начинается с того, на скольких уровнях снято сравнение.
+    const items = screen.getAllByRole('listitem');
+    expect(items.length).toBeGreaterThanOrEqual(4);
+    expect(items[0].textContent).toContain('Сравнение снято на 2 уровнях');
     await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
   }, 60_000);
 
@@ -398,7 +408,7 @@ describe('админка', () => {
     // Гонки: самый дешёвый из трёх прогонов, 1000 досок на правило считается
     // секунды. Один уровень, иначе тест ждёт лестницу.
     fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
-    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '10' } });
     fireEvent.click(await screen.findByRole('button', { name: /Расчёт на 1000 досок/ }));
 
     const text = await screen.findByText(/^Отчёт лаборатории: Гонки/, undefined, { timeout: 120_000 });
@@ -423,7 +433,7 @@ describe('админка', () => {
     // У боевого режима своя метрика: не доля побед, а длина плана, развилки и
     // разнообразие расстановок. Окно прогонов одно, поэтому сначала вкладка.
     fireEvent.click(await screen.findByRole('button', { name: 'Парковка' }));
-    expect(screen.getByLabelText('Уровни для «Парковки» и «Гонок»')).toBeTruthy();
+    expect(screen.getByLabelText('Лестница уровней')).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Сверх бюджета' })).toBeTruthy();
     // Таблица одна на все прогоны: колонка реиграбельности встречается один раз,
     // а не по разу на каждую карточку.
@@ -432,7 +442,7 @@ describe('админка', () => {
     expect(screen.getByRole('columnheader', { name: 'Прощение' })).toBeTruthy();
     // Два уровня и минимум досок: прогон обязан закончиться внутри теста, иначе
     // панель допишет состояние уже после разборки окружения.
-    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '1,6' } });
+    fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '1,6' } });
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Замерить генератор (2)' }));
 
@@ -451,7 +461,7 @@ describe('админка', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
 
     fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
-    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '10' } });
     // Обе ветки сравнения считают ровно столько досок, сколько запрошено: делить
     // запрос пополам - значит соврать в заголовке отчёта.
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '8' } });

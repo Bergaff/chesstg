@@ -8,17 +8,27 @@ import {
   type VariantReport,
 } from '../engine';
 
-export interface VariantSuiteRequest {
-  modes: ModeId[];
+/** Одна задача прогона: вариант правил на конкретном уровне. */
+export interface VariantSuiteJob {
+  mode: ModeId;
   level: number;
+}
+
+export interface VariantSuiteRequest {
+  /**
+   * Пары «вариант + уровень». Правило сравнивается на лесенке уровней, а не на
+   * одном: иначе вывод снимается на поле 4x6 и молчит про 3x4 и 6x9, где то же
+   * правило может работать иначе.
+   */
+  jobs: VariantSuiteJob[];
   samples: number;
   seed: number;
 }
 
 export interface VariantSuiteHandlers {
-  /** Одна доска разобрана: прогресс внутри текущего варианта. */
-  onSample?: (mode: ModeId, done: number, total: number) => void;
-  /** Вариант посчитан целиком. */
+  /** Одна доска разобрана: прогресс внутри текущей пары. */
+  onSample?: (mode: ModeId, level: number, done: number, total: number) => void;
+  /** Пара «вариант + уровень» посчитана целиком. */
   onReport?: (report: VariantReport) => void;
 }
 
@@ -237,23 +247,21 @@ export function runVariantSuite(
     };
 
     if (typeof Worker === 'undefined') {
-      const reports: VariantReport[] = [];
       const step = (index: number) => {
-        if (cancelled || index >= request.modes.length) {
+        if (cancelled || index >= request.jobs.length) {
           resolve();
           return;
         }
-        const mode = request.modes[index];
+        const job = request.jobs[index];
         window.setTimeout(() => {
           try {
             const report = analyzeVariant({
-              mode,
-              level: request.level,
+              mode: job.mode,
+              level: job.level,
               samples: request.samples,
               seed: request.seed,
-              onProgress: (finished, total) => handlers.onSample?.(mode, finished, total),
+              onProgress: (finished, total) => handlers.onSample?.(job.mode, job.level, finished, total),
             });
-            reports.push(report);
             handlers.onReport?.(report);
             step(index + 1);
           } catch (error) {
@@ -267,11 +275,12 @@ export function runVariantSuite(
 
     worker = new Worker(new URL('../workers/variants.worker.ts', import.meta.url), { type: 'module' });
     const post = (index: number) => {
+      const job = request.jobs[index];
       worker?.postMessage({
         type: 'run',
         index,
-        mode: request.modes[index],
-        level: request.level,
+        mode: job.mode,
+        level: job.level,
         samples: request.samples,
         seed: request.seed,
       });
@@ -280,7 +289,7 @@ export function runVariantSuite(
     worker.onmessage = (event: MessageEvent) => {
       const data = event.data as WorkerMessage;
       if (data.type === 'progress') {
-        handlers.onSample?.(data.mode, data.done, data.total);
+        handlers.onSample?.(data.mode, request.jobs[data.index]?.level ?? 0, data.done, data.total);
         return;
       }
       if (data.type === 'report') {
@@ -289,7 +298,7 @@ export function runVariantSuite(
           return;
         }
         handlers.onReport?.(data.report);
-        if (data.index + 1 >= request.modes.length) finish();
+        if (data.index + 1 >= request.jobs.length) finish();
         else post(data.index + 1);
         return;
       }
