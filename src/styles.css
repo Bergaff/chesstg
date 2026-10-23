@@ -1251,6 +1251,9 @@ a {
   flex: 0 0 auto;
   min-height: 16px;
   font-size: 10px;
+  /* Цифры одинаковой ширины: счётчик хода и рекорд не должны растягивать
+     строку на полбуквы - из-за этого она переезжала на вторую и поле вздыхало. */
+  font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
@@ -1287,6 +1290,20 @@ a {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--dim);
+  /* Одна строка и ни слова больше: подпись цели - напоминание, а не правила,
+     её перенос на новую строку отнимал у поля высоту и двигал клетки. */
+  white-space: nowrap;
+}
+
+.goal-line > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.goal-line .num {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .board-measure {

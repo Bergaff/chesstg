@@ -16,6 +16,26 @@ import {
 } from '../engine';
 import { cn } from '../lib/format';
 
+/**
+ * Размер клетки держится с гистерезисом. Строка статуса и подпись цели
+ * переставляют себя на букву-другую при каждом ходе («волна через 9» -> «10»,
+ * «рекорд 3» -> «рекорд 12»), часть уезжает на вторую строку - и поле вместе с
+ * ней сжимается на пиксель-два. На телефоне это выглядит как дрожание экрана на
+ * каждый тап, хотя правилам высота поля не менялась ни на йоту. Новое значение
+ * принимаем, только когда разница заметна (3 px на клетку - это полстроки
+ * реального перероста) или когда изменилась ширина: на ширине держатся и рост
+ * поля, и поворот экрана, и появление клавиатуры.
+ */
+export function stableCell(prev: { cell: number; width: number }, fit: number, width: number): number {
+  // Первый кадр верится измерению целиком: поля ещё нет, прятать нечего.
+  if (prev.cell <= 0) return fit;
+  // Контейнер схлопнулся на миг (строка статуса разъехалась, открылась модалка):
+  // прежнее поле лучше, чем пустота на полсекунды.
+  if (fit <= 0) return prev.cell;
+  if (Math.abs(width - prev.width) >= 1) return fit;
+  return Math.abs(fit - prev.cell) >= 3 ? fit : prev.cell;
+}
+
 export interface MovedPiece {
   id: string;
   from: Cell;
@@ -99,6 +119,8 @@ export function Board({
   const king = rules.player === 'king';
   /** Приток есть: новые фигуры должны въезжать на поле, а не проступать. */
   const spawning = rules.spawnPerTurn > 0 || rules.spawnRate !== undefined;
+  /** Прежняя клетка и ширина: см. `stableCell`. */
+  const sizeRef = useRef({ cell: 0, width: 0 });
   const seenRef = useRef<Set<string>>(new Set());
   const seen = seenRef.current;
   // Прежнее положение игрока: ход должен читаться как перестановка, а не
@@ -121,7 +143,7 @@ export function Board({
   // иначе каждая добавленная колонка пересчитывала бы клетки, и рост читался бы
   // как «доска съехала», а не как «поле стало шире».
   const sizeCols = rules.grow ? Math.max(cols, RACE_WIDTH) : cols;
-  const cell =
+  const fit =
     availableWidth > 0 && availableHeight > 0
       ? Math.floor(
           Math.min(
@@ -130,6 +152,8 @@ export function Board({
           ),
         )
       : 0;
+  const cell = stableCell(sizeRef.current, fit, box.width);
+  sizeRef.current = { cell, width: box.width };
   const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
   const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
 

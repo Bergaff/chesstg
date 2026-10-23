@@ -14,10 +14,18 @@ export function initTelegram(): void {
     /* старые версии клиента */
   }
 
+  // Высота держится с запасом: во время жеста `viewportStableHeight` иногда
+  // приезжает нулём, и берутся за `window.innerHeight` - значения расходятся на
+  // десятки пикселей, переменная скачет, и поле пересчитывает размер клетки на
+  // каждый тап. Реагируем только на заметную смену высоты и никогда не пишем ноль.
+  let appHeight = 0;
   const applyViewport = () => {
     try {
-      const height = tg.viewportStableHeight || window.innerHeight;
-      if (height) document.documentElement.style.setProperty('--app-height', `${height}px`);
+      const stable = tg.viewportStableHeight ?? 0;
+      const height = Math.round(stable > 0 ? stable : window.innerHeight);
+      if (!height || Math.abs(height - appHeight) < 16) return;
+      appHeight = height;
+      document.documentElement.style.setProperty('--app-height', `${height}px`);
     } catch {
       /* ignore */
     }

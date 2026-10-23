@@ -825,7 +825,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поднимайтесь выше, поле растёт'
               : isRace
-                ? 'Король против фигур: они выходят сверху и ходят по своим правилам, бейте и уходите в любую сторону'
+                ? 'Держитесь в полосе: бейте и уходите в любую сторону'
                 : 'Дойти до верхнего ряда'}
           </span>
           <span className="num">{state.score > 0 ? (isRace ? `${state.score} ход.` : `${state.score} кл.`) : ''}</span>
