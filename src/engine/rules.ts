@@ -90,48 +90,15 @@ function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][
 }
 
 /**
- * Такт поля в бегущих режимах: весь ряд уезжает на клетку вниз, нижний ряд
- * сходит с поля и уносит то, что на нём стояло. Игрока сдвиг не трогает: у
- * режима есть полоса (`kingRows`), и король живёт в ней, а волна протекает мимо.
- * Прежняя смерть «ряд унёс короля за край» убрана: с двумя разрешёнными рядами
- * она превращала забег в «один шаг не туда и всё», и вместо чтения поля игрок
- * дергался.
- *
- * Но лента по-прежнему привозит фигуры: если после сдвига фигура встала на
- * клетку короля, партия кончена - это то же самое «фигура на моей клетке», что
- * и ход в `enemyPhase`, просто фигуру туда несёт поле. Иначе фигура осела бы на
- * короле, и читать доску стало бы невозможно.
- * Заморозка ставит на паузу и поле тоже, щит от сдвига не спасает: он от хода
- * фигуры.
+ * Ответ фигур. В «Гонках» они идут своими шахматными ходами, поля как ленты нет:
+ * за такт фигура делает ровно один ход, и конь выглядит буквой Г, а не «прыжком
+ * на три клетки». Фигура, которая стоит в нижнем ряду и не бьёт короля, уходит с
+ * поля (`exitAtBottom`) - это замена уносившему ряду: без неё доска забивалась бы
+ * за пару десятков ходов.
  */
-function scrollPhase(state: GameState): void {
-  const rules = rulesFor(state.mode);
-  if (!rules.scroll || state.freeze > 0 || state.status !== 'playing') return;
-  const kept: typeof state.enemies = [];
-  let swept = 0;
-  let arrived: GameState['enemies'][number] | null = null;
-  for (const enemy of state.enemies) {
-    const y = enemy.y - 1;
-    if (y < 0) {
-      swept += 1;
-      continue;
-    }
-    const moved = { ...enemy, y };
-    if (moved.x === state.player.x && moved.y === state.player.y) arrived = moved;
-    kept.push(moved);
-  }
-  state.enemies = kept;
-  if (swept > 0) state.lastEvent = 'swept';
-  if (arrived) {
-    state.status = 'lost';
-    state.capturedBy = arrived.type;
-    state.lastEvent = 'captured';
-  }
-}
-
 function enemyPhase(state: GameState): void {
   const rules = rulesFor(state.mode);
-  // Партия могла кончиться на такте поля: ответ фигур тогда не пишется в
+  // Партия могла кончиться на выпаде игрока: ответ фигур тогда не пишется в
   // журнал, чтобы `lastEvent` остался причиной конца забега.
   if (state.status !== 'playing') return;
   if (state.freeze > 0) {
@@ -148,6 +115,16 @@ function enemyPhase(state: GameState): void {
       // В «Гонках» фигура, ушедшая за нижний край, покидает поле.
       escaped.push(enemy.id);
       continue;
+    }
+    // Край поля вместо ленты: фигура дошла до нижнего ряда и свой ход уже
+    // использовала - дальше она уходит, иначе доска заполнится до отказа.
+    // Бьющая короля фигура с поля не уходит: сначала взятие.
+    if (rules.exitAtBottom && enemy.y === 0) {
+      const takesPlayer = target !== null && target.x === state.player.x && target.y === state.player.y;
+      if (!takesPlayer) {
+        escaped.push(enemy.id);
+        continue;
+      }
     }
     if (target) {
       enemy.x = target.x;
@@ -220,22 +197,34 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
       if (king && y < 0) throw new RuleError('За границей поля');
       // Полоса игрока: вне неё клетки нет, даже если формально она в доске.
       if (king && rules.kingRows > 0 && y >= rules.kingRows) {
-        throw new RuleError('Выше полосы ходить нельзя');
+        // Через линию шагнуть нельзя, но бить по ней можно: `strike` отдаёт
+        // такие клетки как взятия, поэтому отказ касается только перемещения.
+        throw new RuleError(rules.strike > 0 ? 'Выше полосы ходить нельзя, бить можно через линию' : 'Выше полосы ходить нельзя');
       }
       if (y >= state.height) throw new RuleError('Верхняя граница поля');
       if (x < 0 || x >= state.width) throw new RuleError('За границей поля');
       if (dy === 2) throw new RuleError('Двойной ход доступен только с начальной позиции');
       throw new RuleError('Клетка занята');
     }
-    if (option.takes) {
+    if (option.strike) {
+      // Выпад через линию: фигура снята, а король остаётся на своей клетке.
+      // Полоса от этого не ломается, и позиция, которую игрок прочитал, не
+      // уезжает из-под него после взятия.
       state.enemies = state.enemies.filter((e) => !(e.x === option.x && e.y === option.y));
       state.captures = (state.captures ?? 0) + 1;
       state.lastCapture = { x: option.x, y: option.y };
-      state.lastEvent = 'capture';
+      state.lastEvent = 'strike';
     } else {
-      state.lastEvent = 'move';
+      if (option.takes) {
+        state.enemies = state.enemies.filter((e) => !(e.x === option.x && e.y === option.y));
+        state.captures = (state.captures ?? 0) + 1;
+        state.lastCapture = { x: option.x, y: option.y };
+        state.lastEvent = 'capture';
+      } else {
+        state.lastEvent = 'move';
+      }
+      state.player = { x: option.x, y: option.y };
     }
-    state.player = { x: option.x, y: option.y };
   } else {
     throw new RuleError('Неизвестное действие');
   }
@@ -286,7 +275,6 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.
   const waitingForNothing = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && noMovesLeft(state);
   const before = waitingForNothing ? boardSignature(state) : '';
-  scrollPhase(state);
   spawnPhase(state);
   enemyPhase(state);
 

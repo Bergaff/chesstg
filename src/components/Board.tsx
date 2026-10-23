@@ -25,7 +25,7 @@ export interface MovedPiece {
 /**
  * Фигура, которую на этом ходу унесло за нижний край. Её уже нет в состоянии,
  * поэтому она рисуется призраком поверх поля и съезжает с доски: без этого ряда
- * конвейер не читается, фигуры просто исчезают.
+ * сход фигуры с поля не читается, фигура просто исчезает.
  */
 export interface SweptPiece {
   id: string;
@@ -44,12 +44,8 @@ interface BoardProps {
   turn: number;
   /** Куда переставились фигуры последним ходом: нужно для показа хода врага. */
   moved?: MovedPiece[];
-  /** Фигуры, унесенные рядом: нужны, чтобы показать уход ряда. */
+  /** Фигуры, сошедшие с поля этим ходом: нужны, чтобы показать их уход. */
   swept?: SweptPiece[];
-  /**
-   * Куда игрок хотел сходить этим ходом. Если клетка не изменилась, значит поле
-   * приехало под него (конвейер), и шаг показывается импульсом.
-   */
   /** Идёт ход фигур, ввод заблокирован. */
   settling?: boolean;
 }
@@ -137,10 +133,10 @@ export function Board({
   const boardWidth = cell > 0 ? cell * cols + gap * (cols - 1) : 0;
   const boardHeight = cell > 0 ? cell * rows + gap * (rows - 1) : 0;
 
-  // Бегущее поле показывается движением, а не линиями: приходящие фигуры
-  // въезжают сверху, уходящий ряд съезжает за край. Полосу притока раньше
+  // Уход фигуры с поля показывается движением, а не линиями: пришедшая фигура
+  // въезжает сверху, сошедшая съезжает за нижний край. Полосу притока раньше
   // обводили рамкой - игрок читал её как случайные линии поля, и ничего больше.
-  const flow = Boolean(rules.scroll) && cell > 0;
+  const ghosts = cell > 0;
 
   const playerGlyph = king ? '♚' : (SKINS[skin]?.pawn ?? '♟');
   const playerSlide =
@@ -205,6 +201,8 @@ export function Board({
                     isFinish && 'cell-finish',
                     move && interactive && 'cell-move',
                     move?.takes && 'cell-take',
+                    // Выпад через линию: клетка бьётся, но король на неё не встаёт.
+                    move?.strike && 'cell-strike',
                     risk && 'cell-risk',
                     flash && 'cell-flash',
                     leftCell && 'cell-left',
@@ -219,9 +217,11 @@ export function Board({
                   disabled={!move || !interactive}
                   aria-label={
                     enemy
-                      ? move?.takes
-                        ? `Клетка ${x + 1}, ${y + 1}: взять вражескую фигуру`
-                        : `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
+                      ? move?.strike
+                        ? `Клетка ${x + 1}, ${y + 1}: выпад через линию, взять фигуру и остаться на месте`
+                        : move?.takes
+                          ? `Клетка ${x + 1}, ${y + 1}: взять вражескую фигуру`
+                          : `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
                       : isPlayer
                         ? `Клетка ${x + 1}, ${y + 1}: ваш король`
                         : move
@@ -230,7 +230,7 @@ export function Board({
                   }
                 >
                   {hintIndex >= 0 && <span className="hint-no">{hintIndex + 1}</span>}
-                  {move && interactive && (
+                  {move && interactive && !move.strike && (
                     <span className="move-glyph" aria-hidden="true">
                       {king ? (KING_GLYPH[`${move.dx}:${move.dy ?? 1}`] ?? MOVE_GLYPH[move.dx]) : MOVE_GLYPH[move.dx]}
                     </span>
@@ -302,7 +302,7 @@ export function Board({
             />
           ) : null}
         </div>
-          {flow && swept.length > 0 && (
+          {ghosts && swept.length > 0 && (
             <div className="board-ghosts" aria-hidden="true">
               {swept.map((piece) => (
                 <span

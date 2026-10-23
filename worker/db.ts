@@ -333,10 +333,11 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
     typeof value.player?.y === 'number';
   if (!shaped) return false;
   if (mode === 'race') {
-    // Ряд и высота поля входят в проверку: конвейер менял и геометрию, и правило
-    // про игрока. Стартовый забег обязан начинаться там, где его ждёт клиент, -
-    // в полосе из `RACE_KING_ROWS` нижних рядов, на ряду генератора. Партия со
-    // старого 12-рядного конвейера закрывается как выход, а не продолжается.
+    // Ряд и высота поля входят в проверку: у «Гонок» менялась и геометрия, и
+    // правило про игрока. Стартовый забег обязан начинаться там, где его ждёт
+    // клиент, - в полосе из `RACE_KING_ROWS` нижних рядов, на ряду генератора.
+    // Партия прежних сборок (12 рядов, потом бегущий ряд) закрывается как выход,
+    // а не продолжается: возобновлять её нечестно, правила уже другие.
     const band = typeof value.player?.y === 'number' && value.player.y >= 0 && value.player.y < RACE_KING_ROWS;
     return value.player?.y === RACE_KING_ROW && band && value.height === RACE_ROWS;
   }
@@ -382,7 +383,7 @@ export function serializeRun(run: RunRow) {
 export interface ModeProgress {
   level: number;
   maxLevel: number;
-  /** Рекорд в прокрученных рядах: заполняется только у конвейерных режимов. */
+  /** Рекорд в пережитых ходах: у «Гонок» финиша нет, поэтому считается длина. */
   best?: number;
   /** Ходов в лучшем забеге. */
   bestMoves?: number;

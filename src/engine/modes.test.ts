@@ -67,16 +67,25 @@ describe('правила режимов', () => {
     expect(MODE_RULES.race.grow).toBe(true);
     expect(MODE_RULES.campaign.grow ?? false).toBe(false);
     expect(MODE_RULES.jam.grow ?? false).toBe(false);
+    // Поле не бежит: фигура за такт делает ровно свой ход, а не «ход плюс сдвиг».
+    expect(MODE_RULES.race.exitAtBottom).toBe(true);
+    expect(MODE_RULES.race.strike).toBeGreaterThan(0);
+    expect(MODE_RULES.campaign.strike).toBe(0);
+    expect(MODE_RULES.campaign.exitAtBottom).toBe(false);
+    expect(MODE_RULES.jam.exitAtBottom).toBe(false);
+    // «Гонки без выпадата» отличаются ровно одним флагом: геометрия та же.
+    expect(MODE_RULES.raceNoStrike.strike).toBe(0);
+    expect(MODE_RULES.raceNoStrike.kingRows).toBe(RACE_KING_ROWS);
     // Вариант на уклонение сравнивает правила на статичной ширине.
     expect(MODE_RULES.raceDodge.grow).toBe(false);
-    expect(MODE_RULES.raceDodge.scroll).toBe(false);
     // Полоса игрока: флаг `kingRows` = сколько нижних рядов доступно королю.
     expect(MODE_RULES.race.kingRows).toBe(RACE_KING_ROWS);
     expect(MODE_RULES.campaign.kingRows).toBe(0);
     expect(MODE_RULES.endless.kingRows).toBe(0);
     expect(MODE_RULES.jam.kingRows).toBe(0);
-    // Вариант «на уклонение» - тот же король, поэтому полоса наследуется.
-    expect(MODE_RULES.raceDodge.kingRows).toBe(RACE_KING_ROWS);
+    // Вариант «на уклонение» бегает пешкой: полоса ему не нужна, выпад тоже.
+    expect(MODE_RULES.raceDodge.kingRows).toBe(0);
+    expect(MODE_RULES.raceDodge.strike).toBe(0);
   });
 
   it('полоса режет ходы короля, но не чужие фигуры', () => {
@@ -88,7 +97,9 @@ describe('правила режимов', () => {
     const state = base({ mode: 'race', width: 5, height: 8, player: { x: 2, y: rules.kingRows - 1 } });
     const options = legalMoves(state);
     expect(options).toHaveLength(5);
-    expect(options.every((move) => move.y < rules.kingRows)).toBe(true);
+    // Внутри полосы остаются только ходы; клетки над линией отдаёт выпад, и у
+    // пустой доски его нет: бить не по чему.
+    expect(options.every((move) => move.y < rules.kingRows && !move.strike)).toBe(true);
     // А фигуры в полосу ходят все: правило про игрока, а не про ряды доски.
     // Дальность у них своя (`slideCap`), поэтому ферзя ставим в двух шагах.
     const at = { id: 'q', type: 'queen' as const, x: 2, y: 3 };
@@ -113,32 +124,39 @@ describe('правила режимов', () => {
   });
 
   it('в «Гонках» фигура бьёт по своей линии, а с линии можно уйти', () => {
-    // Полоса в два нижних ряда: линия атаки читается по колонке, потому что
-    // ладья едет вниз вместе с полем и в любой момент встанет на ряд короля.
-    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
-    // Шаг вниз оставляет короля на колонке ладьи: сдвиг подвозит ладью и бьёт.
+    // Конвейера нет: угроза идёт ходом самой фигуры, и читается она по
+    // её шахматному ходу, а не по сдвигу ряда.
+    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 2 }] });
+    // Шаг вниз оставляет короля на колонке ладьи ровно под её ход: ладья едет
+    // на две клетки вниз и снимает его.
     expect(applyAction(lined, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
-    // Тот же шаг в сторону - ладье нужен ход на перестроение.
+    // Тот же шаг в сторону - ладье нужно время на перестроение.
     expect(applyAction(lined, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
 
     // Дальность скользящего хода в «Гонках» ограничена двумя клетками (`slideCap`),
-    // поэтому ладья с трёх клеток не долетает: у игрока есть ход, чтобы уйти с
+    // поэтому ладья с четырёх клеток не долетает: у игрока есть ход, чтобы уйти с
     // линии, и он видит прилёт заранее, а не получает смерть за ход.
-    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 4, y: 1 }] });
+    const outOfReach = base({ mode: 'race', width: 6, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 5, y: 1 }] });
     expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 1)).toBe(false);
     expect(applyAction(outOfReach, { type: 'move', dx: 0, dy: -1 }).status).toBe('playing');
-    // Та же ладья на клетку ближе долетает: шаг вниз её не обманывает, потому что
-    // сдвиг ряда не меняет дистанцию между королём и фигурами.
-    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 3, y: 1 }] });
-    expect(applyAction(inReach, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
 
-    // Никакого «рядового падения» нет: после сдвига фигура тратит ровно свой ход.
-    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 1 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 5 }] });
+    // Ход коня - ровно буква Г: ни «прыжок на три клетки», ни «прыжок плюс сдвиг
+    // поля». Это и была главная претензия к читаемости режима.
+    const far = base({ mode: 'race', width: 6, height: 8, player: { x: 0, y: 1 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 5 }] });
     const step = applyAction(far, { type: 'move', dx: 1, dy: 0 });
     const horse = step.enemies.find((e) => e.id === 'e0')!;
-    // Ряд уехал на клетку вниз (с 5 на 4), остальное - ход коня: |dx| + |dy| = 3.
-    expect(Math.abs(horse.x - 4) + Math.abs(horse.y - 4)).toBe(3);
+    const shiftX = Math.abs(horse.x - 4);
+    const shiftY = Math.abs(horse.y - 5);
+    expect([shiftX, shiftY].sort((a, b) => a - b).join(':')).toBe('1:2');
     expect(step.status).toBe('playing');
+
+    // Фигура, дошедшая до нижнего ряда и не взявшая короля, сходит с поля: поле
+    // не растёт вниз, поэтому уходить приходится ей.
+    const atEdge = base({ mode: 'race', width: 6, height: 8, player: { x: 0, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 5, y: 0 }] });
+    const after = applyAction(atEdge, { type: 'move', dx: 0, dy: -1 });
+    expect(after.enemies.find((e) => e.id === 'e0')).toBeUndefined();
+    expect(after.lastEvent).toBe('escaped');
+    expect(after.status).toBe('playing');
   });
 
   it('двойной ход перекрывается фигурой в промежуточной клетке', () => {

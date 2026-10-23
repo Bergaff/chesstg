@@ -7,6 +7,7 @@ import {
   RACE_MOVES_PER_LEVEL,
   RACE_ROWS,
   RACE_SPAWN_ROWS,
+  RACE_STRIKE_ROWS,
   RACE_TIER_MOVES,
   RACE_WIDTH,
   applyAction,
@@ -94,7 +95,9 @@ describe('Гонки: король против фигур сверху', () => 
       goal: 'survive',
       player: 'king',
       wrapOnTop: false,
-      scroll: true,
+      // Поле не бежит: у режима нет ни сдвига ряда, ни смерти от него.
+      exitAtBottom: true,
+      strike: RACE_STRIKE_ROWS,
       spawnRows: RACE_SPAWN_ROWS,
       kingRows: RACE_KING_ROWS,
     });
@@ -135,21 +138,45 @@ describe('Гонки: король против фигур сверху', () => 
     expect(edge.length).toBe(3);
   });
 
-  it('сдвиг поля уносит фигуры, но не короля', () => {
-    // Ладья стоит далеко по ряду на единицу выше короля: её собственный ход идёт по
-    // горизонтали, поэтому смена y у фигуры - это ровно сдвиг поля.
-    const home = open({ player: { x: 0, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 7, y: 3 }] });
-    const sideways = move(home, 1, 0);
-    // Король остался на своём ряду: полоса никуда не едет.
-    expect(sideways.player).toEqual({ x: 1, y: 1 });
-    expect(sideways.enemies.find((e) => e.id === 'r')!.y).toBe(2);
+  it('поле не едет: фигура за такт делает ровно свой ход', () => {
+    // Конь стоит в четырёх рядах над королём. Раньше за такт он получал прыжок
+    // плюс сдвиг поля, и это читалось как «три клетки вперёд». Теперь смещение
+    // обязано быть буквой Г: 1 по одной оси и 2 по другой.
+    const home = open({ player: { x: 1, y: 1 }, enemies: [{ id: 'h', type: 'knight', x: 4, y: 5 }] });
+    const next = move(home, 1, 0);
+    const horse = next.enemies.find((e) => e.id === 'h')!;
+    const dx = Math.abs(horse.x - 4);
+    const dy = Math.abs(horse.y - 5);
+    expect([dx, dy].sort((a, b) => a - b)).toEqual([1, 2]);
+    // Король стоит там, куда сходил: полоса никуда не уезжает, ряд сам не меняется.
+    expect(next.player).toEqual({ x: 2, y: 1 });
 
-    // Фигура на нижнем ряду сходит с поля, и это не конец партии.
+    // Ладья далеко от короля тоже тратит ровно один свой ход: сдвиг ряда ей не
+    // доплачивается. Она пошла по горизонтали и осталась на своём ряду - прямое
+    // доказательство, что поля никто не сдвигает: с лентой y обязан был уменьшиться.
+    const rookHome = open({ player: { x: 0, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 7, y: 6 }] });
+    const rookNext = move(rookHome, 1, 0);
+    const rook = rookNext.enemies.find((e) => e.id === 'r')!;
+    expect(Math.abs(rook.x - 7) + Math.abs(rook.y - 6)).toBeLessThanOrEqual(2);
+    expect(rook.y).toBe(6);
+    // Ни одного события «ряд унёс»: такого хода движок больше не производит.
+    expect(rookNext.lastEvent).not.toBe('swept');
+  });
+
+  it('фигура, дошедшая до нижнего ряда, уходит с поля', () => {
+    // Раз лента не уносит, фигуры сходят сами: нижний ряд для них это край.
     const edge = open({ player: { x: 4, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 1, y: 0 }] });
-    const swept = move(edge, 1, 0);
-    expect(swept.enemies.some((e) => e.id === 'r')).toBe(false);
-    expect(swept.lastEvent).toBe('swept');
-    expect(swept.status).toBe('playing');
+    const after = move(edge, 1, 0);
+    expect(after.enemies.some((e) => e.id === 'r')).toBe(false);
+    expect(after.lastEvent).toBe('escaped');
+    expect(after.status).toBe('playing');
+
+    // Бьющая короля фигура с поля не уходит: сначала взятие. Король становится на
+    // ряд ладьи - и ладья доезжает до него своим ходом.
+    const killer = open({ player: { x: 0, y: 0 }, enemies: [{ id: 'r', type: 'rook', x: 3, y: 0 }] });
+    const dead = move(killer, 1, 0);
+    expect(dead.status).toBe('lost');
+    expect(dead.capturedBy).toBe('rook');
   });
 
   it('нижний ряд больше не смертельный: стоять на нём можно', () => {
@@ -164,16 +191,47 @@ describe('Гонки: король против фигур сверху', () => 
     expect(up.player).toEqual({ x: 2, y: 1 });
   });
 
-  it('фигуру привозит поле: приехал на клетку короля - это взятие', () => {
-    // Король стоит на своей полосе и никуда не едет, а лента идёт: фигура,
-    // которой сдвиг дал клетку короля, снимает его, даже не потратив свой ход.
-    const home = open({ player: { x: 0, y: 0 }, enemies: [{ id: 'r', type: 'rook', x: 1, y: 1 }] });
-    const into = move(home, 1, 0);
-    expect(into.status).toBe('lost');
-    expect(into.capturedBy).toBe('rook');
-    expect(into.lastEvent).toBe('captured');
-    // Уход в другой ряд той же колонки - фигура приезжает мимо.
-    expect(move(home, 1, 1).status).toBe('playing');
+  it('выпад через линию: бьёт фигуру у границы и оставляет короля на месте', () => {
+    const rules = rulesFor('race');
+    // Фигура встала впритык к границе полосы: над линией. Шагнуть туда нельзя,
+    // а бить можно - и король после взятия остаётся на своей клетке.
+    const home = open({
+      player: { x: 3, y: RACE_KING_ROWS - 1 },
+      enemies: [{ id: 'r', type: 'rook', x: 3, y: RACE_KING_ROWS }],
+    });
+    const option = legalMoves(home).find((m) => m.strike);
+    expect(option, 'клетка над линией обязана отдаваться как взятие').toBeTruthy();
+    expect(option!.y).toBe(RACE_KING_ROWS);
+    expect(option!.takes).toBe('rook');
+
+    const strike = move(home, 0, 1);
+    expect(strike.player).toEqual({ x: 3, y: RACE_KING_ROWS - 1 });
+    expect(strike.enemies.some((e) => e.id === 'r')).toBe(false);
+    expect(strike.captures).toBe(1);
+    expect(strike.lastEvent).toBe('strike');
+    // Выпад стоит хода: счёт и номер хода выросли, как после обычного шага.
+    expect(strike.moves).toBe(1);
+    expect(strike.score).toBe(1);
+    expect(rules.strike).toBe(RACE_STRIKE_ROWS);
+
+    // С нижнего ряда выпад не бьёт: до линии ещё один ряд, и это был бы прыжок.
+    const low = open({ player: { x: 3, y: 0 }, enemies: [{ id: 'r', type: 'rook', x: 3, y: RACE_KING_ROWS }] });
+    const fromBelow = legalMoves(low);
+    expect(fromBelow.some((m) => m.strike)).toBe(false);
+    // Все ходы с нижнего ряда остаются в полосе: до линии ещё один ряд, и бить
+    // через неё может только тот, кто стоит на верхнем ряду полосы.
+    expect(fromBelow.every((m) => m.y < RACE_KING_ROWS)).toBe(true);
+
+    // Пустая клетка над линией не даётся ни как шаг, ни как выпад: бить нечего.
+    const empty = open({ player: { x: 3, y: RACE_KING_ROWS - 1 } });
+    expect(legalMoves(empty).some((m) => m.strike)).toBe(false);
+    expect(legalMoves(empty).every((m) => m.y < RACE_KING_ROWS)).toBe(true);
+    expect(() => move(empty, 0, 1)).toThrow(/полос/);
+
+    // Без права на выпад клетка над линией исчезает и из ходов, и из подсказки:
+    // на этом варианте лаборатория и сверяет, что даёт правило.
+    const plain = { ...home, mode: 'raceNoStrike' as const };
+    expect(legalMoves(plain).some((m) => m.strike)).toBe(false);
   });
 
   it('шаг назад выигрывает темп, когда надо съесть фигуру', () => {
@@ -255,8 +313,9 @@ describe('Гонки: король против фигур сверху', () => 
     const lined = open({
       width: RACE_MIN_WIDTH,
       player: { x: 0, y: 1 },
-      enemies: [{ id: 'r', type: 'rook', x: 3, y: 2 }],
+      enemies: [{ id: 'r', type: 'rook', x: 2, y: 1 }],
     });
+    // Король сам заходит на колонку ладьи, и ладья тратит свой ход на взятие.
     const doomed = move(lined, 1, 0);
     expect(doomed.status).toBe('lost');
     expect(doomed.capturedBy).toBe('rook');
@@ -264,20 +323,21 @@ describe('Гонки: король против фигур сверху', () => 
     expect(move(lined, 1, -1).status).toBe('playing');
   });
 
-  it('заморозка держит и поле, и приток', () => {
+  it('заморозка держит ответ фигур и приток', () => {
     const home = open({
       width: RACE_MIN_WIDTH,
-      player: { x: 1, y: 0 },
-      enemies: [{ id: 'r', type: 'rook', x: 0, y: 2 }],
+      player: { x: 0, y: 0 },
+      enemies: [{ id: 'r', type: 'rook', x: 2, y: 2 }],
     });
     const frozen = move({ ...home, freeze: 1 }, 1, 1);
-    // Король поднялся по полосе, ряд за ним не поехал: заморозка - передышка в ход.
-    expect(frozen.player).toEqual({ x: 2, y: 1 });
+    // Ладья не поехала, притока нет: заморозка - передышка в ход.
+    expect(frozen.player).toEqual({ x: 1, y: 1 });
     expect(frozen.enemies.find((e) => e.id === 'r')!.y).toBe(2);
-    // Без заморозки тот же шаг оставил бы ладью на ряду короля.
+    expect(frozen.enemies.filter((e) => e.id.startsWith('s')).length).toBe(0);
+    // Без заморозки ладья спускается к королю.
     const thawed = move(home, 1, 1);
-    expect(thawed.player).toEqual({ x: 2, y: 1 });
-    expect(thawed.enemies.find((e) => e.id === 'r')!.y).toBe(1);
+    expect(thawed.player).toEqual({ x: 1, y: 1 });
+    expect(thawed.enemies.find((e) => e.id === 'r')!.y).toBeLessThan(2);
   });
 
   it('на длинной серии король не выходит из полосы и не выигрывает', () => {
@@ -292,8 +352,8 @@ describe('Гонки: король против фигур сверху', () => 
       expect(current.player.y).toBeGreaterThanOrEqual(0);
       expect(current.player.y).toBeLessThan(RACE_KING_ROWS);
       expect(current.width).toBeGreaterThanOrEqual(widthBefore);
-      // Сдвиг поля больше не двигает игрока: ряд у короля свой, и после хода он
-      // ровно тот, что был выбран.
+      // Игрок стоит ровно там, куда сходил: ни лента, ни выпад ряд не меняют
+      // (выпад возвращает короля на исходную клетку).
       expect(current.player.y).toBe(step.y);
       expect(yBefore).toBeGreaterThanOrEqual(0);
       for (const enemy of current.enemies) {
@@ -315,8 +375,9 @@ describe('Гонки: король против фигур сверху', () => 
         expect(cell.x).toBeGreaterThanOrEqual(0);
         expect(cell.x).toBeLessThan(state.width);
         expect(cell.y).toBeGreaterThanOrEqual(0);
-        // Подсказка не имеет права звать короля за красную линию.
-        expect(cell.y).toBeLessThan(RACE_KING_ROWS);
+        // Подсказка не имеет права звать короля за красную линию: выше полосы
+        // допускается только клетка выпада, то есть взятие через границу.
+        expect(cell.y).toBeLessThan(RACE_KING_ROWS + RACE_STRIKE_ROWS);
       }
     }
     const empty: GameState = { ...createRaceLevel(1, 5), enemies: [], status: 'lost' };

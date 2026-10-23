@@ -30,7 +30,7 @@ type WorkerRequest =
   /** Замер генератора «Парковки»: уровни по списку, прогресс по уровням. */
   | { type: 'jam'; levels: number[]; samples: number; seed: number }
   /** Прогон «Гонок» на правиле полосы: длина игры до нерешаемой позиции. */
-  | { type: 'race'; levels: number[]; samples: number; seed: number }
+  | { type: 'race'; levels: number[]; samples: number; seed: number; compare?: boolean }
   | { type: 'cancel' };
 
 const scope = self as unknown as WorkerScope;
@@ -67,6 +67,7 @@ scope.addEventListener('message', (event) => {
         const [row] = measureRaceLevels([request.levels[position]], {
           samples: request.samples,
           seed: request.seed,
+          compare: request.compare === true,
         });
         scope.postMessage({ type: 'racrow', row: row as RaceMeasure, done: position + 1, total: request.levels.length });
       }

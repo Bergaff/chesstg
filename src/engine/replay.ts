@@ -124,7 +124,7 @@ export function isDoomed(state: GameState, depth = 3): boolean {
 export interface RaceMeasure {
   level: number;
   samples: number;
-  /** Ширина поля на старте и средняя в конце забега: конвейер растёт вширь. */
+  /** Ширина поля на старте и средняя в конце забега: поле растёт вширь. */
   widthStart: number;
   widthEnd: number;
   /** Ходы до нерешаемой позиции. */
@@ -143,6 +143,11 @@ export interface RaceMeasure {
   capturesAvg: number;
   /** Чем кончились забеги: поимка, тупик, потолок. */
   causes: Record<string, number>;
+  /**
+   * Те же зёрна без права на выпад (`raceNoStrike`): по разнице видно, что даёт
+   * правило. Появляется только при `compare: true`.
+   */
+  noStrike?: { doomMedian: number; lengthMedian: number; capturesAvg: number; samples: number };
 }
 
 export interface RaceMeasureOptions {
@@ -150,11 +155,104 @@ export interface RaceMeasureOptions {
   seed?: number;
   cap?: number;
   depth?: number;
+  /**
+   * Прогнать те же зёрна без права на выпад и положить сравнение в строку.
+   * Дорого вдвое, поэтому включается только по запросу панели: иначе таблица
+   * «Гонок» меряла бы то же самое дважды на каждом прогоне.
+   */
+  compare?: boolean;
+}
+
+/** Один забег жадным ботом: ровно то, что потом уходит в сводку по уровню. */
+interface RaceSampleRun {
+  moves: number;
+  width: number;
+  captures: number;
+  /** Номер хода, после которого перебор не оставляет спасения; -1 значит не было. */
+  doomedAt: number;
+  cause: string;
+  capped: boolean;
+}
+
+/**
+ * Забег жадным ботом. `mode` позволяет прогнать те же доски на варианте правил:
+ * генератор у «Гонок» один, отличается только конфиг, поэтому сравнение честное.
+ */
+function playRaceSample(level: number, seed: number, mode: ModeId, cap: number, depth: number): RaceSampleRun {
+  let state = createRaceLevel(level, seed);
+  if (mode !== state.mode) state = { ...state, mode };
+  let doomedAt = -1;
+  while (state.status === 'playing' && state.moves < cap) {
+    if (doomedAt < 0 && isDoomed(state, depth)) doomedAt = state.moves;
+    const next = bestSurvivalMove(state) ?? playFirstMove(state);
+    if (!next) break;
+    state = next;
+  }
+  const finished = state.status !== 'playing';
+  return {
+    moves: state.moves,
+    width: state.width,
+    captures: state.captures ?? 0,
+    doomedAt,
+    cause: !finished ? 'capped' : (state.lastEvent ?? state.status),
+    capped: !finished,
+  };
+}
+
+/** Сводка по забегам: те же метрики, что у `RaceMeasure`, но без уровня. */
+interface RaceSummary {
+  samples: number;
+  widthEnd: number;
+  doomAvg: number;
+  doomMedian: number;
+  doomMin: number;
+  doomMax: number;
+  doomShare: number;
+  lengthAvg: number;
+  lengthMedian: number;
+  capped: number;
+  capturesAvg: number;
+  causes: Record<string, number>;
+}
+
+function raceSummary(runs: RaceSampleRun[]): RaceSummary {
+  const doom = runs.map((run) => run.doomedAt).filter((value) => value >= 0);
+  const lengths = runs.map((run) => run.moves);
+  const sortedDoom = [...doom].sort((a, b) => a - b);
+  const sortedLength = [...lengths].sort((a, b) => a - b);
+  const causes: Record<string, number> = {};
+  const average = (values: number[]): number => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+  let widthEnd = 0;
+  let captures = 0;
+  let capped = 0;
+  for (const run of runs) {
+    widthEnd += run.width;
+    captures += run.captures;
+    if (run.capped) capped += 1;
+    causes[run.cause] = (causes[run.cause] ?? 0) + 1;
+  }
+  const samples = runs.length || 1;
+  return {
+    samples: runs.length,
+    widthEnd: widthEnd / samples,
+    // Если ни один забег не стал нерешаемым (бот умер от другого или упёрся в
+    // потолок), берём длину партии: иначе в отчёте ноль выглядит как подарок.
+    doomAvg: doom.length > 0 ? average(doom) : average(lengths),
+    doomMedian: doom.length > 0 ? sortedDoom[Math.floor(sortedDoom.length / 2)] : sortedLength[Math.floor(sortedLength.length / 2)],
+    doomMin: doom.length > 0 ? sortedDoom[0] : sortedLength[0],
+    doomMax: doom.length > 0 ? sortedDoom[sortedDoom.length - 1] : sortedLength[sortedLength.length - 1],
+    doomShare: doom.length / samples,
+    lengthAvg: average(lengths),
+    lengthMedian: sortedLength[Math.floor(sortedLength.length / 2)],
+    capped,
+    capturesAvg: captures / samples,
+    causes,
+  };
 }
 
 /**
  * Прогон «Гонок» на правиле полосы: жадный бот (тот же выбор, что у подсказки)
- * играет до конца партии, а мы mierим длину игры до позиции, где исход
+ * играет до конца партии, а мы меряем длину игры до позиции, где исход
  * предрешён. Цифры - верхняя граница того, что читается глазами, а не потолок
  * движка: бот не считает на два темпа вперёд и потому иногда умирает раньше.
  */
@@ -165,53 +263,28 @@ export function measureRaceLevels(
   const samples = Math.max(1, Math.min(400, options.samples ?? 24));
   const cap = Math.max(8, options.cap ?? 240);
   const depth = Math.max(1, options.depth ?? 3);
-  return levels.map((level) => {
-    const doom: number[] = [];
-    const lengths: number[] = [];
-    const causes: Record<string, number> = {};
-    let widthEnd = 0;
-    let captures = 0;
-    let capped = 0;
+  const play = (level: number, mode: ModeId): RaceSampleRun[] => {
+    const runs: RaceSampleRun[] = [];
     for (let i = 0; i < samples; i += 1) {
       const seed = ((options.seed ?? 4242) ^ (level * 7919) ^ (i * 104729)) >>> 0;
-      let state = createRaceLevel(level, seed);
-      let doomedAt = -1;
-      while (state.status === 'playing' && state.moves < cap) {
-        if (doomedAt < 0 && isDoomed(state, depth)) doomedAt = state.moves;
-        const next = bestSurvivalMove(state) ?? playFirstMove(state);
-        if (!next) break;
-        state = next;
-      }
-      const finished = state.status !== 'playing';
-      lengths.push(state.moves);
-      widthEnd += state.width;
-      captures += state.captures ?? 0;
-      if (!finished) capped += 1;
-      const cause = !finished ? 'capped' : (state.lastEvent ?? state.status);
-      causes[cause] = (causes[cause] ?? 0) + 1;
-      if (doomedAt >= 0) doom.push(doomedAt);
+      runs.push(playRaceSample(level, seed, mode, cap, depth));
     }
-    const sortedDoom = [...doom].sort((a, b) => a - b);
-    const sortedLength = [...lengths].sort((a, b) => a - b);
-    return {
-      level,
-      samples,
-      widthStart: RACE_MIN_WIDTH,
-      widthEnd: widthEnd / samples,
-      // Если ни один забег не стал нерешаемым (бот умер от другого или упёрся в
-      // потолок), берём длину партии: иначе в отчёте ноль выглядит как подарок.
-      doomAvg: doom.length > 0 ? average(doom) : average(lengths),
-      doomMedian:
-        doom.length > 0 ? sortedDoom[Math.floor(sortedDoom.length / 2)] : sortedLength[Math.floor(sortedLength.length / 2)],
-      doomMin: doom.length > 0 ? sortedDoom[0] : sortedLength[0],
-      doomMax: doom.length > 0 ? sortedDoom[sortedDoom.length - 1] : sortedLength[sortedLength.length - 1],
-      doomShare: doom.length / samples,
-      lengthAvg: average(lengths),
-      lengthMedian: sortedLength[Math.floor(sortedLength.length / 2)],
-      capped,
-      capturesAvg: captures / samples,
-      causes,
-    };
+    return runs;
+  };
+
+  return levels.map((level) => {
+    const summary = raceSummary(play(level, 'race'));
+    const row: RaceMeasure = { level, widthStart: RACE_MIN_WIDTH, ...summary };
+    if (options.compare) {
+      const baseline = raceSummary(play(level, 'raceNoStrike'));
+      row.noStrike = {
+        doomMedian: baseline.doomMedian,
+        lengthMedian: baseline.lengthMedian,
+        capturesAvg: +baseline.capturesAvg.toFixed(1),
+        samples: baseline.samples,
+      };
+    }
+    return row;
   });
 }
 

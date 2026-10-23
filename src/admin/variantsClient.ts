@@ -118,6 +118,8 @@ export interface RaceSuiteRequest {
   levels: number[];
   samples: number;
   seed: number;
+  /** Прогнать те же зёрна без права на выпад и положить разницу в строку. */
+  compare?: boolean;
 }
 
 export interface RaceSuiteHandlers {
@@ -151,6 +153,7 @@ export function runRaceSuite(request: RaceSuiteRequest, handlers: RaceSuiteHandl
             const [row] = measureRaceLevels([request.levels[index]], {
               samples: request.samples,
               seed: request.seed,
+              compare: request.compare,
             });
             handlers.onRow?.(row, index + 1, total);
           } catch (error) {
@@ -191,7 +194,13 @@ export function runRaceSuite(request: RaceSuiteRequest, handlers: RaceSuiteHandl
       worker = null;
       reject(new Error('worker_failed'));
     };
-    worker.postMessage({ type: 'race', levels: request.levels, samples: request.samples, seed: request.seed });
+    worker.postMessage({
+      type: 'race',
+      levels: request.levels,
+      samples: request.samples,
+      seed: request.seed,
+      compare: request.compare === true,
+    });
   });
 
   return {

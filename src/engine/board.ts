@@ -37,12 +37,19 @@ export function isPlayerAt(state: GameState, x: number, y: number): boolean {
  * Ходы короля («Гонки»): восемь соседних клеток, но только внутри полосы
  * `kingRows`. Взять фигуру можно так же, в любую сторону, включая назад: это
  * единственный способ расчистить поле, поэтому квоты на взятия у режима нет.
+ *
+ * Сверху к полосе добавляется выпад (`strike`): по фигуре, вставшей впритык к
+ * границе полосы, бить можно, а вставать на её клетку - нет. Такие клетки
+ * помечены `strike`, и `applyAction` снимает фигуру, не двигая короля. Без
+ * пометки выпад выглядел бы как шаг за линию, то есть как нарушение правила
+ * полосы, и подсказка с разбором спорили бы с доской.
  */
 function kingMoves(state: GameState): MoveOption[] {
   // `kingRows` отсекает клетки вне полосы ещё до проверки занятости: подсказка,
   // бот лаборатории и серверный разбор ходят по одному списку легальных ходов, и
   // «нельзя выше» не должно ни у кого читаться по-своему.
-  const band = rulesFor(state.mode).kingRows;
+  const rules = rulesFor(state.mode);
+  const band = rules.kingRows;
   const limit = band > 0 ? Math.min(band, state.height) : state.height;
   const result: MoveOption[] = [];
   for (const dx of [-1, 0, 1] as MoveDx[]) {
@@ -54,6 +61,20 @@ function kingMoves(state: GameState): MoveOption[] {
       if (y >= limit) continue;
       const occupant = enemyAt(state, x, y);
       result.push(occupant ? { x, y, dx, dy, takes: occupant.type } : { x, y, dx, dy });
+    }
+  }
+
+  // Выпад доступен с верхнего ряда полосы: иначе это уже не удар через линию,
+  // а прыжок на два ряда, который игрок не прочитает.
+  if (band > 0 && rules.strike > 0 && state.player.y === limit - 1) {
+    for (const dx of [-1, 0, 1] as MoveDx[]) {
+      for (let row = limit; row < Math.min(limit + rules.strike, state.height); row++) {
+        const x = state.player.x + dx;
+        if (!inside(state, x, row)) continue;
+        const occupant = enemyAt(state, x, row);
+        if (!occupant) continue;
+        result.push({ x, y: row, dx, dy: 1, takes: occupant.type, strike: true });
+      }
     }
   }
   return result;
@@ -342,8 +363,10 @@ export function chooseEnemyMove(state: GameState, enemy: Enemy): Cell | null {
     if (a.chebyshev !== b.chebyshev) return a.chebyshev - b.chebyshev;
     if (a.alignment !== b.alignment) return b.alignment - a.alignment;
     // Из двух равных вариантов предпочитаем тот, что выше к финишу,
-    // затем левее, так поведение остаётся воспроизводимым.
-    if (a.y !== b.y) return b.y - a.y;
+    // затем левее, так поведение остаётся воспроизводимым. В «Гонках» финиша
+    // нет, и там разрез по y читается как «фигура убежала вверх»: при равной
+    // дистанции фигура обязана опускаться, иначе конь прыгает к линии рождения.
+    if (a.y !== b.y) return rulesFor(state.mode).goal === 'survive' ? a.y - b.y : b.y - a.y;
     return a.x - b.x;
   });
 

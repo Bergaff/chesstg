@@ -90,10 +90,10 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   race: {
     tab: 'Гонки',
     title: 'Гонки: сколько можно играть до нерешаемой позиции',
-    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), сдвиг поля его не убивает. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти.`,
-    run: 'Прогнать гонки',
+    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), поля как ленты больше нет: фигура за такт делает ровно свой ход. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти. Справа то же поле без права на выпад: по разнице видно, что даёт правило.`,
     footnote:
-      '«Решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает, что игрок всегда умирает в позиции, где ходить было некуда.',
+      '«Решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает, что игрок всегда умирает в позиции, где ходить было некуда. Фигура, дошедшая до нижнего ряда и не взявшая короля, сходит с поля - это замена уносившему ряду, иначе доска забивалась бы за пару десятков ходов.',
+    run: 'Прогнать гонки',
   },
 };
 
@@ -191,7 +191,14 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       setRaceRows([]);
       setProgress(`Уровень 0 из ${parsedLevels.length}`);
       const suite = runRaceSuite(
-        { levels: parsedLevels, samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))), seed },
+        {
+          levels: parsedLevels,
+          samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))),
+          seed,
+          // Тот же набор зёрен без права на выпад: иначе таблица не отвечает на
+          // вопрос «а зачем правило вообще нужно».
+          compare: true,
+        },
         {
           onRow: (row, done, total) => {
             setRaceRows((current) => [...current, row]);
@@ -477,6 +484,7 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
         'Партия, ходов',
         'Решаемых до конца',
         'Взятий',
+        'Что даёт выпад',
         'Чем кончились',
       ]}
       empty="Прогон считает перебором: ход, после которого любой ответ фигур ведёт к смерти"
@@ -487,7 +495,7 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
           return (
             <tr key={value}>
               <td>{value}</td>
-              <td colSpan={7} className="adm-muted">
+              <td colSpan={8} className="adm-muted">
                 {running ? 'считаем' : 'нет данных'}
               </td>
             </tr>
@@ -508,6 +516,7 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
             </td>
             <td>{formatPercent(1 - item.doomShare, 0)}</td>
             <td>{item.capturesAvg.toFixed(1)}</td>
+            <td className="is-mono">{strikeGainText(item)}</td>
             <td className="adm-muted">
               {causesText(item.causes)}
               {item.capped > 0 ? `, потолок ${item.capped}` : ''}
@@ -542,10 +551,24 @@ function diagonalConclusion(reports: VariantReport[]): string {
 const CAUSE_NAME: Record<string, string> = {
   captured: 'поимка',
   stuck: 'тупик',
-  swept: 'унесло ряд',
+  escaped: 'ушли с поля',
   won: 'победа',
   capped: 'потолок просчёта',
 };
+
+/**
+ * Что даёт право бить через линию: та же доска, тот же бот, разница в ходах и
+ * снятых фигурах. Без сравнения правило невозможно ни подтвердить, ни отменить.
+ */
+function strikeGainText(row: RaceMeasure): string {
+  const base = row.noStrike;
+  if (!base) return 'нет сравнения';
+  const doom = row.doomMedian - base.doomMedian;
+  const length = row.lengthMedian - base.lengthMedian;
+  const takes = +(row.capturesAvg - base.capturesAvg).toFixed(1);
+  const sign = (value: number): string => (value > 0 ? `+${value}` : `${value}`);
+  return `доом ${sign(doom)}, партия ${sign(length)}, взятий ${sign(takes)}`;
+}
 
 function causesText(causes: Record<string, number>): string {
   const entries = Object.entries(causes);
@@ -599,22 +622,23 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
     'разброс',
     'Партия (медиана)',
     'Взятий',
+    'Без выпада: доом / партия / взятий',
     'Чем кончились',
   ];
   const lines = [
-    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда; по ${meta.samples} забегов на уровень, зерно ${meta.seed}`,
+    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${meta.samples} забегов на уровень, зерно ${meta.seed}`,
     '',
     `| ${head.join(' | ')} |`,
     `| ${head.map(() => '---').join(' | ')} |`,
   ];
   for (const row of rows) {
     lines.push(
-      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${causesText(row.causes)} |`,
+      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${row.noStrike ? `${row.noStrike.doomMedian} / ${row.noStrike.lengthMedian} / ${row.noStrike.capturesAvg}` : 'нет сравнения'} | ${causesText(row.causes)} |`,
     );
   }
   lines.push('');
   lines.push(
-    '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Взятий» - сколько фигур снял бот: без взятий полоса забивается раньше.',
+    '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Взятий» - сколько фигур снял бот: без взятий полоса забивается раньше. Колонка сравнения - тот же бот и те же зёрна на правиле без выпадата (`raceNoStrike`).',
   );
   return lines.join('\n');
 }

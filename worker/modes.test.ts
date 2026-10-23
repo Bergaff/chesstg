@@ -9,7 +9,7 @@ import {
   modeProgress,
   toProfile,
 } from './db';
-import { RACE_KING_ROW, RACE_MIN_WIDTH, RACE_ROWS, RACE_WIDTH } from '../src/engine';
+import { RACE_KING_ROW, RACE_KING_ROWS, RACE_MIN_WIDTH, RACE_ROWS, RACE_WIDTH } from '../src/engine';
 import { replayRun } from '../src/engine';
 import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
 import type { GameState } from '../src/engine';
@@ -46,7 +46,7 @@ function user(patch: Partial<UserRow> = {}): UserRow {
   };
 }
 
-describe('журнал конвейерного режима', () => {
+describe('журнал режима «Гонки»', () => {
   it('различает шаг в своём ряду и ход вперёд', () => {
     const stay = parseActions([{ type: 'move', dx: 0, dy: 0 }], 'race');
     expect(stay).toEqual([{ type: 'move', dx: 0, dy: 0 }]);
@@ -221,6 +221,29 @@ describe('активная партия и поле прежней сборки'
     expect(runShapeMatchesMode({ mode: 'race', initial_state: JSON.stringify(king) })).toBe(true);
   });
 
+  it('выпад через линию сервер воспроизводит, и журнал для него не новый', () => {
+    // Выпад - это обычный `{type:'move', dx, dy}`: протокол не менялся, поэтому
+    // сервер обязан принять тот же журнал и снять фигуру, не двигая короля. Если
+    // здесь появится «неизвестное действие», значит клиент и сервер разошлись.
+    const lined = {
+      ...king,
+      enemies: [{ id: 'e0', type: 'rook', x: 1, y: RACE_KING_ROWS }],
+    };
+    const actions = parseActions([{ type: 'move', dx: 0, dy: 1 }], 'race');
+    const after = replayRun(lined as unknown as GameState, actions) as unknown as GameState;
+    expect(after.moves).toBe(1);
+    expect(after.score).toBe(1);
+    expect(after.captures).toBe(1);
+    expect(after.enemies.some((e) => e.id === 'e0')).toBe(false);
+    expect(after.player).toEqual({ x: 1, y: RACE_KING_ROW });
+    expect(after.lastEvent).toBe('strike');
+    expect(after.status).toBe('playing');
+
+    // Та же запись журнала без фигуры над линией остаётся незаконным шагом за
+    // границу полосы: сервер не даёт «двигаться вне полосы» ни при каких данных.
+    expect(() => replayRun(king as unknown as GameState, actions)).toThrow(/полос/);
+  });
+
   it('у гонок требует короля в стартовом ряду', () => {
     expect(runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify(king) }))).toBe(true);
     expect(
@@ -228,7 +251,7 @@ describe('активная партия и поле прежней сборки'
         runRow({ mode: 'race', initial_state: JSON.stringify({ ...king, player: { x: 3, y: 0 } }) }),
       ),
     ).toBe(false);
-    // Поле прежней сборки (восемь на двенадцать, конвейер считался рядами) новым
+    // Поле прежней сборки (восемь на двенадцать, ряды считались конвейером) новым
     // правилом не играется: такая партия закрывается, а не продолжается.
     expect(
       runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify({ ...king, height: 12 }) })),

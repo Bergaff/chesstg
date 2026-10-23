@@ -365,7 +365,9 @@ describe('UI smoke', () => {
     const options = legalMoves(initial);
     // Полоса: все подсвеченные клетки хода лежат в двух нижних рядах, и доска
     // рисует её границу. Отметок поля больше нет, линия - единственная.
-    expect(options.every((move) => move.y < 2)).toBe(true);
+    // Выпад - единственная клетка вне полосы, и она помечена: на неё не встают.
+    expect(options.every((move) => move.y < 2 || move.strike === true)).toBe(true);
+    expect(options.some((move) => move.strike)).toBe(false);
     expect(document.querySelectorAll('.board-bandline').length).toBe(1);
     // Клетка хода берётся по координатам, а не по подписи: подпись меняется,
     // когда ход взятие. Ряды в разметке идут сверху вниз, поэтому индекс ряда

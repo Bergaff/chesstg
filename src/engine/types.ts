@@ -10,6 +10,7 @@ export type LabMode =
   | 'jamExit2'
   | 'jamExit4'
   | 'raceDodge'
+  | 'raceNoStrike'
   | 'campaignFreeDiag'
   | 'campaignStrictDiag'
   | 'jamStrictDiag';
@@ -95,6 +96,12 @@ export interface MoveOption extends Cell {
   dy?: MoveDy;
   /** Тип фигуры, которую пешка бьёт на этой клетке. */
   takes?: PieceType;
+  /**
+   * Выпад короля: клетка выше полосы, взятие без перемещения. Игрок снимает
+   * фигуру у границы и остаётся на своей клетке, поэтому ход считается этим
+   * действием, а не шагом на клетку `x,y`.
+   */
+  strike?: boolean;
 }
 
 export class RuleError extends Error {
