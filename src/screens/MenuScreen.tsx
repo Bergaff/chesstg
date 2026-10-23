@@ -124,13 +124,13 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       )}
 
       <section className="masthead">
-        <span className="label masthead-kicker">Шахматная головоломка в Telegram</span>
+        <span className="label masthead-kicker">Шахматные головоломки в Telegram</span>
         <h1 className="masthead-title serif">
-          <span>Пешка</span>
-          <em>против всех</em>
+          <span>Край</span>
+          <em>доски</em>
         </h1>
         <p className="masthead-sub">
-          Дойти до последней линии и не попасться фигурам. Один неверный шаг заканчивает партию.
+          Пешка идёт к последней линии, пробка фигур - к своему краю, король держится в полосе. Один неверный шаг заканчивает партию.
         </p>
       </section>
 

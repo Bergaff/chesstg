@@ -44,7 +44,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
   async function shareInvite() {
     const link = data?.inviteLink ?? appBaseUrl(config.webappUrl);
-    const text = 'Загляните в «Пешку против всех»: пешка идёт через поле, фигуры охотятся. У меня уже есть рекорд, попробуйте побить.';
+    const text = 'Загляните в «Край доски»: там три режима на одной доске и фигуры, которые охотятся. У меня уже есть рекорд, попробуйте побить.';
     const status = await shareContent(text, link);
     if (status === 'copied') toast('Ссылка скопирована', 'success');
     if (status === 'failed') toast('Не удалось поделиться', 'error');
@@ -63,9 +63,9 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
     const level = metric === 'campaign' ? profile.maxLevel : profile.modes?.[metric]?.level ?? 1;
     const text =
       metric === 'endless'
-        ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
+        ? `Мой рекорд в «Крае доски», ${profile.endlessBest} клеток. Слабо выше?`
         : metric === 'campaign'
-          ? `Я дошёл до ${profile.maxLevel} уровня в «Пешке против всех». Сможешь лучше?`
+          ? `Я дошёл до ${profile.maxLevel} уровня в «Крае доски». Сможешь лучше?`
           : `В режиме «${modeDef(metric).name}» я на ${level} уровне ${levelMetric ? ', дойдите и вы' : ''}.`;
     const status = await shareContent(text, url);
     if (status === 'copied') toast('Ссылка скопирована', 'success');

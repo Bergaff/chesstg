@@ -660,9 +660,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     const endless = mode === 'endless';
     const payload = endless ? `ch_0_${profile.endlessBest}` : `ch_${level}_${level}`;
     const url = bot ? `https://t.me/${bot}?startapp=${payload}` : appBaseUrl(config.webappUrl);
-    const where = mode === 'campaign' ? 'в «Пешке против всех»' : `в режиме «${modeDef(mode).name}»`;
+    const where = mode === 'campaign' ? 'в «Крае доски»' : `в режиме «${modeDef(mode).name}»`;
     const text = endless
-      ? `Мой рекорд в «Пешке против всех», ${profile.endlessBest} клеток. Слабо выше?`
+      ? `Мой рекорд в «Крае доски», ${profile.endlessBest} клеток. Слабо выше?`
       : kind === 'win'
         ? `Я прошёл уровень ${result?.level ?? run?.level ?? profile.level} ${where}. Слабо повторить?`
         : `Я пал на ${result?.level ?? run?.level ?? profile.level} уровне ${where}. Сможешь лучше?`;

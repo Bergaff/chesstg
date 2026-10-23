@@ -455,7 +455,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     const bot = config.botUsername;
     const level = result?.level ?? run?.level ?? profile.modes?.jam?.level ?? 1;
     const url = bot ? `https://t.me/${bot}?startapp=play` : '';
-    const text = `Собрал «Парковку» уровня ${level} в «Пешке против всех». За ${movesUsed} перестановок.`;
+    const text = `Собрал «Парковку» уровня ${level} в «Крае доски». За ${movesUsed} перестановок.`;
     const status = await shareContent(text, url);
     if (status === 'copied') toast('Текст скопирован', 'success');
     if (status === 'failed') toast('Не удалось поделиться', 'error');

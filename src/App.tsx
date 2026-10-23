@@ -305,7 +305,7 @@ export default function App(): ReactNode {
       <div className="boot-screen">
         <span className="boot-mark" aria-hidden="true">♟</span>
         <h1 className="boot-title">
-          Пешка <em>против всех</em>
+          Край <em>доски</em>
         </h1>
         {bootError ? (
           <div className="boot-error">
@@ -435,7 +435,7 @@ export function BootFallback(): ReactNode {
       <div className="boot-screen">
         <span className="boot-mark" aria-hidden="true">♟</span>
         <h1 className="boot-title">
-          Пешка <em>против всех</em>
+          Край <em>доски</em>
         </h1>
         <p className="boot-text">Загружаем игру</p>
       </div>

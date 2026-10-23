@@ -130,7 +130,7 @@ npx wrangler secret put ADMIN_SECRET</pre>
     <div className="adm-shell">
       <header className="adm-header">
         <div className="adm-brand">
-          <span className="adm-label">Пешка против всех</span>
+          <span className="adm-label">Край доски</span>
           <h1 className="adm-title">Админка</h1>
         </div>
         <div className="adm-header-side">

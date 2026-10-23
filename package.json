@@ -2,7 +2,7 @@
   "name": "pawn-vs-all",
   "version": "1.0.0",
   "private": true,
-  "description": "Пешка против всех — Telegram Mini App на Cloudflare Workers",
+  "description": "Край доски — Telegram Mini App на Cloudflare Workers",
   "type": "module",
   "scripts": {
     "dev": "vite",

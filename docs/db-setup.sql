@@ -1,4 +1,4 @@
--- Пешка против всех: полная схема боевой базы.
+-- Край доски: полная схема боевой базы.
 -- Файл собран из migrations/*.sql скриптом npm run db:sql, руками его не правят.
 --
 -- Как применять: панель Cloudflare -> Workers & Pages -> D1 -> выбрать базу
@@ -146,6 +146,40 @@ CREATE TABLE IF NOT EXISTS audit_runs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_runs_created ON audit_runs (created_at DESC);
 
+-- ── 0003_auth_link.sql ──────────────────────────────────────────
+-- Привязка сайта к Telegram через бота.
+--
+-- Сайт не знает, кто перед ним: есть только гостевой идентификатор в
+-- localStorage. Игрок нажимает «Привязать Telegram», получает одноразовый код,
+-- открывается чат бота с кнопками «Да» и «Нет». Подтверждение живёт несколько
+-- минут и используется один раз: по нему воркер выдаёт токен сеанса.
+CREATE TABLE IF NOT EXISTS auth_links (
+  code TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  guest_id TEXT NOT NULL,
+  user_id TEXT,
+  first_name TEXT NOT NULL DEFAULT '',
+  username TEXT,
+  tg_id INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_links_guest ON auth_links (guest_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_links_status ON auth_links (status, created_at DESC);
+
+-- ── 0004_mode_levels.sql ────────────────────────────────────────
+-- Прогресс режимов, где есть номер уровня, кроме кампании: «Парковка» и «Гонки».
+--
+-- Отдельные колонки на режим означали бы миграцию каждый раз, когда в лаборатории
+-- появляется новый режим с уровнем, поэтому прогресс живёт в одном JSON-поле.
+-- Кампания по-прежнему в users.level и users.max_level: их меняет только её
+-- победа, на них смотрят разблокировки фигур и бесконечного режима.
+ALTER TABLE users ADD COLUMN mode_levels TEXT NOT NULL DEFAULT '{}';
+
+-- Статистика прохождений в админке группирует забеги по режиму и уровню.
+CREATE INDEX IF NOT EXISTS idx_runs_level_mode ON runs (mode, level, created_at DESC);
+
 -- Служебная таблица, в которую wrangler записывает применённые миграции.
 -- Отметки ниже нужны, чтобы `npm run db:remote` позже ничего не повторял.
 CREATE TABLE IF NOT EXISTS d1_migrations (
@@ -156,6 +190,8 @@ CREATE TABLE IF NOT EXISTS d1_migrations (
 
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0001_init.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0002_admin.sql');
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0003_auth_link.sql');
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0004_mode_levels.sql');
 
 -- Проверка: должно вернуть 9 имён.
 SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;

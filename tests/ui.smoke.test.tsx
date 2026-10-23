@@ -208,7 +208,7 @@ afterEach(() => {
 async function boot() {
   const { default: App } = await import('../src/App');
   const view = render(createElement(App));
-  await screen.findByText('Пешка');
+  await screen.findByText('Край');
   return view;
 }
 
@@ -222,7 +222,7 @@ describe('UI smoke', () => {
 
   it('загружает меню и показывает ключевые блоки', async () => {
     await boot();
-    expect(screen.getByText('против всех')).toBeTruthy();
+    expect(screen.getByText('доски')).toBeTruthy();
     expect(screen.getByText(/Продолжить|Играть/)).toBeTruthy();
     expect(screen.getByText(/Бонусы за монеты/)).toBeTruthy();
     expect(screen.getByText(/Мировая таблица и друзья/)).toBeTruthy();
@@ -256,7 +256,7 @@ describe('UI smoke', () => {
     await waitFor(() => expect(screen.getByText('Гроссмейстер')).toBeTruthy());
     expect(screen.getAllByText(/клеток/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
-    expect(await screen.findByText('против всех')).toBeTruthy();
+    expect(await screen.findByText('доски')).toBeTruthy();
 
     // Сердечки ведут сразу на вкладку Stars — там продаются жизни.
     fireEvent.click(screen.getByRole('button', { name: 'Жизни: 5 из 5' }));
@@ -508,7 +508,7 @@ describe('UI smoke', () => {
     expect(screen.getByText('1. Какие данные мы получаем')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
-    expect(await screen.findByText('против всех')).toBeTruthy();
+    expect(await screen.findByText('доски')).toBeTruthy();
 
     fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
     expect(await screen.findByText('Бонусы на партию')).toBeTruthy();

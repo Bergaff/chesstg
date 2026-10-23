@@ -64,9 +64,9 @@ export async function sendWelcome(env: WorkerEnv, chatId: number, firstName: str
   const link = appLink(env, payload);
   const start = botStartLink(env, payload);
   const text =
-    `<b>Пешка против всех</b>\n\n` +
-    `${escapeHtml(firstName)}, проведите пешку на другую сторону доски и не попадитесь фигурам.\n\n` +
-    `Пять жизней, кампания и бесконечный режим.\n` +
+    `<b>Край доски</b>\n\n` +
+    `${escapeHtml(firstName)}, три шахматные головоломки на одной доске: провести пешку сквозь фигуры, разобрать пробку и удержать короля в полосе.\n\n` +
+    `Пять жизней, кампания, бесконечный режим, «Парковка» и «Гонки».\n` +
     `Подсказки, заморозка и отмена хода.\n\n` +
     `Нажмите «Играть», чтобы начать.`;
   const playButton = link
@@ -77,7 +77,7 @@ export async function sendWelcome(env: WorkerEnv, chatId: number, firstName: str
   const reply_markup = {
     inline_keyboard: [
       ...(playButton ? [[playButton]] : []),
-      ...(start ? [[{ text: 'Поделиться игрой', url: `https://t.me/share/url?url=${encodeURIComponent(start)}&text=${encodeURIComponent('Пешка против всех: попробуйте дойти до края доски.')}` }]] : []),
+      ...(start ? [[{ text: 'Поделиться игрой', url: `https://t.me/share/url?url=${encodeURIComponent(start)}&text=${encodeURIComponent('Край доски: три головоломки на одной доске. Дойти до края и не попасться.')}` }]] : []),
     ],
   };
   await callTelegram(env, 'sendMessage', {

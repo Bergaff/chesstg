@@ -190,7 +190,7 @@ curl https://<worker>.workers.dev/api/health
 1. Открой [@BotFather](https://t.me/BotFather) → `/newbot`, получи токен.
 
 > Важно: это Mini App, а не игра Telegram. Используй `/newapp` (раздел Mini Apps), а не `/newgame`. Игровая платформа `/newgame` рассчитана на `sendGame`, `game_short_name` и таблицу очков через `setGameScore`, в ней нет `initData`, оплаты Stars и полноценного WebApp API, поэтому наш сценарий там не работает.
-2. `/newapp` → выбери бота → название `Пешка против всех` → описание → иконка 512×512 (файл `public/icon-512.png`) → URL `https://<worker>.workers.dev/`.
+2. `/newapp` → выбери бота → название `Край доски` → описание → иконка 512×512 (файл `public/icon-512.png`) → URL `https://<worker>.workers.dev/`.
    Для карточки в каталогах и превью описания подготовлена обложка `docs/assets/cover-640x360.png` в том же визуальном языке.
 3. `/setmenubutton` → выбери бота → URL приложения → текст кнопки `Играть`.
 4. Команды:

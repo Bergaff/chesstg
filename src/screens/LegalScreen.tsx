@@ -49,7 +49,7 @@ export function LegalScreen({ kind, onBack, onSwitch }: LegalScreenProps): React
         <button type="button" onClick={() => onSwitch(other)}>
           {other === 'terms' ? 'Условия использования' : 'Политика конфиденциальности'}
         </button>
-        <span>Пешка против всех, 2026</span>
+        <span>Край доски, 2026</span>
       </div>
     </div>
   );
