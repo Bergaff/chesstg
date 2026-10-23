@@ -318,7 +318,7 @@ Adsgram, поэтому в кабинете может быть всё наст�
 3. Скопируй `Block ID` в `vars` файла `wrangler.jsonc` - `"ADSGRAM_BLOCK_ID": "12345"`. Держим его в репозитории, а не только в панели Cloudflare: иначе следующий деплой сотрёт настройку.
 4. Оставь `ADSGRAM_SRC=https://sad.adsgram.ai/js/sad.min.js` - SDK подключается на клиенте, ключей и секретов для показа не нужно.
 5. Задеплой: `npm run build && npx wrangler deploy`.
-6. Проверь без игры: `curl -s https://<WORKER>/api/health` - в `warnings` не должно быть `adsgram_block_missing`; `curl -s -X POST https://<WORKER>/api/ads/reward -H 'content-type: application/json' -d '{"kind":"probe"}'` отвечает 503 `ads_not_configured`, пока блок не задан, и 400 `bad_ad_reward`, когда задан (400 - значит точка целая и ждёт честный `done` от SDK).
+6. Проверь без игры: `curl -s https://<WORKER>/api/health` - в `warnings` не должно быть `adsgram_block_missing` (остальные пункты этого списка - про бота и админку, к рекламе отношения не имеют). Точка награды требует авторизованного сеанса, поэтому голая `curl` ответит 401; с токеном клиента она отвечает 503 `ads_not_configured`, пока блок не задан, и 400 `bad_ad_reward`, когда задан - 400 значит, что точка цела и ждёт честный `done` от SDK.
 7. Проверь на реальном устройстве в Telegram: ролик из меню за 30 монет, жизнь после поражения, щит перед уровнем. В браузере SDK не играет - это ограничение окружения, а не поломка.
 
 Особенности:
