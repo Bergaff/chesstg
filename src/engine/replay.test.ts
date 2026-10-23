@@ -166,6 +166,15 @@ describe('прогон сравнений', () => {
     expect(RACE_KING_ROWS).toBe(2);
   }, 120_000);
 
+  it('тяжёлый прогон считает все 1000 досок, а не молча режется', () => {
+    // Кнопка «Расчёт на 1000 досок» в лаборатории обещает цифру в отчёте: если
+    // движок обрежет её до своего потолка, отчёт соврёт, а проверить это в браузере
+    // нельзя. Поэтому потолок движка и поле панели обязаны сходиться.
+    const row = measureRaceLevels([9], { samples: 1000, seed: 606, cap: 8, depth: 1 })[0];
+    expect(row.samples).toBe(1000);
+    expect(Object.values(row.causes).reduce((a, b) => a + b, 0)).toBe(1000);
+  }, 120_000);
+
   it('сравнение с полем без выпада добавляет колонку, а не меняет прогон', () => {
     const plain = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120 })[0];
     expect(plain.noStrike).toBeUndefined();

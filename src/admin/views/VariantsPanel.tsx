@@ -10,7 +10,7 @@ import {
   type RaceMeasure,
   type VariantReport,
 } from '../../engine';
-import { Panel, StatusLine, Table, formatPercent } from '../ui';
+import { Panel, StatusLine, Table, formatDateTime, formatPercent } from '../ui';
 import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
 
 /**
@@ -36,9 +36,16 @@ type SuiteId = 'diagonal' | 'jam' | 'race';
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
-const SAMPLE_PRESETS = [16, 64, 100, 250];
+const SAMPLE_PRESETS = [16, 64, 100, 250, 1000];
 const MIN_SAMPLES = 4;
 const MAX_SAMPLES = 2000;
+/**
+ * Тяжёлый прогон: тот же таб, но 1000 досок и полный отчёт вместо таблицы.
+ * 1000 - не круглая цифра ради цифры: на 16 досках разница между правилом и его
+ * отсутствием тоньше шума (см. выводы в отчёте), а больше браузер в воркере
+ * считает только по явной кнопке.
+ */
+const BIG_SAMPLES = 1000;
 /** Кампания сравнивается двумя вариантами одних и тех же досок. */
 const DIAGONAL_PAIR: ModeId[] = ['campaignFreeDiag', 'campaignStrictDiag'];
 /** Лестница уровней для «Парковки» и «Гонок»: те же срезы, что и в `docs/modes.md`. */
@@ -57,6 +64,29 @@ const DIAGONAL_HEAD = [
   'Реиграбельность',
 ];
 
+/** Что осталось после прогона: шапка отчёта собирается из этих полей, а не из
+ * текущего значения полей ввода - пользователь мог поменять зерно, пока считалось. */
+interface RunMeta {
+  suite: SuiteId;
+  finishedAt: number;
+  seconds: number;
+  samples: number;
+  seed: number;
+  /** Уровень кампании или лестница уровней «Парковки» и «Гонок». */
+  scope: string;
+  /** Это расчёт на 1000 досок: в отчёте он помечен явно. */
+  big: boolean;
+  stopped: boolean;
+}
+
+/** Как называть единицу прогона и на что она делится - в заголовке отчёта. */
+const BOARD_WORD: Record<SuiteId, string> = { diagonal: 'досок', jam: 'полей', race: 'забегов' };
+const PER_WORD: Record<SuiteId, string> = {
+  diagonal: 'на вариант',
+  jam: 'на уровень',
+  race: 'на уровень и на правило',
+};
+
 interface SuiteMeta {
   /** Подпись вкладки. */
   tab: string;
@@ -68,6 +98,8 @@ interface SuiteMeta {
   run: string;
   /** Сноска под таблицей: формулы сводных индексов. */
   footnote: string;
+  /** Сколько живёт расчёт на 1000 досок: мерялось node-ом на этом движке. */
+  bigEta: string;
 }
 
 const SUITE: Record<SuiteId, SuiteMeta> = {
@@ -76,6 +108,7 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
     title: 'Кампания: диагональ только бить или свободно',
     note: 'Один генератор, две версии права на пустую диагональ. Если «только бить» не хуже по цифрам, правило можно оставлять как есть.',
     run: 'Сравнить диагональ',
+    bigEta: '~45 с',
     footnote:
       '«Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10% отсутствия безальтернативных ходов. «Выбор» - средняя развилка на пути решения.',
   },
@@ -84,16 +117,18 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
     title: 'Парковка: сложность и реиграбельность',
     note: 'Головоломка без финиша по времени: важна длина плана, число развилок и различие досок. «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема: низкое значит «один неверный ход, и всё».',
     run: `Замерить генератор`,
+    bigEta: '~3 мин',
     footnote:
       '«Запас» - сколько ходов бюджета остаётся после плана: бюджет около двух длин плана, поэтому различают уровни именно план и запас, а не прощение.',
   },
   race: {
     tab: 'Гонки',
     title: 'Гонки: сколько можно играть до нерешаемой позиции',
-    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), поля как ленты больше нет: фигура за такт делает ровно свой ход. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти. Справа то же поле без права на выпад: по разнице видно, что даёт правило, - поэтому гонки берут половину досок на каждое правило.`,
+    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), поля как ленты больше нет: фигура за такт делает ровно свой ход. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти. Справа то же поле без права на выпад: по разнице видно, что даёт правило, и обе ветки считают ровно столько досок, сколько запрошено.`,
     footnote:
       '«До нерешаемой доходят» - доля забегов, где перебор успевает найти позицию без хода: сто процентов означают, что конец партии читается заранее, а не приходит из-за угла. Фигура, дошедшая до нижнего ряда и не взявшая короля, сходит с поля - это замена уносившему ряду, иначе доска забивалась бы за пару десятков ходов. «Чем кончились» считается по тем же забегам, что и строка: «поимка 16 из 16» значит, что все партии этого уровня закончились поимкой.',
     run: 'Прогнать гонки',
+    bigEta: '~10 с',
   },
 };
 
@@ -108,6 +143,8 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [reports, setReports] = useState<VariantReport[]>([]);
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
   const [raceRows, setRaceRows] = useState<RaceMeasure[]>([]);
+
+  const [runMeta, setRunMeta] = useState<RunMeta | null>(null);
 
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
@@ -152,69 +189,99 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       });
   }
 
-  const runDiagonal = () =>
-    start(async () => {
-      setReports([]);
-      setProgress(`${modeDef(DIAGONAL_PAIR[0]).name}: 0 из ${samples}`);
-      const suite = runVariantSuite(
-        { modes: DIAGONAL_PAIR, level, samples, seed },
-        {
-          onSample: (mode, done, total) => setProgress(`${modeDef(mode).name}: ${done} из ${total}`),
-          onReport: (item) => setReports((current) => [...current, item]),
-        },
-      );
-      suiteRef.current = suite;
-      await suite.done;
-    });
+  /**
+   * Прогон сравнивает два правила, и каждая ветка получает ровно столько досок,
+   * сколько запрошено: делить пополам значит соврать в заголовке отчёта.
+   */
+  function suiteDiagonal(count: number): Promise<void> {
+    setReports([]);
+    setProgress(`${modeDef(DIAGONAL_PAIR[0]).name}: 0 из ${count}`);
+    const suite = runVariantSuite(
+      { modes: DIAGONAL_PAIR, level, samples: count, seed },
+      {
+        onSample: (mode, done, total) => setProgress(`${modeDef(mode).name}: ${done} из ${total}`),
+        onReport: (item) => setReports((current) => [...current, item]),
+      },
+    );
+    suiteRef.current = suite;
+    return suite.done;
+  }
 
-  const runJam = () =>
-    start(async () => {
-      if (parsedLevels.length === 0) return;
-      setJamRows([]);
-      setProgress(`Уровень 0 из ${parsedLevels.length}`);
-      const suite = runJamSuite(
-        { levels: parsedLevels, samples, seed },
-        {
-          onRow: (row, done, total) => {
-            setJamRows((current) => [...current, row]);
-            setProgress(`Уровень ${done} из ${total}`);
-          },
+  function suiteJam(count: number): Promise<void> {
+    setJamRows([]);
+    setProgress(`Уровень 0 из ${parsedLevels.length}`);
+    const suite = runJamSuite(
+      { levels: parsedLevels, samples: count, seed },
+      {
+        onRow: (row, done, total) => {
+          setJamRows((current) => [...current, row]);
+          setProgress(`Уровень ${done} из ${total}`);
         },
-      );
-      suiteRef.current = suite;
-      await suite.done;
-    });
+      },
+    );
+    suiteRef.current = suite;
+    return suite.done;
+  }
 
-  const runRace = () =>
-    start(async () => {
-      if (parsedLevels.length === 0) return;
-      setRaceRows([]);
-      setProgress(`Уровень 0 из ${parsedLevels.length}`);
-      const suite = runRaceSuite(
-        {
-          levels: parsedLevels,
-          samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))),
-          seed,
-          // Тот же набор зёрен без права на выпад: иначе таблица не отвечает на
-          // вопрос «а зачем правило вообще нужно».
-          compare: true,
+  function suiteRace(count: number): Promise<void> {
+    setRaceRows([]);
+    setProgress(`Уровень 0 из ${parsedLevels.length}`);
+    const suite = runRaceSuite(
+      {
+        levels: parsedLevels,
+        samples: count,
+        seed,
+        // Тот же набор зёрен без права на выпад: иначе таблица не отвечает на
+        // вопрос «а зачем правило вообще нужно».
+        compare: true,
+      },
+      {
+        onRow: (row, done, total) => {
+          setRaceRows((current) => [...current, row]);
+          setProgress(`Уровень ${done} из ${total}`);
         },
-        {
-          onRow: (row, done, total) => {
-            setRaceRows((current) => [...current, row]);
-            setProgress(`Уровень ${done} из ${total}`);
-          },
-        },
-      );
-      suiteRef.current = suite;
-      await suite.done;
-    });
+      },
+    );
+    suiteRef.current = suite;
+    return suite.done;
+  }
 
-  const runActive = () => {
-    if (active === 'diagonal') runDiagonal();
-    else if (active === 'jam') runJam();
-    else runRace();
+  /** Шапка отчёта пишется из того, что прогналось, а не из текущего ввода. */
+  function stamp(scope: string, count: number, big: boolean, startedAt: number) {
+    const seconds = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+    const stopped = stopRef.current;
+    setRunMeta({ suite: active, finishedAt: Date.now(), seconds, samples: count, seed, scope, big, stopped });
+    setNote(
+      stopped
+        ? `Прогон остановлен: в отчёте только то, что успело сосчитаться (${count} ${BOARD_WORD[active]} ${PER_WORD[active]}).`
+        : `Готово: ${count} ${BOARD_WORD[active]} ${PER_WORD[active]} за ${seconds} с. Отчёт с выводами лежит ниже, «Скопировать» забирает его целиком.`,
+    );
+  }
+
+  /**
+   * Один прогон активного таба. `big` - тяжёлый расчёт на 1000 досок: то же
+   * самое, только дольше и с полным отчётом на выходе, чтобы результат можно
+   * было переслать без подписей «что за колонки».
+   */
+  const runSuite = (count: number, big: boolean) => {
+    if (active !== 'diagonal' && parsedLevels.length === 0) return;
+    const scope = active === 'diagonal' ? `уровень ${level}` : `уровни ${parsedLevels.join(',')}`;
+    start(async () => {
+      const startedAt = Date.now();
+      try {
+        if (active === 'diagonal') await suiteDiagonal(count);
+        else if (active === 'jam') await suiteJam(count);
+        else await suiteRace(count);
+      } finally {
+        // Отчёт нужен и после отмены: половина уровней посчитана - её и показываем,
+        // в шапке помечено, что прогон остановлен.
+        stamp(scope, count, big, startedAt);
+      }
+    });
   };
+
+  const runActive = () => runSuite(samples, false);
+  const runBig = () => runSuite(BIG_SAMPLES, true);
 
   const stop = () => {
     stopRef.current = true;
@@ -224,14 +291,45 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const count = active === 'diagonal' ? reports.length : active === 'jam' ? jamRows.length : raceRows.length;
   const canRun = active === 'diagonal' || parsedLevels.length > 0;
 
+  /** Markdown-таблицы активного прогона с их же заголовком про зерно и доски. */
+  const tableText = (): string => {
+    const ran = runMeta?.samples ?? samples;
+    const usedSeed = runMeta?.seed ?? seed;
+    return active === 'diagonal'
+      ? diagonalText(reports, { level, samples: ran, seed: usedSeed })
+      : active === 'jam'
+        ? jamText(jamRows, { samples: ran, seed: usedSeed })
+        : raceText(raceRows, { samples: ran, seed: usedSeed });
+  };
+
+  const reportFindings = (): string[] =>
+    active === 'diagonal'
+      ? diagonalFindings(reports)
+      : active === 'jam'
+        ? jamFindings(jamRows)
+        : raceFindings(raceRows);
+
+  /**
+   * Отчёт целиком: дата, настройки, таблицы и выводы, посчитанные из цифр.
+   * Шапка берётся из меты прогона - поля ввода за время расчёта могли уехать,
+   * а пересылаем мы именно то, что считалось.
+   */
+  const reportText = (): string => {
+    const own = runMeta && runMeta.suite === active ? runMeta : null;
+    const head = own
+      ? [
+          `Отчёт лаборатории: ${meta.title}`,
+          `${formatDateTime(own.finishedAt)} · ${own.scope} · ${own.samples} ${BOARD_WORD[own.suite]} ${PER_WORD[own.suite]}${own.big ? ` · тяжёлый расчёт на ${BIG_SAMPLES} досок, считалось ${own.seconds} с` : ` · считалось ${own.seconds} с`}${own.stopped ? ' · прогон остановлен, считали не все уровни' : ''}`,
+          '',
+        ].join('\n')
+      : '';
+    const findings = reportFindings();
+    const tail = findings.length > 0 ? `\n\nВыводы:\n${findings.map((line) => `- ${line}`).join('\n')}` : '';
+    return `${head}${tableText()}${tail}`.trim();
+  };
+
   const copy = async () => {
-    const text =
-      active === 'diagonal'
-        ? diagonalText(reports, { level, samples, seed })
-        : active === 'jam'
-          ? jamText(jamRows, { samples, seed })
-          : raceText(raceRows, { samples, seed });
-    const ok = await writeClipboard(text);
+    const ok = await writeClipboard(reportText());
     setNote(ok ? 'Скопировано. Вставляй прямо в чат или в `docs/modes.md`.' : 'Буфер обмена недоступен, выдели текст вручную.');
   };
 
@@ -326,9 +424,18 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
               ? progress
               : `${meta.run}${active === 'diagonal' ? '' : ` (${parsedLevels.length})`}`}
           </button>
+          <button
+            type="button"
+            className="btn btn-quiet"
+            onClick={runBig}
+            disabled={running || !canRun}
+            title={`Тот же прогон на ${BIG_SAMPLES} досок и отчёт с выводами: его можно переслать как есть. Ориентир по времени - ${meta.bigEta}`}
+          >
+            {running && progress ? `считаем: ${BIG_SAMPLES} досок` : `Расчёт на ${BIG_SAMPLES} досок · ${meta.bigEta}`}
+          </button>
           {count > 0 && (
             <button type="button" className="btn btn-quiet" onClick={() => void copy()}>
-              Скопировать
+              Скопировать отчёт
             </button>
           )}
         </div>
@@ -342,15 +449,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
 
         <p className="adm-suite-note">{meta.footnote}</p>
         {conclusion && active === 'diagonal' && <p className="adm-suite-note">{conclusion}</p>}
-        {count > 0 && (
-          <pre className="adm-code adm-copyable">
-            {active === 'diagonal'
-              ? diagonalText(reports, { level, samples, seed })
-              : active === 'jam'
-                ? jamText(jamRows, { samples, seed })
-                : raceText(raceRows, { samples, seed })}
-          </pre>
-        )}
+        {count > 0 && <pre className="adm-code adm-copyable">{reportText()}</pre>}
       </section>
     </Panel>
   );
@@ -580,6 +679,160 @@ function causesText(causes: Record<string, number>, total?: number): string {
     .join(', ');
 }
 
+/**
+ * Выводы из цифр гонок. Их пишет сама панель, потому что вывод «правило работает»
+ * должен быть выводом из прогона, а не из того, что автор кнопки ожидал увидеть.
+ */
+function raceFindings(rows: RaceMeasure[]): string[] {
+  if (rows.length === 0) return [];
+  const doom = rows.map((row) => row.doomMedian);
+  const out = [
+    `Длина решаемой партии от уровня не зависит: ${Math.min(...doom)}-${Math.max(...doom)} ходов на уровнях ${rows
+      .map((row) => row.level)
+      .join(', ')}. Разница между соседними строками меньше разброса по зёрнам - читать её как «стало сложнее» нельзя.`,
+  ];
+
+  const compared = rows.filter((row) => row.noStrike);
+  if (compared.length > 0) {
+    const avg = (pick: (row: RaceMeasure) => number) =>
+      compared.reduce((sum, row) => sum + pick(row), 0) / compared.length;
+    const gain = avg((row) => row.doomMedian - row.noStrike!.doomMedian);
+    const captures = avg((row) => row.capturesAvg - row.noStrike!.capturesAvg);
+    const length = avg((row) => row.lengthMedian - row.noStrike!.lengthMedian);
+    const worse = gain < 0 || captures < 0;
+    out.push(
+      `Выпад через линию: ${sign(gain)} ${Math.abs(gain).toFixed(1)} хода до нерешаемой позиции, ${sign(
+        captures,
+      )} ${Math.abs(captures).toFixed(1)} взятия за забег, длина партии ${sign(length)} ${Math.abs(length).toFixed(1)} хода. ` +
+        (worse
+          ? 'Правило хуже базового - его надо убирать, а не докручивать.'
+          : 'Правило чистит полосу, а не дарит лишнюю жизнь: при той же длине партии взятий заметно больше.'),
+    );
+  } else {
+    out.push('Сравнения с полем без выпада нет: колонка пустая, и судить о правилу не по чему.');
+  }
+
+  const width = rows.reduce((sum, row) => sum + row.widthEnd, 0) / rows.length;
+  out.push(
+    `Поле дорастает в среднем до ${width.toFixed(1)} колонки из ${RACE_WIDTH} при стартовых ${RACE_MIN_WIDTH}: рост поля успевает случиться внутри одного забега.`,
+  );
+
+  const causes: Record<string, number> = {};
+  let total = 0;
+  let capped = 0;
+  let doomShare = 0;
+  for (const row of rows) {
+    for (const [cause, count] of Object.entries(row.causes)) {
+      causes[cause] = (causes[cause] ?? 0) + count;
+      total += count;
+    }
+    capped += row.capped;
+    doomShare += row.doomShare;
+  }
+  const names = Object.entries(causes)
+    .sort((a, b) => b[1] - a[1])
+    .map(([cause, count]) => `${CAUSE_NAME[cause] ?? cause} ${count}`)
+    .join(', ');
+  out.push(
+    `Исходы ${total} забегов: ${names || 'нет данных'}. В ${formatPercent(
+      doomShare / rows.length,
+      0,
+    )} партий конец наступает там, где перебор уже не оставляет хода${
+      capped > 0 ? `, в ${capped} забегах длина упёрлась в потолок просчёта и не измерена` : ', упоров в потолок просчёта нет'
+    }.`,
+  );
+  if ((causes.stuck ?? 0) === 0 && (causes.won ?? 0) === 0) {
+    out.push(
+      'Тупика и победы нет ни в одном забеге: у режима без финиша единственный конец - поимка, и она приходит раньше, чем игроку станет некуда ходить.',
+    );
+  }
+  return out;
+}
+
+/** Выводы замера «Парковки»: растёт ли сложность и где лестница упирается. */
+function jamFindings(rows: JamMeasure[]): string[] {
+  if (rows.length === 0) return [];
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const out = [
+    `План растёт с уровнем: ${first.avgCost} хода на ${first.level}-м против ${last.avgCost} на ${last.level}-м (поле ${first.width}x${first.height} выросло до ${last.width}x${last.height}).`,
+  ];
+
+  const tail = rows.slice(-3);
+  if (tail.length > 1) {
+    const costs = tail.map((row) => row.avgCost);
+    const spread = Math.max(...costs) - Math.min(...costs);
+    const sameBoard = new Set(tail.map((row) => `${row.width}x${row.height}`)).size === 1;
+    if (sameBoard && spread / Math.max(1, last.avgCost) < 0.12) {
+      out.push(
+        `Последние уровни (${tail.map((row) => row.level).join(', ')}) играют на одном поле ${tail[0].width}x${tail[0].height} и прибавляют по плану всего ${spread.toFixed(0)} хода: выше этого уровня генератор задачу не усложняет, различаются только число фигур и расстановка.`,
+      );
+    }
+  }
+
+  const over = rows.reduce((sum, row) => sum + row.overBudget, 0);
+  const runs = rows.reduce((sum, row) => sum + row.samples, 0);
+  const slack = rows.map((row) => row.slackAvg);
+  out.push(
+    over > 0
+      ? `Сверх бюджета ${over} полей из ${runs}: бюджет давит и сам по себе делает уровень сложнее.`
+      : `Бюджет не давит ни на одном уровне (сверх бюджета 0 из ${runs}), после плана остаётся ${Math.min(
+          ...slack,
+        ).toFixed(0)}-${Math.max(...slack).toFixed(0)} хода: сложность делают план и развилки, а не лимит.`,
+  );
+
+  const unique = rows.reduce((sum, row) => sum + row.uniqueLayouts, 0);
+  out.push(`Разнообразие генератора: ${unique} различных расстановок из ${runs} - повторов он не даёт.`);
+
+  const forgiveness = rows.map((row) => row.forgiveness);
+  out.push(
+    `Прощение первого хода гуляет от ${formatPercent(Math.min(...forgiveness), 0)} до ${formatPercent(
+      Math.max(...forgiveness),
+      0,
+    )} и не монотонно по уровню: метрика уровни не различает, спорить на её основе нельзя.`,
+  );
+  return out;
+}
+
+/** Выводы сравнения диагонали: чем объясняется падение решаемости. */
+function diagonalFindings(reports: VariantReport[]): string[] {
+  const free = reports.find((report) => report.mode === 'campaignFreeDiag');
+  const strict = reports.find((report) => report.mode === 'campaignStrictDiag');
+  if (!free || !strict) return [];
+  const ratio = strict.avgChoiceSteps > 0 ? free.avgChoiceSteps / strict.avgChoiceSteps : 0;
+  const drop = (free.solvableShare - strict.solvableShare) * 100;
+  const out = [
+    `Выбор на пути решения: ${free.avgChoiceSteps.toFixed(2)} против ${strict.avgChoiceSteps.toFixed(
+      2,
+    )}${ratio > 0 ? ` - со строгой диагональю развилок в ${ratio.toFixed(1)} раза меньше` : ''}.`,
+  ];
+  out.push(
+    strict.fallbacks > 0 && drop > 1
+      ? `Решаемость падает на ${drop.toFixed(
+          1,
+        )} п.п., но генератор отдал ${strict.fallbacks} досок из ${strict.samples} без отбора: почти всё падение объясняется воронкой генератора, а не правилом. Цифра «с решением» смешивает «доска нерешаемая» и «генератор сдался» - смотри на откаты рядом.`
+      : `Решаемость ${formatPercent(free.solvableShare, 1)} против ${formatPercent(
+          strict.solvableShare,
+          1,
+        )} при откатах ${free.fallbacks} и ${strict.fallbacks}.`,
+  );
+  const better = free.replayIndex >= strict.replayIndex ? 'свободная' : 'строгая';
+  out.push(
+    `Реиграбельность ${Math.round(free.replayIndex * 100)} против ${Math.round(
+      strict.replayIndex * 100,
+    )}, различных досок ${free.uniqueLayouts}/${free.samples} против ${strict.uniqueLayouts}/${strict.samples}: выигрывает ${better} диагональ, её и оставляем.` +
+      (free.samples < 64 ? ` На ${free.samples} досках разница в пару пунктов - шум, для вывода нужно 64+.` : ''),
+  );
+  return out;
+}
+
+/** Знак в выводах словами: «плюс 1.2 хода» читается быстрее, чем «1.2». */
+function sign(value: number): string {
+  if (value > 0) return 'плюс';
+  if (value < 0) return 'минус';
+  return 'ровно';
+}
+
 /** Текст замера генератора «Парковки»: его же вставляем в `docs/modes.md`. */
 function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): string {
   const head = [
@@ -598,7 +851,9 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
     'Сложность',
     'Реиграб.',
   ];
-  const lines = [`Замер генератора «Парковки», по ${meta.samples} полей на уровень, зерно ${meta.seed}`, ''];
+  // Как и в гонках: сколько полей реально прогналось, а не что стоит в поле ввода.
+  const ran = rows[0]?.samples ?? meta.samples;
+  const lines = [`Замер генератора «Парковки», по ${ran} полей на уровень, зерно ${meta.seed}`, ''];
   lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
   for (const row of rows) {
     lines.push(
@@ -626,8 +881,8 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
     'Без выпада: доом / партия / взятий',
     'Чем кончились',
   ];
-  // Число берём из строк, а не из поля «досок»: гонки считают половину запроса
-  // на каждое правило, и заголовок обязан показывать то, что реально прогналось.
+  // Число берём из строк, а не из поля «досок»: заголовок обязан показывать то,
+  // что реально прогналось, - на случай отмены и округлений в запросе.
   const ran = rows[0]?.samples ?? meta.samples;
   const lines = [
     `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${ran} забегов на уровень и на правило, зерно ${meta.seed}`,
@@ -652,8 +907,9 @@ function diagonalText(
   reports: VariantReport[],
   meta: { level: number; samples: number; seed: number },
 ): string {
+  const ran = reports[0]?.samples ?? meta.samples;
   const lines = [
-    `Кампания: диагональ свободно или только бить, уровень ${meta.level}, по ${meta.samples} досок, зерно ${meta.seed}`,
+    `Кампания: диагональ свободно или только бить, уровень ${meta.level}, по ${ran} досок на вариант, зерно ${meta.seed}`,
     '',
     `| ${DIAGONAL_HEAD.join(' | ')} |`,
     `| ${DIAGONAL_HEAD.map(() => '---').join(' | ')} |`,

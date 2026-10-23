@@ -380,12 +380,39 @@ describe('админка', () => {
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Сравнить диагональ' }));
 
-    const text = await screen.findByText(/^Кампания: диагональ свободно или только бить/, undefined, { timeout: 30_000 });
+    // Отчёт начинается с шапки, а строки таблиц ищутся внутри неё.
+    const text = await screen.findByText(/^Отчёт лаборатории: Кампания/, undefined, { timeout: 30_000 });
+    expect(text.textContent).toContain('Кампания: диагональ свободно или только бить');
     expect(text.textContent).toContain('| Режим | Поле | С решением |');
     expect(text.textContent).toContain('Кампания, диагональ свободна');
     expect(text.textContent).toContain('Кампания, диагональ только для взятия');
     await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
   }, 60_000);
+
+  it('тяжёлый расчёт на 1000 досок отдаёт отчёт с выводами', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    // Гонки: самый дешёвый из трёх прогонов, 1000 досок на правило считается
+    // секунды. Один уровень, иначе тест ждёт лестницу.
+    fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
+    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
+    fireEvent.click(await screen.findByRole('button', { name: /Расчёт на 1000 досок/ }));
+
+    const text = await screen.findByText(/^Отчёт лаборатории: Гонки/, undefined, { timeout: 120_000 });
+    expect(text.textContent).toContain('по 1000 забегов на уровень и на правило');
+    expect(text.textContent).toContain('тяжёлый расчёт на 1000 досок');
+    expect(text.textContent).toContain('считалось');
+    // Выводы панель считает из цифр прогона: без них отчёт в чате приходится
+    // дописывать руками, и первое, что в нём появляется, - ожидание автора.
+    expect(text.textContent).toContain('Выводы:');
+    expect(text.textContent).toContain('Длина решаемой партии от уровня не зависит');
+    expect(text.textContent).toContain('Выпад через линию');
+    expect(text.textContent).toContain('Исходы 1000 забегов');
+    await waitFor(() => expect(screen.queryByText(/считаем/)).toBeNull(), { timeout: 30_000 });
+  }, 180_000);
 
   it('меряет боевую «Парковку» длиной плана решателя', async () => {
     await mount();
@@ -409,7 +436,8 @@ describe('админка', () => {
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Замерить генератор (2)' }));
 
-    const text = await screen.findByText(/^Замер генератора «Парковки»/, undefined, { timeout: 30_000 });
+    const text = await screen.findByText(/^Отчёт лаборатории: Парковка/, undefined, { timeout: 30_000 });
+    expect(text.textContent).toContain('Замер генератора «Парковки»');
     expect(text.textContent).toContain('«План, ходы» - длина решения решателя');
     await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
     // Решаемость у генератора обязана быть полной: план ищет решатель, а не удача.
@@ -424,19 +452,20 @@ describe('админка', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
     fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
-    // Сравнение двух правил делит запрос пополам, и заголовок обязан показывать
-    // то число, что реально прогналось, а не значение поля «досок».
+    // Обе ветки сравнения считают ровно столько досок, сколько запрошено: делить
+    // запрос пополам - значит соврать в заголовке отчёта.
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '8' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Прогнать гонки (1)' }));
 
-    const text = await screen.findByText(/^Прогон «Гонок»/, undefined, { timeout: 60_000 });
+    const text = await screen.findByText(/^Отчёт лаборатории: Гонки/, undefined, { timeout: 60_000 });
+    expect(text.textContent).toContain('Прогон «Гонок»');
     // Метрика - ходы до позиции, где перебор не оставляет ни одного спасения.
     expect(text.textContent).toContain('До нерешаемой (медиана)');
     expect(text.textContent).toContain('Чем кончились');
-    expect(text.textContent).toContain('по 4 забегов на уровень и на правило');
+    expect(text.textContent).toContain('по 8 забегов на уровень и на правило');
     // Причины считаются по тем же забегам, что и вся строка: без знаменателя
     // «поимка 4» читается как потерянная половина прогона.
-    expect(text.textContent).toMatch(/\d+ из 4/);
-    await waitFor(() => expect(screen.getAllByText(/из 4/).length).toBeGreaterThan(0));
+    expect(text.textContent).toMatch(/\d+ из 8/);
+    await waitFor(() => expect(screen.getAllByText(/из 8/).length).toBeGreaterThan(0));
   }, 90_000);
 });

@@ -260,7 +260,9 @@ export function measureRaceLevels(
   levels: readonly number[],
   options: RaceMeasureOptions = {},
 ): RaceMeasure[] {
-  const samples = Math.max(1, Math.min(400, options.samples ?? 24));
+  // Потолок 2000: панель умеет прогон на 1000 досок по явной кнопке, и цифра в
+  // отчёте обязана означать ровно столько забегов, сколько прогналось.
+  const samples = Math.max(1, Math.min(2_000, options.samples ?? 24));
   const cap = Math.max(8, options.cap ?? 240);
   const depth = Math.max(1, options.depth ?? 3);
   const play = (level: number, mode: ModeId): RaceSampleRun[] => {
