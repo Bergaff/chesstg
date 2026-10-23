@@ -33,7 +33,35 @@ export function ProfileChip({ profile }: { profile: Profile }): ReactNode {
   );
 }
 
-export function HeartsRow({ lives, maxLives, className }: { lives: number; maxLives: number; className?: string }): ReactNode {
+/**
+ * Ряд сердец. `eternal` - аккаунт из списка `QA_LIVES_IDS`: вместо пяти сердец
+ * показываем бесконечность, чтобы проверяющий видел, что список сработал.
+ * Остальные цифры профиля при этом обычные: режим про жизни, а не про льготы.
+ */
+export function HeartsRow({
+  lives,
+  maxLives,
+  className,
+  eternal = false,
+}: {
+  lives: number;
+  maxLives: number;
+  className?: string;
+  eternal?: boolean;
+}): ReactNode {
+  if (eternal) {
+    return (
+      <span
+        className={className ? `hearts hearts-eternal ${className}` : 'hearts hearts-eternal'}
+        aria-label="Жизни не списываются: аккаунт в списке QA"
+      >
+        <span className="heart-filled">♥</span>
+        <span className="heart-infinity" aria-hidden="true">
+          ∞
+        </span>
+      </span>
+    );
+  }
   return (
     <span
       className={className ? `hearts ${className}` : 'hearts'}

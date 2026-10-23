@@ -32,6 +32,11 @@ export interface Profile {
   coins: number;
   lives: number;
   maxLives: number;
+  /**
+   * Аккаунт в списке `QA_LIVES_IDS`: сердца не списываются. Приходит только от
+   * настроенного воркера, поэтому отсутствие поля значит «обычный аккаунт».
+   */
+  eternalLives?: boolean;
   nextLifeAt: number | null;
   nextLifeInMs: number;
   serverNow: number;

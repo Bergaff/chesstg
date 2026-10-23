@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   RACE_ROWS,
-  RACE_WIDTH,
   createCampaignLevel,
   createJamPuzzle,
   createRaceLevel,
@@ -342,11 +341,12 @@ describe('UI smoke', () => {
     expect(await screen.findByText('Начать')).toBeTruthy();
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('race');
-    // Поле то же, что и было: восемь колонок и двенадцать рядов, король на
-    // втором ряду от низа.
+    // Поле старает узким: три колонки при восьми рядах, король на втором ряду от
+    // низа. Шире оно станет внутри забега, по числу пришедших фигур.
     expect(screen.getByText('рекорд 14')).toBeTruthy();
     const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
-    expect(grid.querySelectorAll('[role=\"gridcell\"]').length).toBe(RACE_WIDTH * RACE_ROWS);
+    expect(initial.width).toBe(3);
+    expect(grid.querySelectorAll('[role=\"gridcell\"]').length).toBe(initial.width * RACE_ROWS);
     // Нижней навигации в «Гонках» больше нет: ходят тапом по подсвеченной клетке.
     // Полосу притока и линию уходящего ряда тоже убрали - вместо них движение.
     expect(document.querySelectorAll('.move-pad').length).toBe(0);
@@ -365,11 +365,12 @@ describe('UI smoke', () => {
     const options = legalMoves(initial);
     // Клетка хода берётся по координатам, а не по подписи: подпись меняется,
     // когда ход взятие. Ряды в разметке идут сверху вниз, поэтому индекс ряда
-    // считается от верхнего края поля.
-    const picked = options.find((move) => (move.dy ?? 1) !== 1) ?? options[0];
+    // считается от верхнего края поля. Шаг берём вверх: любой другой в «Гонках»
+    // стоит ряда, и с первого ряда король уехал бы за край раньше хода.
+    const picked = options.find((move) => (move.dy ?? 1) === 1) ?? options[0];
     const target = { x: initial.player.x + picked.dx, y: initial.player.y + (picked.dy ?? 1) };
     const cells = [...grid.querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
-    const cell = cells[(RACE_ROWS - 1 - target.y) * RACE_WIDTH + target.x];
+    const cell = cells[(initial.height - 1 - target.y) * initial.width + target.x];
     expect(cell.disabled).toBe(false);
     fireEvent.click(cell);
     await waitFor(() => expect(screen.getByText('Ходы 1')).toBeTruthy());
@@ -379,7 +380,7 @@ describe('UI smoke', () => {
     const action = (sent?.body as { actions?: { dx?: number; dy?: number }[] } | undefined)?.actions?.[0];
     expect(action?.dx).toBe(picked.dx);
     // Шаг вперёд в журнале пишется без dy: прежние партии от этого не разъезжаются.
-    expect(action?.dy).toBe(picked.dy ?? undefined);
+    expect(action?.dy).toBe(picked.dy === 1 ? undefined : picked.dy);
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {

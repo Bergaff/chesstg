@@ -125,8 +125,16 @@ function rankSurvival(state: GameState, next: GameState): number {
   score += Math.min(5, nearestThreat(next)) * 1.5;
   // Строки, где рождается приток: вставать туда невыгодно, оттуда фигура
   // приходит на голову уже в следующем ходу.
-  const top = next.height - (rulesFor(next.mode).spawnRows ?? 1);
+  const modeRules = rulesFor(next.mode);
+  const top = next.height - (modeRules.spawnRows ?? 1);
   if (next.player.y >= top) score -= (next.player.y - top + 1) * 4;
+  // Бегущее поле: снизу край опаснее, чем сверху. Ряд уезжает каждый ход, и
+  // король с ним, поэтому второй ряд снизу - последнее место, где ещё можно
+  // дышать, а нулевой ряд означает смерть на следующем же такте.
+  if (modeRules.scroll && next.player.y <= 1) score -= (2 - next.player.y) * 5;
+  // И тем же правилом подсказка ценит высоту: на бегущем поле запас рядов над
+  // головой - это ходы, которые ещё можно выиграть, а ряд под ногами - нет.
+  if (modeRules.scroll) score += next.player.y * 1.2;
   return score;
 }
 

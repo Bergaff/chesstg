@@ -1,4 +1,4 @@
-import { RACE_PREFILL, RACE_ROWS, RACE_SPAWN_ROWS, RACE_WIDTH, raceSpawnEvery, raceSpawnPerTurn } from './race';
+import { RACE_MIN_WIDTH, RACE_ROWS, RACE_SPAWN_ROWS, racePrefillFor, raceSpawnEvery, raceSpawnPerTurn } from './race';
 import type { AnyMode, GameMode } from './types';
 
 /**
@@ -139,7 +139,7 @@ const RACE: ModeRules = {
   player: 'king',
   wrapOnTop: false,
   rows: () => RACE_ROWS,
-  pieces: () => RACE_PREFILL,
+  pieces: () => racePrefillFor(RACE_MIN_WIDTH),
 };
 
 /**
@@ -168,6 +168,11 @@ const VARIANTS: Partial<Record<ModeId, ModeRules>> = {
     skipQuota: 1,
     player: 'pawn',
     wrapOnTop: true,
+    // Поле не течёт:variant сравнивает уклонение без конвейера. С бегущим рядом
+    // перелив сверху кидал бы пешку на нулевой ряд, а с нулевого ряда сдвиг сразу
+    // уносит за край - то есть вариант проверял бы не уклонение, а мгновенную
+    // смерть от правила.
+    scroll: false,
     spawnRate: undefined,
     // Один бесплатный пропуск оставляем как в базе: без него пешка обязана
     // ходить в любую сторону, и уклонение вырождается в «первый ход решает».
@@ -256,7 +261,9 @@ export function modeFamily(mode: ModeId): 'campaign' | 'jam' | 'race' {
 export function colsFor(mode: ModeId, level: number): number {
   const family = modeFamily(mode);
   if (family === 'jam') return Math.min(6, 4 + Math.floor(level / 10));
-  if (family === 'race') return RACE_WIDTH;
+  // Гонка стартует узким полем и растёт вширь по ходу забега: для лаборатории и
+  // стартового состояния важна именно начальная ширина.
+  if (family === 'race') return RACE_MIN_WIDTH;
   if (level <= 5) return 3;
   if (level <= 15) return 4;
   if (level <= 30) return 5;

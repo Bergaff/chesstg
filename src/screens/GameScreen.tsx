@@ -24,9 +24,8 @@ import {
   rulesFor,
   projectHint,
   survivalHint,
-  raceScrollEvery,
+  RACE_WIDTH,
   raceSpawnEvery,
-  raceSpawnWidth,
   type BonusId,
   type Cell,
   type GameAction,
@@ -722,11 +721,11 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   // поле заполняется не каждый ход.
   const raceEvery = isRace ? raceSpawnEvery(state.tier) : 0;
   const raceElapsed = isRace ? state.moves % raceEvery : 0;
-  // Такт поля и ширина притока: первое отвечает на вопрос «ряд уходит сейчас или
-  // через ход», второе на «сколько колонок заняты рождением фигур».
-  const raceRows = isRace ? Math.max(1, raceScrollEvery(state.tier)) : 0;
-  const raceRowElapsed = isRace ? state.moves % raceRows : 0;
-  const raceBand = isRace ? Math.min(run.initial.width, raceSpawnWidth(state.tier)) : 0;
+  // Ширина поля - местная шкала сложности: колонки добавляются справа по мере
+  // того, как приходят фигуры, поэтому «сколько поля уже отросло» стоит показывать
+  // так же заметно, как номер волны. Такт поля не показываем: ряд едет каждый
+  // ход, и считать тут нечего.
+  const raceWidth = isRace ? state.width : 0;
   // Король: у «Гонок» игрок ходит на клетку в любую сторону, поэтому кнопок
   // девять, а не три.
   const king = rules.player === 'king';
@@ -788,21 +787,8 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         {isRace && (
           <>
             <span className="status-sep" aria-hidden="true">/</span>
-            <span className="status-item">
-              ряд через {raceRows - raceRowElapsed}
-              <span className="race-ticks" aria-hidden="true">
-                {Array.from({ length: raceRows }).map((_, index) => (
-                  <i key={index} className={index < raceRowElapsed ? 'on' : undefined} />
-                ))}
-              </span>
-            </span>
-          </>
-        )}
-        {isRace && (
-          <>
-            <span className="status-sep" aria-hidden="true">/</span>
-            <span className={cn('status-item', raceBand >= run.initial.width && 'off')}>
-              приток в {raceBand} из {run.initial.width}
+            <span className={cn('status-item', raceWidth >= RACE_WIDTH && 'off')}>
+              ширина {raceWidth} из {RACE_WIDTH}
             </span>
           </>
         )}
@@ -954,7 +940,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
               ? 'Фигуры идут на короля.'
               : king
                 ? isRace
-                  ? 'Король: шаг в любую из восьми сторон. Ходить - по клеткам поля, они подсвечены. Шаг вперёд придвигает поле на ряд ближе, шаг назад оставляет вас в уносимом ряду.'
+                  ? 'Король: шаг в любую из восьми сторон. Ходить - по клеткам поля, они подсвечены. После хода ряд уезжает вниз вместе с вами: шаг вперёд оставляет на втором ряду, внизу снесёт за край.'
                   : 'Король: шаг и взятие в любую из восьми сторон, назад включительно. Клетка с фигурой доступна, если её можно взять.'
                 : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
         </p>
@@ -963,7 +949,11 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
       {preOpen && (
         <Modal dismissible={false} onClose={() => undefined} labelledBy="pre-title">
           <span className="label">
-            {isEndless ? 'Забег' : `Поле ${run.initial.width} на ${run.initial.height}`}
+            {isEndless
+              ? 'Забег'
+              : isRace
+                ? `Поле ${run.initial.width} на ${run.initial.height}, рост вширь`
+                : `Поле ${run.initial.width} на ${run.initial.height}`}
           </span>
           <h2 className="modal-title" id="pre-title">
             {isEndless ? 'Бесконечный режим' : `${modeName}, уровень ${run.level}`}
@@ -972,7 +962,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
               : isRace
-                ? 'Вы король: один шаг и одно взятие в любую сторону. Фигуры выходят из двух верхних рядов и ходят по своим шахматным правилам. Поле бежит: снизу ряд уходит, сверху приходит новый, а король всегда остаётся на втором ряду. Считаются пережитые ходы: каждые восемь волна шире и быстрее, каждые двенадцать растёт уровень режима.'
+                ? 'Вы король: один шаг и одно взятие в любую сторону. Фигуры выходят из двух верхних рядов и ходят по своим шахматным правилам. После каждого вашего хода всё поле уезжает на ряд вниз, и вы вместе с ним: внизу задерживаться нельзя, сдвиг уносит за край. Считаются пережитые ходы: каждые восемь волна быстрее, каждые двенадцать растёт уровень режима.'
                 : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
@@ -1271,6 +1261,9 @@ function LoseModal({
   const captured = result.capturedBy;
   // В тупике фигуры не ходят и не бьют, поэтому победителя у поражения нет.
   const stuck = captured === undefined;
+  // В «Гонках» король гибнет и от фигуры, и от сдвига ряда: тексты разные, иначе
+  // «Короля поймали» стоит там, где его никто не трогал.
+  const swept = isRace && result.reason === 'swept';
   const canRetry = profile.lives > 0;
 
   return (
@@ -1286,10 +1279,14 @@ function LoseModal({
               ? `${modeName}, ходов ${result.score}`
               : `${modeName}, уровень ${result.level}`}
         </span>
-        <h2 className="modal-title" id="lose-title">{stuck ? 'Тупик' : isRace ? 'Короля поймали' : 'Пешка поймана'}</h2>
+        <h2 className="modal-title" id="lose-title">
+          {stuck ? 'Тупик' : isRace ? (swept ? 'Ряд унёс короля' : 'Короля поймали') : 'Пешка поймана'}
+        </h2>
         <p className="modal-text">
           {isRace
-            ? 'Фигура встала на клетку короля, либо ходить стало некуда. Каждый пережитый ход идёт в рекорд, каждые двенадцать режим поднимает уровень.'
+            ? swept
+              ? 'Ты остался на нижнем ряду, и сдвиг унёс тебя за край: поле уезжает вниз каждый ход, и ты вместе с ним. Каждый пережитый ход идёт в рекорд, каждые двенадцать режим поднимает уровень.'
+              : 'Фигура встала на клетку короля, либо ходить стало некуда. Каждый пережитый ход идёт в рекорд, каждые двенадцать режим поднимает уровень.'
             : stuck
               ? 'Дорога закрыта: ходить некуда, взятия кончились.'
               : captured
@@ -1301,7 +1298,11 @@ function LoseModal({
 
       <div className="lives-line">
         <span>Осталось жизней</span>
-        <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
+        <HeartsRow
+          lives={profile.lives}
+          maxLives={profile.maxLives}
+          eternal={profile.eternalLives}
+        />
       </div>
 
       {result.newBest && (

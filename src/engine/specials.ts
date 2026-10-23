@@ -3,12 +3,12 @@ import { auditState, difficultyBand, SURVIVAL_DEPTH, survivalTargetFor } from '.
 import { boardForMode, isSurvivalGoal, piecesFor, rulesFor, type ModeId } from './modes';
 import {
   RACE_KING_ROW,
-  RACE_PREFILL,
+  RACE_MIN_WIDTH,
   RACE_ROWS,
+  racePrefillFor,
   RACE_SPAWN_ROWS,
   RACE_WIDTH,
   raceSpawnPool,
-  raceSpawnWidth,
 } from './race';
 import { Rng, mix32 } from './rng';
 import type { GameState, PieceType } from './types';
@@ -95,32 +95,25 @@ export function createJamLevel(level: number, seed: number): GameState {
 }
 
 /**
- * «Гонки»: король против фигур, приходящих сверху. Король стартует в нижнем
- * ряду (один ряд под него остаётся, чтобы было куда отступить), фигуры стоят в
- * двух верхних рядах. Стартовая фигура не имеет права бить короля: забег не
- * должен кончаться раньше первого хода.
+ * «Гонки»: король против фигур, приходящих сверху. Генератор рисует только
+ * начало забега: поле в RACE_MIN_WIDTH колонки при восьми рядах, король во
+ * втором ряду от низа, пробка в двух верхних рядах. Дальше поле растёт вширь само
+ * (`raceWidthForSpawned`), поэтому широкой доска на старте не бывает. Стартовая
+ * фигура не имеет права бить короля: забег не должен кончаться раньше первого
+ * хода, и именно поэтому колонка короля выбирается после расстановки пробки.
  */
 export function createRaceLevel(level: number, seed: number): GameState {
-  const width = RACE_WIDTH;
+  const width = RACE_MIN_WIDTH;
   const height = RACE_ROWS;
   const rng = new Rng(mix32(seed, level, 0x9ac3, width, height));
-  // Полоса первой волны и стартовая колонка короля: король выходит вне полосы,
-  // иначе ладья из пробки приезжает по его колонке за один ход, и забег
-  // кончается раньше, чем игрок успевает увидеть, что поле бежит.
-  const band = Math.min(width, raceSpawnWidth(1));
-  const bandLeft = Math.max(0, Math.floor((width - band) / 2));
-  const free: number[] = [];
-  for (let x = 0; x < width; x++) {
-    if (x < bandLeft || x >= bandLeft + band) free.push(x);
-  }
-  const startColumn = free.length > 0 ? free[rng.int(free.length)] : rng.int(width);
   const state: GameState = {
     version: 1,
     mode: 'race',
     width,
     height,
-    player: { x: startColumn, y: RACE_KING_ROW },
+    player: { x: 0, y: RACE_KING_ROW },
     enemies: [],
+    spawned: 0,
     status: 'playing',
     moves: 0,
     score: 0,
@@ -132,14 +125,13 @@ export function createRaceLevel(level: number, seed: number): GameState {
     seed,
   };
   const pool = raceSpawnPool(1);
-  // Стартовая пробка стоит в той же полосе, что и будущий приток: иначе начало
-  // забега выглядело бы шире, чем оно есть на первой волне.
-  const left = bandLeft;
-  const target = Math.min(RACE_PREFILL, RACE_SPAWN_ROWS * band - 1);
+  // Пробка занимает те же верхние ряды, что и будущий приток, по всей стартовой
+  // ширине: на трёх колонках полоса и есть поле.
+  const target = Math.min(racePrefillFor(width), RACE_SPAWN_ROWS * width - 1);
   let placed = 0;
   let guard = 0;
   while (placed < target && guard++ < 300) {
-    const x = left + rng.int(band);
+    const x = rng.int(width);
     const y = height - 1 - rng.int(RACE_SPAWN_ROWS);
     if (state.enemies.some((e) => e.x === x && e.y === y)) continue;
     if (x === state.player.x && y === state.player.y) continue;
@@ -150,6 +142,18 @@ export function createRaceLevel(level: number, seed: number): GameState {
       continue;
     }
     placed += 1;
+  }
+  // Стартовая колонка: из всех, куда пробка не бьёт, берём среднюю, если она
+  // свободна. На трёх колонках «уйти в сторону» невозможно, поэтому королю надо
+  // хотя бы оставить право шагнуть вверх, а не родиться под боем.
+  const free: number[] = [];
+  for (let x = 0; x < width; x++) {
+    const probe = { ...state, player: { x, y: RACE_KING_ROW } };
+    if (probe.enemies.some((e) => enemyAttacksCell(probe, e, x, RACE_KING_ROW))) continue;
+    free.push(x);
+  }
+  if (free.length > 0) {
+    state.player = { x: free[Math.floor(free.length / 2)], y: RACE_KING_ROW };
   }
   state.rng = rng.save();
   return state;

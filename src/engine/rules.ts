@@ -1,6 +1,6 @@
 import { cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
-import { RACE_KING_ROW, RACE_SPAWN_ROWS, raceScrollEvery, raceSpawnPool, raceSpawnWidth, raceTierForMoves } from './race';
+import { RACE_SPAWN_ROWS, raceSpawnPool, raceTierForMoves, raceWidthForSpawned } from './race';
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
@@ -41,13 +41,15 @@ function spawnPhase(state: GameState): void {
   const rng = new Rng(state.rng || 1);
   const rows = Math.max(1, Math.min(rules.spawnRows || 1, state.height - 1));
   const pool: readonly string[] = rules.player === 'king' ? raceSpawnPool(state.tier) : SPAWN_POOL;
-  // Приток занимает полосу по центру: на первой волне три колонки, дальше
-  // полоса растёт и с шестой волны держит всю ширину поля.
-  const band = rules.player === 'king' ? raceSpawnWidth(state.tier) : state.width;
+  // В «Гонках» приток занимает всю теку ширину поля: полоса по центру не нужна,
+  // потому что полем считается то, что уже наросло, и каждая добавленная колонка
+  // сама добавляет линии, которые надо держать в голове.
+  const band = state.width;
   const left = Math.max(0, Math.floor((state.width - band) / 2));
   const span = Math.max(1, Math.min(band, state.width));
   const taken = (x: number, y: number) =>
     state.enemies.some((e) => e.x === x && e.y === y) || (state.player.x === x && state.player.y === y);
+  let arrived = 0;
   for (let spawned = 0; spawned < perTurn; spawned++) {
     let placed = false;
     for (let attempt = 0; attempt < 8 && !placed; attempt++) {
@@ -66,9 +68,21 @@ function spawnPhase(state: GameState): void {
         continue;
       }
       placed = true;
+      arrived += 1;
     }
   }
   state.rng = rng.save();
+  if (rules.player === 'king') {
+    // Поле растёт по числу пришедших фигур, а не по числу пережитых ходов:
+    // стоящий на месте шире не станет, а тот, кто играет, получит новую колонку
+    // справа примерно каждые RACE_FIGURES_PER_COLUMN фигур.
+    state.spawned = (state.spawned ?? 0) + arrived;
+    const width = raceWidthForSpawned(state.spawned);
+    if (width > state.width) {
+      state.width = width;
+      state.lastEvent = 'width';
+    }
+  }
 }
 
 function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][number]['type'] {
@@ -76,20 +90,20 @@ function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][
 }
 
 /**
- * Такт поля в бегущих режимах: нижний ряд уходит за край и уносит всё, что на
- * нём стояло, остальных сдвигает на ряд вниз. Короля сдвиг не трогает: он
- * «двигается, но остаётся» на своём ряду, а ряды протекают мимо. Фигура,
- * спущенная на клетку короля, ловит его на месте, поэтому проверка стоит здесь,
- * а не в шахматном ходе.
+ * Такт поля в бегущих режимах: весь ряд уезжает на клетку вниз, нижний ряд
+ * сходит с поля и уносит то, что на нём стояло. Сдвиг несёт и короля: за доску он
+ * не держится, поэтому каждый ход надо подниматься, шаг в сторону или назад стоит
+ * ряда, а долгое стояние внизу кончается тем, что ряд уносит короля за край. Это
+ * и поражение, и ответ на «король двигается, но остаётся на втором ряду»: он
+ * остаётся ровно пока ходит вверх.
+ * Фигура и король едут одним и тем же движением, поэтому относительное положение
+ * не меняется: ловит короля только собственный ход фигуры из `enemyPhase`.
+ * Заморозка ставит на паузу и поле тоже, щит от сдвига не спасает - он от хода
+ * фигуры.
  */
 function scrollPhase(state: GameState): void {
   const rules = rulesFor(state.mode);
-  // Заморозка держит всё поле, а не только шахматные ходы фигур: иначе она
-  // стоила бы тридцати монет за передышку в один ход.
   if (!rules.scroll || state.freeze > 0 || state.status !== 'playing') return;
-  const every = Math.max(1, raceScrollEvery(state.tier));
-  if (state.moves % every !== 0) return;
-
   const kept: typeof state.enemies = [];
   let swept = 0;
   for (const enemy of state.enemies) {
@@ -98,54 +112,18 @@ function scrollPhase(state: GameState): void {
       swept += 1;
       continue;
     }
-    if (y === state.player.y && enemy.x === state.player.x) {
-      state.status = 'lost';
-      state.capturedBy = enemy.type;
-      state.lastEvent = 'captured';
-      state.enemies = state.enemies.map((e) => (e.id === enemy.id ? { ...e, y } : e));
-      return;
-    }
     kept.push({ ...enemy, y });
   }
   state.enemies = kept;
-  if (swept > 0) state.lastEvent = 'swept';
-}
-
-/**
- * Конвейер: король живёт на своём втором ряду. Шаг вперёд придвигает всё поле на
- * ряд ближе и уносит то, что свалилось за нижний край; сам король при этом
- * возвращается на свой ряд, поэтому «поле едет, а король стоит» видно с первого
- * хода. Назад отступить можно на нулевой ряд и оставить там: поле не едет следом
- * за королём вверх, иначе «оттягивать волну» было бы вечным безопасным ходом и
- * счёт перестал бы что-то значить. Фигура, которую сдвиг посадил на клетку
- * короля, ловит его: та же логика, что и с уносимым рядом.
- */
-function conveyorPhase(state: GameState): void {
-  const rules = rulesFor(state.mode);
-  if (!rules.scroll || state.status !== 'playing') return;
-  const delta = state.player.y - RACE_KING_ROW;
-  if (delta <= 0) return;
-
-  const kept: typeof state.enemies = [];
-  let swept = 0;
-  for (const enemy of state.enemies) {
-    const y = enemy.y - delta;
-    if (y < 0) {
-      swept += 1;
-      continue;
-    }
-    if (y === RACE_KING_ROW && enemy.x === state.player.x) {
-      state.status = 'lost';
-      state.capturedBy = enemy.type;
-      state.lastEvent = 'captured';
-      state.enemies = state.enemies.map((e) => (e.id === enemy.id ? { ...e, y } : e));
-      state.player = { ...state.player, y: RACE_KING_ROW };
-      return;
-    }
-    kept.push({ ...enemy, y });
+  const y = state.player.y - 1;
+  if (y < 0) {
+    // Ряд унёс короля за край. Своей фигуры на его клетке оказаться не могло:
+    // сдвиг общий, поэтому опасен только собственный ход фигуры.
+    state.status = 'lost';
+    state.lastEvent = 'swept';
+    return;
   }
-  state.enemies = kept;
-  state.player = { ...state.player, y: RACE_KING_ROW };
+  state.player = { x: state.player.x, y };
   if (swept > 0) state.lastEvent = 'swept';
 }
 
@@ -302,7 +280,6 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.
   const waitingForNothing = action.type === 'skip' && state.freeze === 0 && state.shield === 0 && noMovesLeft(state);
   const before = waitingForNothing ? boardSignature(state) : '';
-  conveyorPhase(state);
   scrollPhase(state);
   spawnPhase(state);
   enemyPhase(state);
@@ -313,12 +290,14 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   const rules = rulesFor(state.mode);
   const stuckByRules = rules.motion === 'static' || rules.goal === 'survive';
   const noProgress = waitingForNothing && before === boardSignature(state);
-  if (stuckByRules && noMovesLeft(state)) {
+  // Сдвиг уже унёс короля за край? Тогда причина конца - `swept`, а не тупик:
+  // на мёртвом поле `legalMoves` пустеет, и без проверки ряд терял своё событие.
+  if (stuckByRules && state.status === 'playing' && noMovesLeft(state)) {
     state.status = 'lost';
     state.lastEvent = 'stuck';
     return state;
   }
-  if (noProgress) {
+  if (state.status === 'playing' && noProgress) {
     state.status = 'lost';
     state.lastEvent = 'stuck';
   }

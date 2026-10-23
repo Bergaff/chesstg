@@ -22,6 +22,12 @@ export interface WorkerEnv {
   ADMIN_SECRET?: string;
   /** Секрет подписи сеансовых токенов сайта. По умолчанию берётся ADMIN_SECRET. */
   SESSION_SECRET?: string;
+  /**
+   * Вечные сердца для проверки: Telegram id через запятую. Аккаунтам из списка
+   * жизни не списываются - режим про сердца и только, монеты, цены и реклама
+   * остаются обычными, поэтому баланс по такому аккаунту не проверяют.
+   */
+  QA_LIVES_IDS?: string;
 }
 
 export interface TelegramUser {

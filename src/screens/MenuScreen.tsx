@@ -323,7 +323,11 @@ function LivesPool({ onShop, onRefresh }: { onShop: () => void; onRefresh: () =>
   return (
     <div className="resource-row">
       <span className="resource-main">
-        <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
+        <HeartsRow
+          lives={profile.lives}
+          maxLives={profile.maxLives}
+          eternal={profile.eternalLives}
+        />
         <span className="resource-caption">
           Следующая жизнь через <b>{formatDuration(remaining)}</b>
         </span>

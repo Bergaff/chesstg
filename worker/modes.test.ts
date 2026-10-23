@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  eternalLives,
   parseModeLevels,
   profileModes,
   resumableRun,
@@ -8,7 +9,7 @@ import {
   modeProgress,
   toProfile,
 } from './db';
-import { RACE_KING_ROW, RACE_ROWS, RACE_WIDTH } from '../src/engine';
+import { RACE_KING_ROW, RACE_MIN_WIDTH, RACE_ROWS, RACE_WIDTH } from '../src/engine';
 import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
 import type { UserRow } from './types';
 
@@ -137,6 +138,22 @@ describe('прогресс режимов в JSON-колонке', () => {
     expect(toProfile(user({ max_level: 5 })).endlessUnlocked).toBe(false);
     expect(profileModes(user({ max_level: 11 })).endless.unlocked).toBe(true);
   });
+
+  it('список QA_LIVES_IDS держит сердца полными', () => {
+    const env = { QA_LIVES_IDS: '42, 777' } as never;
+    expect(eternalLives(env, user({ tg_id: 777 }))).toBe(true);
+    expect(eternalLives(env, user({ tg_id: 42 }))).toBe(true);
+    expect(eternalLives(env, user({ tg_id: 4242 }))).toBe(false);
+    // Гостю список не назначить: `tg_id` пустой, и вечных сердец нет.
+    expect(eternalLives(env, user({ tg_id: null }))).toBe(false);
+    // Пустая переменная - режима нет вовсе.
+    expect(eternalLives({} as never, user({ tg_id: 42 }))).toBe(false);
+    expect(eternalLives({ QA_LIVES_IDS: '  ' } as never, user({ tg_id: 42 }))).toBe(false);
+    // Профиль вечного аккаунта: полные сердца, флаг, без таймера регенерации.
+    const row = user({ lives: 1, lives_at: Date.now() });
+    expect(toProfile(row, 1000, true)).toMatchObject({ lives: 5, eternalLives: true, nextLifeAt: null });
+    expect(toProfile(row, 1000, false).eternalLives).toBe(false);
+  });
 });
 
 describe('активная партия и поле прежней сборки', () => {
@@ -170,7 +187,13 @@ describe('активная партия и поле прежней сборки'
     shield: 0,
     status: 'playing',
   };
-  const king = { ...sandbox, mode: 'race', player: { x: 3, y: RACE_KING_ROW } };
+  const king = {
+    ...sandbox,
+    mode: 'race',
+    width: RACE_MIN_WIDTH,
+    height: RACE_ROWS,
+    player: { x: 1, y: RACE_KING_ROW },
+  };
   const runRow = (patch: Partial<{ mode: string; initial_state: string; actions: string }> = {}) => ({
     mode: 'jam',
     initial_state: JSON.stringify(puzzle),
@@ -190,8 +213,13 @@ describe('активная партия и поле прежней сборки'
         runRow({ mode: 'race', initial_state: JSON.stringify({ ...king, player: { x: 3, y: 0 } }) }),
       ),
     ).toBe(false);
-    expect(RACE_WIDTH).toBeGreaterThan(0);
-    expect(RACE_ROWS).toBeGreaterThan(0);
+    // Поле прежней сборки (восемь на двенадцать, конвейер считался рядами) новым
+    // правилом не играется: такая партия закрывается, а не продолжается.
+    expect(
+      runShapeMatchesMode(runRow({ mode: 'race', initial_state: JSON.stringify({ ...king, height: 12 }) })),
+    ).toBe(false);
+    expect(RACE_WIDTH).toBe(RACE_MIN_WIDTH + 5);
+    expect(RACE_ROWS).toBe(8);
   });
 
   it('журнал чужого режима партию не продолжает', () => {

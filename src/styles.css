@@ -533,6 +533,17 @@ a {
   color: var(--accent);
 }
 
+/* Вечные сердца (`QA_LIVES_IDS`): одно сердце и бесконечность вместо ряда.
+   Тот же акцент, что и у обычных сердец: это не награда, а пометка аккаунта. */
+.hearts-eternal {
+  gap: 4px;
+}
+
+.heart-infinity {
+  font-size: 15px;
+  line-height: 1;
+}
+
 .heart-filled,
 .heart-full {
   color: var(--accent);

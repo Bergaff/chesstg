@@ -10,6 +10,7 @@ import {
   PAID_SKINS,
   PLAYABLE_MODES,
   RACE_KING_ROW,
+  RACE_ROWS,
   randomSeed,
   shortCode,
   SKINS,
@@ -59,9 +60,9 @@ export function selectedSkin(user: UserRow): SkinId {
   return isSkinId(user.skin) && owned.includes(user.skin) ? user.skin : 'classic';
 }
 
-export function toProfile(user: UserRow, now = Date.now()) {
+export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
   const lives = materializeLives(user.lives, user.lives_at, now);
-  const nextLifeInMs = msUntilNextLife(lives.lives, lives.livesAt, now);
+  const nextLifeInMs = eternal ? 0 : msUntilNextLife(lives.lives, lives.livesAt, now);
   return {
     id: user.id,
     name: user.first_name || (user.is_guest ? 'Гость' : 'Игрок'),
@@ -70,8 +71,11 @@ export function toProfile(user: UserRow, now = Date.now()) {
     maxLevel: user.max_level,
     levelsCleared: Math.max(0, user.max_level - 1),
     coins: user.coins,
-    lives: lives.lives,
+    // Вечные сердца показываются полным рядом и с флагом: проверяющий должен
+    // видеть, что список сработал, а не молча получать пять сердец.
+    lives: eternal ? MAX_LIVES : lives.lives,
     maxLives: MAX_LIVES,
+    eternalLives: eternal,
     nextLifeAt: nextLifeInMs > 0 ? now + nextLifeInMs : null,
     nextLifeInMs,
     serverNow: now,
@@ -213,7 +217,28 @@ export function resetModeLevelsProbe(): void {
 }
 
 /** Пересчитывает жизни с учётом времени и сохраняет, если что-то изменилось. */
+/**
+ * Вечные сердца. `QA_LIVES_IDS` - список Telegram id через запятую (или пробел),
+ * переменная окружения воркера. Аккаунт из списка играет без списания жизней.
+ *
+ * Проверка идёт по `tg_id`, а не по гостевому id: гостю список не назначить,
+ * зато подделать себя нельзя - `tg_id` берётся из подписанного initData. Пустая
+ * или отсутствующая переменная значит «режима нет», поэтому на проде без
+ * настройки ничего не меняется.
+ */
+export function eternalLives(env: WorkerEnv, user: Pick<UserRow, 'tg_id'>): boolean {
+  const raw = env.QA_LIVES_IDS?.trim();
+  if (!raw || user.tg_id == null) return false;
+  const id = String(user.tg_id);
+  return raw
+    .split(/[\s,;]+/)
+    .some((token) => token.length > 0 && token === id);
+}
+
 export async function refreshLives(env: WorkerEnv, user: UserRow, now = Date.now()): Promise<UserRow> {
+  // Вечным аккаунтам строку не пишем: снимешь переменную - и регенерация
+  // продолжится с того же момента, что и была.
+  if (eternalLives(env, user)) return user.lives === MAX_LIVES ? user : { ...user, lives: MAX_LIVES };
   const lives = materializeLives(user.lives, user.lives_at, now);
   if (lives.lives === user.lives && lives.livesAt === user.lives_at) return user;
   await env.DB.prepare('UPDATE users SET lives = ?, lives_at = ?, updated_at = ? WHERE id = ?')
@@ -309,7 +334,13 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
   // Гонки играют королём, и генератор ставит его в первый ряд от низа. Прежний
   // конвейер начинал с другого ряда и считал ряды, а не ходы: такой забег новый
   // клиент досчитал бы не тем правилом, поэтому ряд входит в проверку формы.
-  if (mode === 'race') return value.player?.y === RACE_KING_ROW;
+  if (mode === 'race') {
+    // Ряд и высота поля входят в проверку: прежний конвейер играл на двенадцати
+    // рядах и с другим рядом короля, а правило теперь - «ряд уезжает каждый
+    // ход». Такой забег клиент досчитал бы не тем правилом, поэтому он закрывается
+    // как выход, а не продолжается.
+    return value.player?.y === RACE_KING_ROW && value.height === RACE_ROWS;
+  }
   return true;
 }
 

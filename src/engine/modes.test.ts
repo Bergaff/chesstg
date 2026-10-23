@@ -81,25 +81,31 @@ describe('правила режимов', () => {
   });
 
   it('в «Гонках» фигура бьёт по своей линии, а с линии можно уйти', () => {
-    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 2 }] });
+    // Короля держим в середине поля: с первого ряда вниз шагнут нельзя, там его
+    // уносит сдвигом, и проверка линии атаки превратилась бы в проверку края.
+    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 4 }] });
     // Шаг вдоль ряда: король остаётся на колонке ладьи, и его снимают.
     expect(applyAction(lined, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
     // Тот же ход в сторону с линии - ладье нужен ход на перестроение.
     expect(applyAction(lined, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
 
     // Дальность скользящего хода в «Гонках» ограничена двумя клетками (`slideCap`),
-    // поэтому ладья с трёх рядов до короля не долетает: у игрока есть ход, чтобы
-    // уйти с линии, и он видит прилёт заранее, а не получает смерть за один ход.
-    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 0 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
-    expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 0)).toBe(false);
-    expect(applyAction(outOfReach, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
-    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 0 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 2 }] });
-    expect(enemyMoves(inReach, inReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 0)).toBe(true);
+    // поэтому ладья с четырёх рядов до короля не долетает: у игрока есть ход,
+    // чтобы уйти с линии, и он видит прилёт заранее, а не получает смерть за ход.
+    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 7 }] });
+    expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 3)).toBe(false);
+    expect(applyAction(outOfReach, { type: 'move', dx: 0, dy: 1 }).status).toBe('playing');
+    // Та же ладья на ряд ближе долетает: шаг вперёд её не обманывает, потому что
+    // сдвиг ряда не меняет дистанцию между королём и фигурами.
+    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 6 }] });
+    expect(applyAction(inReach, { type: 'move', dx: 0, dy: 1 }).status).toBe('lost');
 
-    // Никакого «рядового падения» нет: фигура тратит ходы по своему правилу.
-    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 0 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 4 }] });
+    // Никакого «рядового падения» нет: после сдвига фигура тратит ровно свой ход.
+    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 3 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 5 }] });
     const step = applyAction(far, { type: 'move', dx: 1, dy: 0 });
-    expect(step.enemies.find((e) => e.id === 'e0')).toMatchObject({ x: 3, y: 2 });
+    const horse = step.enemies.find((e) => e.id === 'e0')!;
+    // Ряд уехал на клетку вниз (с 5 на 4), остальное - ход коня: |dx| + |dy| = 3.
+    expect(Math.abs(horse.x - 4) + Math.abs(horse.y - 4)).toBe(3);
     expect(step.status).toBe('playing');
   });
 
@@ -348,7 +354,8 @@ describe('переключатели вариантов', () => {
     // Боевые «Гонки» перелива не дают: король ходит назад сам, ему это не нужно.
     // И конвейер его держит: шаг вверх возвращает на второй ряд, а поле сдвигает.
     const kingTurn = applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 });
-    expect(kingTurn.player.y).toBe(1);
+    // Король шагнул вверх и уехал рядом с полем на ряд вниз: итог - тот же ряд.
+    expect(kingTurn.player.y).toBe(4);
     expect(kingTurn.lastEvent).not.toBe('wrap');
   });
 

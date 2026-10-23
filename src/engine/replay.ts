@@ -116,8 +116,13 @@ function bestSurvivalMove(state: GameState): GameState | null {
       next.enemies.length * 6 -
       legalMoves(next).length * 1.5 -
       nearestDistance(next) * 2 +
-      (next.player.y <= 1 ? 0.5 : 0) +
-      (next.player.y >= next.height - 3 ? 1.5 : 0);
+      // Бегущее поле несёт короля вниз каждый ход, поэтому низ поля - не укрытие,
+      // а шаг до края: бот обязан это учитывать, иначе замер гонок врёт.
+      (next.player.y <= 1 ? 2.5 - next.player.y : 0) +
+      (next.player.y >= next.height - 3 ? 1.5 : 0) -
+      // Бегущее поле: ряд, на котором ты стоишь, уезжает вниз, поэтому высота -
+      // это запас темпа. Без этого шага бот жмётся к краю и замер врёт.
+      next.player.y * 0.7;
     if (rank < bestRank) {
       bestRank = rank;
       best = next;
