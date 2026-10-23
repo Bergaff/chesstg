@@ -375,10 +375,13 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     if (!current || !canPlay || bonusBusy) return;
     setBonusBusy(true);
     try {
-      await api<BonusUseResponse>('/api/bonus/use', {
+      const paid = await api<BonusUseResponse>('/api/bonus/use', {
         method: 'POST',
         body: { kind: 'hint', runId: run?.id, at: actionsRef.current.length },
       });
+      // Монеты уже списаны, поэтому счётчик обновляем до запроса хода: отказ
+      // на /hint не должен оставлять игрока с цифрой, которой больше нет.
+      setProfile({ ...profile, coins: paid.coins, inventory: paid.inventory });
       const response = await api<JamHintResponse>(`/api/run/${runRef.current!.id}/hint`, {
         method: 'POST',
         body: { actions: actionsRef.current },
