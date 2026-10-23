@@ -1,4 +1,4 @@
-import { cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
+import { attackerId, cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
 import { RACE_SPAWN_ROWS, raceSpawnPool, raceTierForMoves, raceWidthForSpawned } from './race';
 
@@ -92,7 +92,8 @@ function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][
 /**
  * Ответ фигур. В «Гонках» они идут своими шахматными ходами, поля как ленты нет:
  * за такт фигура делает ровно один ход, и конь выглядит буквой Г, а не «прыжком
- * на три клетки». Фигура, которая стоит в нижнем ряду и не бьёт короля, уходит с
+ * на три клетки». Сколько фигур делает этот один ход - правило `enemyTempo`:
+ * `all` двигает все, `one` одну атакующую, `cycle` по очереди. Фигура, которая стоит в нижнем ряду и не бьёт короля, уходит с
  * поля (`exitAtBottom`) - это замена уносившему ряду: без неё доска забивалась бы
  * за пару десятков ходов.
  */
@@ -107,6 +108,20 @@ function enemyPhase(state: GameState): void {
     state.lastEvent = 'frozen';
     return;
   }
+
+  // Темп ответа. `all` - двигаются все фигуры, `one` - одна атакующая, `cycle` -
+  // по кругу (индекс считается по `state.moves`, и приток сдвигает очередь:
+  // ротация получается детерминированной, но не «ровно каждая фигура раз в N»).
+  // Клиренс нижнего ряда очереди не ждёт: фигура, дошедшая до края, уходит в
+  // любом темпе, иначе поле забивается теми, кто не успел походить.
+  const tempo = rules.enemyTempo;
+  const queue = state.enemies;
+  const actor =
+    tempo === 'one'
+      ? attackerId(state)
+      : tempo === 'cycle' && queue.length > 0
+        ? queue[state.moves % queue.length].id
+        : null;
 
   const escaped: string[] = [];
   for (const enemy of state.enemies) {
@@ -126,6 +141,7 @@ function enemyPhase(state: GameState): void {
         continue;
       }
     }
+    if (tempo !== 'all' && enemy.id !== actor) continue;
     if (target) {
       enemy.x = target.x;
       enemy.y = target.y;

@@ -336,6 +336,26 @@ export function enemyTarget(state: GameState, enemy: Enemy): Cell | 'escape' | n
 }
 
 /**
+ * Кто из фигур делает ход за такт при темпе `one`: та, чей ход ближе всего
+ * подводит её к игроку, а взятие короля перевешивает любой другой ход. Выбор
+ * считается по позиции ДО ходов: порядок, в котором фигуры двигаются, меняет
+ * доступность клеток, и «лучший ход» после первого хода был бы уже другим -
+ * клиент и сервер разошлись бы на том же журнале.
+ */
+export function attackerId(state: GameState, enemies: Enemy[] = state.enemies): string | null {
+  let best: { id: string; score: number } | null = null;
+  for (const enemy of enemies) {
+    const target = enemyTarget(state, enemy);
+    if (!target || target === 'escape') continue;
+    const takes = target.x === state.player.x && target.y === state.player.y;
+    const distance = Math.abs(target.x - state.player.x) + Math.abs(target.y - state.player.y);
+    const score = (takes ? -100 : 0) + distance;
+    if (!best || score < best.score) best = { id: enemy.id, score };
+  }
+  return best?.id ?? null;
+}
+
+/**
  * Жадный ИИ: минимизируем манхэттенское расстояние до пешки.
  * Тай-брейки детерминированы, чтобы клиент и сервер считали одинаково.
  */

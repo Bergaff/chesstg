@@ -175,19 +175,54 @@ describe('прогон сравнений', () => {
     expect(Object.values(row.causes).reduce((a, b) => a + b, 0)).toBe(1000);
   }, 120_000);
 
-  it('сравнение с полем без выпада добавляет колонку, а не меняет прогон', () => {
+  it('сравнение с базовым правилом добавляет колонку, а не меняет прогон', () => {
     const plain = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120 })[0];
-    expect(plain.noStrike).toBeUndefined();
+    expect(plain!.comparison).toBeUndefined();
+    expect(plain!.mode).toBe('race');
     const compared = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120, compare: true })[0];
     // Тот же набор зёрен и тот же потолок: база обязана совпасть цифра в цифру,
     // иначе «прирост от правила» считается по разным партиям.
-    expect(compared.doomMedian).toBe(plain.doomMedian);
-    expect(compared.lengthMedian).toBe(plain.lengthMedian);
-    expect(compared.noStrike).toBeDefined();
-    expect(compared.noStrike!.samples).toBe(compared.samples);
+    expect(compared!.doomMedian).toBe(plain!.doomMedian);
+    expect(compared!.lengthMedian).toBe(plain!.lengthMedian);
+    expect(compared!.comparison).toBeDefined();
+    expect(compared!.comparison!.mode).toBe('raceNoStrike');
+    expect(compared!.comparison!.samples).toBe(compared!.samples);
     // Без права бить через линию взятий меньше либо столько же - правило ровно
     // про это, и замер обязан показать направление, а не шум.
-    expect(compared.noStrike!.capturesAvg).toBeLessThanOrEqual(compared.capturesAvg);
+    expect(compared!.comparison!.capturesAvg).toBeLessThanOrEqual(compared!.capturesAvg);
+  }, 120_000);
+
+  it('замер меряет другое правило и темп, и реиграбельность', () => {
+    const options = { samples: 4, seed: 909, cap: 40, depth: 2 } as const;
+    const one = measureRaceLevels([9], { ...options, mode: 'raceTempoOne' })[0]!;
+    const all = measureRaceLevels([9], { ...options, mode: 'race' })[0]!;
+    expect(one.mode).toBe('raceTempoOne');
+    // Темп видно по числу сдвинувшихся фигур за такт: при «по одной» их не больше
+    // одной, при общем темпе - заметно больше. Так видно, что замер мерит
+    // правило, а не шум генератора.
+    expect(one.moversAvg).toBeLessThanOrEqual(1);
+    expect(all.moversAvg).toBeGreaterThan(one.moversAvg);
+    // Метрики реиграбельности обязаны лежать в тех границах, что обещает сноска.
+    for (const row of [one, all]) {
+      expect(row.choiceAvg).toBeGreaterThan(1);
+      expect(row.safeShare).toBeGreaterThanOrEqual(0);
+      expect(row.safeShare).toBeLessThanOrEqual(1);
+      expect(row.forcedShare).toBeGreaterThanOrEqual(0);
+      expect(row.startVariety).toBeGreaterThan(0);
+      expect(row.startVariety).toBeLessThanOrEqual(1);
+      expect(row.lengthSpread).toBeGreaterThanOrEqual(0);
+      expect(row.replayIndex).toBeGreaterThanOrEqual(0);
+      expect(row.replayIndex).toBeLessThanOrEqual(1);
+      expect(row.busiestType).toBeTruthy();
+      expect(row.busiestShare).toBeGreaterThanOrEqual(0);
+      expect(row.capturesMedian).toBeGreaterThanOrEqual(0);
+      expect(row.capturesP90).toBeGreaterThanOrEqual(row.capturesMedian);
+      expect(row.strikesAvg).toBeGreaterThanOrEqual(0);
+    }
+    // Сравнение обязано уметь любую базу, а не только «без выпада».
+    const vs = measureRaceLevels([9], { ...options, mode: 'raceTempoOne', compare: true, compareMode: 'race' })[0]!;
+    expect(vs.comparison!.mode).toBe('race');
+    expect(vs.comparison!.samples).toBe(vs.samples);
   }, 120_000);
 
   it('замер парковки считает развилки и разнообразие расстановок', () => {

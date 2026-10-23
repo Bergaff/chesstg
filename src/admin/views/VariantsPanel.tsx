@@ -4,6 +4,7 @@ import {
   modeDef,
   RACE_MIN_WIDTH,
   RACE_ROWS,
+  raceCoinReward,
   RACE_WIDTH,
   type JamMeasure,
   type ModeId,
@@ -14,7 +15,7 @@ import { Panel, StatusLine, Table, formatDateTime, formatPercent } from '../ui';
 import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
 
 /**
- * Лаборатория прогонов: одно окно, три прогона.
+ * Лаборатория прогонов: одно окно, четыре прогона.
  *
  * Вкладки переключают то, что показано в таблице, и меняют подпись запуска.
  * Данные каждого прогона живут отдельно, поэтому результат предыдущего не
@@ -27,12 +28,14 @@ import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
  *    длина плана, развилки на нём и отличия расстановок.
  * 3. «Гонки»: сколько ходов партия остаётся решаемой. Игрок заперт в полосе из
  *    двух нижних рядов, и финал забега - позиция, где от фигуры не уйти.
+ * 4. «Темп фигур»: те же доски на трёх правилах темпа (все фигуры, одна, по
+ *    кругу) - проверяем, остаётся ли напряжение и платится ли награда.
  *
  * Всё считается в воркере (см. `variantsClient`): перебор на каждый ход короля
  * занимает секунды на доску, и на главном потоке вкладка бы встала.
  */
 
-type SuiteId = 'diagonal' | 'jam' | 'race';
+type SuiteId = 'diagonal' | 'jam' | 'race' | 'tempo';
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
@@ -50,6 +53,28 @@ const BIG_SAMPLES = 1000;
 const DIAGONAL_PAIR: ModeId[] = ['campaignFreeDiag', 'campaignStrictDiag'];
 /** Лестница уровней для «Парковки» и «Гонок»: те же срезы, что и в `docs/modes.md`. */
 const LEVELS_LADDER = '1,3,8,12,20,30,40';
+/**
+ * Правила темпа, которые сравнивает четвёртая вкладка: боевой общий темп и два
+ * медленных. Строка таблицы - пара «уровень × правило».
+ */
+const TEMPO_MODES: ModeId[] = ['race', 'raceTempoOne', 'raceTempoCycle'];
+/** Правило, относительно которого темп и меряется: первый элемент списка. */
+const TEMPO_BASE: ModeId = TEMPO_MODES[0];
+/**
+ * За сколько ходов прогон считает забег законченным. Медленный темп партии не
+ * кончает вовсе, и потолок обязан быть виден в отчёте, а не спрятан в цифре.
+ */
+const RACE_CAP = 240;
+/** Сколько монет панель приписывает одному взятию, когда проектирует награду. */
+const COIN_PRESETS = [0, 1, 2, 3];
+/** Имена фигур в сводке: `busiestType` приходит из движка по-английски. */
+const PIECE_NAME: Record<string, string> = {
+  pawn: 'пешка',
+  rook: 'ладья',
+  knight: 'конь',
+  bishop: 'слон',
+  queen: 'ферзь',
+};
 
 const DIAGONAL_HEAD = [
   'Уровень',
@@ -85,11 +110,13 @@ const BOARD_FORMS: Record<SuiteId, [string, string, string]> = {
   diagonal: ['доска', 'доски', 'досок'],
   jam: ['поле', 'поля', 'полей'],
   race: ['забег', 'забега', 'забегов'],
+  tempo: ['забег', 'забега', 'забегов'],
 };
 const PER_WORD: Record<SuiteId, string> = {
   diagonal: 'на вариант',
   jam: 'на уровень',
   race: 'на уровень и на правило',
+  tempo: 'на уровень и на правило',
 };
 
 interface SuiteMeta {
@@ -126,6 +153,15 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
     footnote:
       '«Запас» - сколько ходов бюджета остаётся после плана: бюджет около двух длин плана, поэтому различают уровни именно план и запас, а не прощение.',
   },
+  tempo: {
+    tab: 'Темп фигур',
+    title: 'Гонки: за такт ходят все фигуры или по одной',
+    note: 'Один генератор, три правила темпа: все фигуры (боевое), одна атакующая, фигуры по кругу. Смотрим не длину партии, а то, что за ней стоит: сколько осмысленного выбора остаётся у короля, какая доля ходов не ведёт к краху, как различаются забеги по длине и что при этом даёт взятие. Медленный темп обязан быть хуже по всем четырём пунктам или объяснять, зачем он нужен.',
+    run: 'Сравнить темп',
+    bigEta: '~2 мин на одном уровне, ~12 мин на лесенке',
+    footnote:
+      '«Реиграб.» = 35% выбора на ходу (три хода и больше - максимум), 25% доли безопасных ходов (0.7 - максимум), 25% разброса длины партии ((p90-p10)/медиана, 0.5 - максимум) и 15% разных стартов. «Фигур за такт» - среднее число сдвинувшихся фигур: 1 значит темп «по одной». Уровень в «Гонках» не меняет ни поле, ни приток (из него берётся только зерно стартовой пробки), поэтому семь строк лесенки - это семь стартов одного поля.',
+  },
   race: {
     tab: 'Гонки',
     title: 'Гонки: сколько можно играть до нерешаемой позиции',
@@ -137,7 +173,7 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   },
 };
 
-const SUITE_ORDER: SuiteId[] = ['diagonal', 'jam', 'race'];
+const SUITE_ORDER: SuiteId[] = ['diagonal', 'jam', 'race', 'tempo'];
 
 export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
@@ -148,6 +184,10 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [reports, setReports] = useState<VariantReport[]>([]);
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
   const [raceRows, setRaceRows] = useState<RaceMeasure[]>([]);
+  const [tempoRows, setTempoRows] = useState<RaceMeasure[]>([]);
+  // Монет за взятие: панель только проектирует награду, движок пока платит за
+  // длину партии. Число нужно, чтобы увидеть цену правила до его смены.
+  const [coins, setCoins] = useState(2);
 
   const [runMeta, setRunMeta] = useState<RunMeta | null>(null);
 
@@ -253,11 +293,44 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         // Тот же набор зёрен без права на выпад: иначе таблица не отвечает на
         // вопрос «а зачем правило вообще нужно».
         compare: true,
+        compareMode: 'raceNoStrike',
+        cap: RACE_CAP,
       },
       {
         onRow: (row, done, total) => {
           setRaceRows((current) => [...current, row]);
           setProgress(`Уровень ${done} из ${total}`);
+        },
+      },
+    );
+    suiteRef.current = suite;
+    return suite.done;
+  }
+
+  /**
+   * Темп меряется тремя правилами на одних и тех же зёрнах, базой служит боевое
+   * «race»: иначе «замедление» выглядело бы изменением генератора, а не правила.
+   */
+  function suiteTempo(count: number): Promise<void> {
+    setTempoRows([]);
+    const total = ladder.length * TEMPO_MODES.length;
+    setProgress(`Строк 0 из ${total}`);
+    const suite = runRaceSuite(
+      {
+        levels: ladder,
+        modes: TEMPO_MODES,
+        samples: count,
+        seed,
+        compare: true,
+        compareMode: TEMPO_BASE,
+        cap: RACE_CAP,
+      },
+      {
+        onRow: (row, done) => {
+          setTempoRows((current) => [...current, row]);
+          setProgress(
+            `${modeDef(row.mode).name}, уровень ${row.level}: ${done} из ${total}`,
+          );
         },
       },
     );
@@ -292,6 +365,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       try {
         if (active === 'diagonal') await suiteDiagonal(count);
         else if (active === 'jam') await suiteJam(count);
+        else if (active === 'tempo') await suiteTempo(count);
         else await suiteRace(count);
       } finally {
         // Отчёт нужен и после отмены: половина уровней посчитана - её и показываем,
@@ -309,7 +383,14 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     suiteRef.current?.cancel();
   };
 
-  const count = active === 'diagonal' ? reports.length : active === 'jam' ? jamRows.length : raceRows.length;
+  const count =
+    active === 'diagonal'
+      ? reports.length
+      : active === 'jam'
+        ? jamRows.length
+        : active === 'tempo'
+          ? tempoRows.length
+          : raceRows.length;
 
   /** Markdown-таблицы активного прогона с их же заголовком про зерно и доски. */
   const tableText = (): string => {
@@ -319,7 +400,9 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       ? diagonalText(reports, { levels: ladder, samples: ran, seed: usedSeed })
       : active === 'jam'
         ? jamText(jamRows, { samples: ran, seed: usedSeed })
-        : raceText(raceRows, { samples: ran, seed: usedSeed });
+        : active === 'tempo'
+          ? raceText(tempoRows, { samples: ran, seed: usedSeed, coins, modeColumn: true })
+          : raceText(raceRows, { samples: ran, seed: usedSeed, coins });
   };
 
   const reportFindings = (): string[] =>
@@ -327,7 +410,9 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       ? diagonalFindings(reports)
       : active === 'jam'
         ? jamFindings(jamRows)
-        : raceFindings(raceRows);
+        : active === 'tempo'
+          ? tempoFindings(tempoRows, coins)
+          : raceFindings(raceRows, coins);
 
   /**
    * Отчёт целиком: дата, настройки, таблицы и выводы, посчитанные из цифр.
@@ -359,7 +444,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   return (
     <Panel
       title="Прогоны: кампания, парковка, гонки"
-      note={`Лестница уровней задаёт поле и число фигур для всех трёх прогонов: кампания растёт с 3x4 до 6x9, у «Парковки» и «Гонок» своё расписание. Пустое поле - не ошибка: тогда считается текущий уровень ${level}. Перебор живёт в воркере, поэтому вкладка не замирает`}
+      note={`Лестница уровней задаёт поле и число фигур для всех прогонов: кампания растёт с 3x4 до 6x9, у «Парковки» своё расписание, а у «Гонок» уровень меняет только зерно старта. Пустое поле - не ошибка: тогда считается текущий уровень ${level}. Перебор живёт в воркере, поэтому вкладка не замирает`}
     >
       <div className="adm-row-actions">
         <label className="adm-field is-inline">
@@ -397,6 +482,34 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             disabled={running}
           />
         </label>
+        {(active === 'race' || active === 'tempo') && (
+          <label className="adm-field is-inline">
+            <span className="adm-label">Монет за взятие</span>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              step={1}
+              value={coins}
+              onChange={(event) => setCoins(Math.max(0, Math.min(10, Number(event.target.value) || 0)))}
+              disabled={running}
+              title="Сколько монет панель приписывает одному взятию, когда проектирует награду за забег. Движок пока платит за длину партии: это только расчёт."
+            />
+          </label>
+        )}
+        {(active === 'race' || active === 'tempo') &&
+          COIN_PRESETS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={`adm-chip${coins === value ? ' is-active' : ''}`}
+              onClick={() => setCoins(value)}
+              disabled={running}
+              title={`Проекция награды при ${value} монетах за взятие`}
+            >
+              {value} м/вз
+            </button>
+          ))}
         {SAMPLE_PRESETS.map((value) => (
           <button
             key={value}
@@ -443,7 +556,9 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             onClick={runActive}
             disabled={running}
           >
-            {running && progress ? progress : `${meta.run} (${ladder.length})`}
+            {running && progress
+              ? progress
+              : `${meta.run} (${active === 'tempo' ? ladder.length * TEMPO_MODES.length : ladder.length})`}
           </button>
           <button
             type="button"
@@ -466,7 +581,19 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
 
         {active === 'diagonal' && <DiagonalTable rows={reports} levels={ladder} running={running} />}
         {active === 'jam' && <JamTable rows={jamRows} levels={ladder} running={running} />}
-        {active === 'race' && <RaceTable rows={raceRows} levels={ladder} running={running} />}
+        {active === 'race' && (
+          <RaceTable rows={raceRows} levels={ladder} running={running} coins={coins} compareLabel="Что даёт выпад" />
+        )}
+        {active === 'tempo' && (
+          <RaceTable
+            rows={tempoRows}
+            levels={ladder}
+            running={running}
+            coins={coins}
+            modeColumn
+            compareLabel="Что даёт темп"
+          />
+        )}
 
         {findings.length > 0 && (
           <ul className="adm-suite-findings">
@@ -614,37 +741,67 @@ function JamTable({ rows, levels, running }: { rows: JamMeasure[]; levels: numbe
   );
 }
 
-function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: number[]; running: boolean }): ReactNode {
+interface RaceTableProps {
+  rows: RaceMeasure[];
+  levels: number[];
+  running: boolean;
+  /** Сколько монет за взятие показывает проекция награды. */
+  coins: number;
+  /** Строка на пару «уровень × правило»: так работает вкладка «Темп фигур». */
+  modeColumn?: boolean;
+  /** Колонка сравнения: на вкладке «Гонки» это выпад, на «Темпе» - сам темп. */
+  compareLabel?: string;
+}
+
+/**
+ * Одна таблица на два гоночных прогона. Строки заданы не данными, а списком
+ * уровней (и правил): недостающие показаны как «считаем» или «нет данных»,
+ * чтобы остановленный прогон не выглядел полным.
+ */
+function RaceTable({ rows, levels, running, coins, modeColumn = false, compareLabel = 'Что даёт сравнение' }: RaceTableProps): ReactNode {
+  const head = [
+    'Уровень',
+    ...(modeColumn ? ['Правило'] : []),
+    'Ширина в конце',
+    'Ходов до нерешаемой',
+    'Разброс',
+    'Партия, ходов',
+    'До нерешаемой доходят',
+    'Взятий',
+    compareLabel,
+    'Выбор · безопасные',
+    'Фигур за такт · кто бегает',
+    'Реиграб.',
+    'Награда, монеты',
+    'Чем кончились',
+  ];
+  const pairs = levels.flatMap((level) =>
+    modeColumn ? TEMPO_MODES.map((mode) => ({ level, mode })) : [{ level, mode: 'race' as ModeId }],
+  );
+  const rest = head.length - (modeColumn ? 2 : 1);
   return (
     <Table
-      head={[
-        'Уровень',
-        'Ширина в конце',
-        'Ходов до нерешаемой',
-        'Разброс',
-        'Партия, ходов',
-        'До нерешаемой доходят',
-        'Взятий',
-        'Что даёт выпад',
-        'Чем кончились',
-      ]}
+      head={head}
       empty="Прогон считает перебором: ход, после которого любой ответ фигур ведёт к смерти"
     >
-      {levels.map((value) => {
-        const item = rows.find((row) => row.level === value);
+      {pairs.map(({ level, mode }) => {
+        const key = modeColumn ? `${level}-${mode}` : `${level}`;
+        const item = rows.find((row) => row.level === level && (!modeColumn || row.mode === mode));
         if (!item) {
           return (
-            <tr key={value}>
-              <td>{value}</td>
-              <td colSpan={8} className="adm-muted">
+            <tr key={key}>
+              <td>{level}</td>
+              {modeColumn ? <td className="adm-muted">{modeDef(mode).name}</td> : null}
+              <td colSpan={rest} className="adm-muted">
                 {running ? 'считаем' : 'нет данных'}
               </td>
             </tr>
           );
         }
         return (
-          <tr key={value}>
-            <td>{value}</td>
+          <tr key={key}>
+            <td>{level}</td>
+            {modeColumn ? <td>{modeDef(item.mode).name}</td> : null}
             <td className="is-mono">{item.widthEnd.toFixed(1)}</td>
             <td className="is-mono">
               {item.doomMedian} (в среднем {item.doomAvg.toFixed(1)})
@@ -656,8 +813,19 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
               {item.lengthMedian} (в среднем {item.lengthAvg.toFixed(1)})
             </td>
             <td>{formatPercent(item.doomShare, 0)}</td>
-            <td>{item.capturesAvg.toFixed(1)}</td>
-            <td className="is-mono">{strikeGainText(item)}</td>
+            <td className="is-mono">{item.capturesAvg.toFixed(1)}</td>
+            <td className="is-mono">{compareGainText(item, modeColumn && item.mode === TEMPO_BASE)}</td>
+            <td className="is-mono">
+              {item.choiceAvg.toFixed(2)} · {formatPercent(item.safeShare, 0)}
+            </td>
+            <td className="is-mono">
+              {item.moversAvg.toFixed(2)} · {PIECE_NAME[item.busiestType] ?? item.busiestType}{' '}
+              {Math.round(item.busiestShare * 100)}%
+            </td>
+            <td className="is-mono">
+              {item.replayIndex.toFixed(2)} (форс {formatPercent(item.forcedShare, 0)})
+            </td>
+            <td className="is-mono">{rewardText(item, coins)}</td>
             <td className="adm-muted">
               {causesText(item.causes, item.samples)}
               {item.capped > 0 ? `, потолок ${item.capped}` : ''}
@@ -679,17 +847,39 @@ const CAUSE_NAME: Record<string, string> = {
 };
 
 /**
- * Что даёт право бить через линию: та же доска, тот же бот, разница в ходах и
+ * Что даёт проверяемое правило: та же доска, тот же бот, разница в ходах и
  * снятых фигурах. Без сравнения правило невозможно ни подтвердить, ни отменить.
  */
-function strikeGainText(row: RaceMeasure): string {
-  const base = row.noStrike;
-  if (!base) return 'нет сравнения';
+/** Разница с базовым правилом со знаком и числом: «плюс» без цифры ничего не значит. */
+function delta(value: number, digits = 1): string {
+  const text = value.toFixed(digits);
+  return value > 0 ? `+${text}` : text;
+}
+
+function compareGainText(row: RaceMeasure, isBase = false): string {
+  const base = row.comparison;
+  if (!base) return isBase ? 'это база сравнения' : 'нет сравнения';
   const doom = row.doomMedian - base.doomMedian;
   const length = row.lengthMedian - base.lengthMedian;
-  const takes = +(row.capturesAvg - base.capturesAvg).toFixed(1);
-  const sign = (value: number): string => (value > 0 ? `+${value}` : `${value}`);
-  return `доом ${sign(doom)}, партия ${sign(length)}, взятий ${sign(takes)}`;
+  const takes = row.capturesAvg - base.capturesAvg;
+  const replay = (row.replayIndex - base.replayIndex) * 100;
+  return `доом ${delta(doom, 0)}, партия ${delta(length, 0)}, взятий ${delta(takes)}, реиграб. ${delta(replay)}`;
+}
+
+/**
+ * Проекция награды. Движок платит за пережитые ходы и только за проигранный
+ * забег (`raceCoinReward`), взятие пока бесплатно. Колонка отвечает на вопрос
+ * «сколько было бы, если платить за фигуру»: медиану, а не среднее - редкие
+ * длинные партии тянут средний вверх, а платить приходится за обычный забег.
+ * Выпад идёт за половину взятия: фигура та же, но король не ушёл с клетки.
+ */
+function rewardText(row: RaceMeasure, coins: number): string {
+  // Платёж начисляется за проигранный забег. Если половина партий упёрлась в
+  // потолок прогона, игрок не проигрывает - и награды нет, как бы ни рос счёт.
+  if (row.samples > 0 && row.capped / row.samples > 0.5) return '0: забег не проигран';
+  const now = raceCoinReward(Math.round(row.lengthAvg));
+  const takes = row.capturesMedian * coins + Math.round(row.strikesAvg * Math.floor(coins / 2));
+  return `${now} → ${now + Math.round(takes)}`;
 }
 
 function causesText(causes: Record<string, number>, total?: number): string {
@@ -702,11 +892,41 @@ function causesText(causes: Record<string, number>, total?: number): string {
     .join(', ');
 }
 
+/** Средняя цифра по строкам: выводы пишутся по всему прогону, а не по одной строке. */
+function mean(rows: RaceMeasure[], pick: (row: RaceMeasure) => number): number {
+  return rows.length ? rows.reduce((sum, row) => sum + pick(row), 0) / rows.length : 0;
+}
+
+/** Медианы взятий и выпадов -> сколько монет добавила бы плата за фигуру. */
+function rewardLine(rows: RaceMeasure[], coins: number): string {
+  const runs = Math.max(1, rows.reduce((sum, row) => sum + row.samples, 0));
+  const stuck = rows.reduce((sum, row) => sum + row.capped, 0) / runs;
+  if (stuck > 0.5) {
+    const share = Math.round(stuck * 100);
+    return (
+      `Награда не начисляется: ${share}% ${declension(share, ['забегов', 'забегов', 'забегов'])} не кончились проигрышем, а платёж привязан к концу партии. ` +
+      'Пока забег можно не проигрывать, платить за взятие бессмысленно: деньги начнут капать из ожидания.'
+    );
+  }
+  const now = Math.round(mean(rows, (row) => raceCoinReward(Math.round(row.lengthAvg))));
+  const takes = mean(rows, (row) => row.capturesMedian);
+  const strikes = mean(rows, (row) => row.strikesAvg);
+  const bonus = Math.round(takes * coins + Math.round(strikes * Math.floor(coins / 2)));
+  const p90 = Math.round(mean(rows, (row) => row.capturesP90));
+  return (
+    `Медиана взятий ${takes.toFixed(1)} за забег, верхний дециль ${p90}, выпадов ${strikes.toFixed(1)}. ` +
+    (coins > 0
+      ? `При ${coins} ${declension(coins, ['монете', 'монетах', 'монетах'])} за взятие это +${bonus} к ${now} монетам за длину: награда за забег стала бы ${now + bonus} ` +
+        `(${((now + bonus) / Math.max(1, now) - 1) * 100 > 0 ? '+' : ''}${Math.round(((now + bonus) / Math.max(1, now) - 1) * 100)}% к текущему).`
+      : `При нулевой ставке платёж остаётся тем же: ${now} монет только за длину.`)
+  );
+}
+
 /**
  * Выводы из цифр гонок. Их пишет сама панель, потому что вывод «правило работает»
  * должен быть выводом из прогона, а не из того, что автор кнопки ожидал увидеть.
  */
-function raceFindings(rows: RaceMeasure[]): string[] {
+function raceFindings(rows: RaceMeasure[], coins: number): string[] {
   if (rows.length === 0) return [];
   const doom = rows.map((row) => row.doomMedian);
   const out = [
@@ -715,18 +935,20 @@ function raceFindings(rows: RaceMeasure[]): string[] {
       .join(', ')}. Разница между соседними строками меньше разброса по зёрнам - читать её как «стало сложнее» нельзя.`,
   ];
 
-  const compared = rows.filter((row) => row.noStrike);
+  const compared = rows.filter((row) => row.comparison);
   if (compared.length > 0) {
-    const avg = (pick: (row: RaceMeasure) => number) =>
-      compared.reduce((sum, row) => sum + pick(row), 0) / compared.length;
-    const gain = avg((row) => row.doomMedian - row.noStrike!.doomMedian);
-    const captures = avg((row) => row.capturesAvg - row.noStrike!.capturesAvg);
-    const length = avg((row) => row.lengthMedian - row.noStrike!.lengthMedian);
+    const avg = (pick: (row: RaceMeasure) => number) => mean(compared, pick);
+    const gain = avg((row) => row.doomMedian - row.comparison!.doomMedian);
+    const captures = avg((row) => row.capturesAvg - row.comparison!.capturesAvg);
+    const length = avg((row) => row.lengthMedian - row.comparison!.lengthMedian);
+    const replay = avg((row) => row.replayIndex - row.comparison!.replayIndex);
     const worse = gain < 0 || captures < 0;
     out.push(
       `Выпад через линию: ${sign(gain)} ${Math.abs(gain).toFixed(1)} хода до нерешаемой позиции, ${sign(
         captures,
-      )} ${Math.abs(captures).toFixed(1)} взятия за забег, длина партии ${sign(length)} ${Math.abs(length).toFixed(1)} хода. ` +
+      )} ${Math.abs(captures).toFixed(1)} взятия за забег, длина партии ${sign(length)} ${Math.abs(
+        length,
+      ).toFixed(1)} хода, реиграбельность ${sign(replay)} ${(Math.abs(replay) * 100).toFixed(1)} пункта. ` +
         (worse
           ? 'Правило хуже базового - его надо убирать, а не докручивать.'
           : 'Правило чистит полосу, а не дарит лишнюю жизнь: при той же длине партии взятий заметно больше.'),
@@ -735,10 +957,13 @@ function raceFindings(rows: RaceMeasure[]): string[] {
     out.push('Сравнения с полем без выпада нет: колонка пустая, и судить о правилу не по чему.');
   }
 
-  const width = rows.reduce((sum, row) => sum + row.widthEnd, 0) / rows.length;
+  const width = mean(rows, (row) => row.widthEnd);
   out.push(
     `Поле дорастает в среднем до ${width.toFixed(1)} колонки из ${RACE_WIDTH} при стартовых ${RACE_MIN_WIDTH}: рост поля успевает случиться внутри одного забега.`,
   );
+
+  out.push(replayLine(rows));
+  out.push(rewardLine(rows, coins));
 
   const causes: Record<string, number> = {};
   let total = 0;
@@ -770,6 +995,103 @@ function raceFindings(rows: RaceMeasure[]): string[] {
     );
   }
   return out;
+}
+
+/**
+ * Выводы вкладки «Темп фигур»: сравниваются три правила на одних зёрнах. Читаем
+ * не длину партии (она зависит от потолка прогона), а напряжение: доля ходов без
+ * альтернативы, доля безопасных, разброс длины и то, платится ли награда.
+ */
+function tempoFindings(rows: RaceMeasure[], coins: number): string[] {
+  if (rows.length === 0) return [];
+  const byMode = new Map<ModeId, RaceMeasure[]>();
+  for (const row of rows) {
+    byMode.set(row.mode, [...(byMode.get(row.mode) ?? []), row]);
+  }
+  const base = byMode.get('race') ?? [];
+  const lines: string[] = [];
+  if (base.length === 0) {
+    lines.push('Боевого правила в прогоне нет: сравнивать не с чем, цифры ниже - просто описание каждого темпа.');
+  }
+
+  for (const mode of TEMPO_MODES) {
+    const group = byMode.get(mode) ?? [];
+    if (group.length === 0) continue;
+    const capped = group.reduce((sum, row) => sum + row.capped, 0);
+    const runs = group.reduce((sum, row) => sum + row.samples, 0);
+    const doomShare = mean(group, (row) => row.doomShare);
+    lines.push(
+      `${modeDef(mode).name}: ${mean(group, (row) => row.moversAvg).toFixed(2)} фигур за такт, ` +
+        `партия ${mean(group, (row) => row.lengthAvg).toFixed(0)} ходов, ` +
+        `до нерешаемой доходят в ${formatPercent(doomShare, 0)} забегов, ` +
+        `выбор ${mean(group, (row) => row.choiceAvg).toFixed(2)} хода при ${formatPercent(
+          mean(group, (row) => row.safeShare),
+          0,
+        )} безопасных, ` +
+        `реиграбельность ${mean(group, (row) => row.replayIndex).toFixed(2)}, ` +
+        `взятий ${mean(group, (row) => row.capturesAvg).toFixed(1)}, ` +
+        `бегает чаще всех ${PIECE_NAME[group[0]!.busiestType] ?? group[0]!.busiestType} (${Math.round(
+          mean(group, (row) => row.busiestShare) * 100,
+        )}% сдвигов)` +
+        (capped > 0 ? `, а ${capped} из ${runs} ${declension(capped, ['забега', 'забегов', 'забегов'])} упёрлись в потолок ${RACE_CAP} ходов - партия не кончается вовсе` : '') +
+        '.',
+    );
+  }
+
+  if (base.length > 0) {
+    for (const mode of TEMPO_MODES) {
+      if (mode === 'race') continue;
+      const group = byMode.get(mode) ?? [];
+      if (group.length === 0) continue;
+      const doom = mean(group, (row) => row.doomMedian) - mean(base, (row) => row.doomMedian);
+      const safe = mean(group, (row) => row.safeShare) - mean(base, (row) => row.safeShare);
+      const replay = mean(group, (row) => row.replayIndex) - mean(base, (row) => row.replayIndex);
+      const takes = mean(group, (row) => row.capturesAvg) - mean(base, (row) => row.capturesAvg);
+      const neverDies = mean(group, (row) => row.doomShare) < 0.05;
+      lines.push(
+        `${modeDef(mode).name} против общего темпа: ${sign(doom)} ${Math.abs(doom).toFixed(0)} хода до нерешаемой, ` +
+        `${sign(safe * 100)} ${(Math.abs(safe) * 100).toFixed(0)} п.п. безопасных ходов, ` +
+        `${sign(takes)} ${Math.abs(takes).toFixed(1)} взятия, реиграбельность ${sign(replay)} ${(Math.abs(replay) * 100).toFixed(1)} пункта. ` +
+        (neverDies
+          ? 'Позиция не становится нерешаемой ни разу: королю нельзя дать мат одной фигурой в открытой полосе, поэтому конец партии наступает только от потолка прогона, а не от правил.'
+          : 'Напряжение остаётся: фигуры успевают накрыть короля раньше, чем он уйдёт.') +
+          ' Награда за медленным темпом не платится вовсе: начисление идёт за проигранный забег, а его нет.',
+      );
+    }
+    lines.push(replayLine(rows.filter((row) => row.mode === 'race')));
+    lines.push(rewardLine(rows.filter((row) => row.mode === 'race'), coins));
+    lines.push(
+      'Вывод по цифрам: темп «по одной фигуре» убирает из «Гонок» не сложность, а сам конец партии. Держать его можно только вместе с другим ограничением - два ходящих за такт, стена вместо открытой полосы или запрет сходить с поля, - иначе счёт перестаёт что-то значить.',
+    );
+  }
+  return lines;
+}
+
+/**
+ * Реиграбельность одной строкой: сравнение выбора, безопасных ходов, разброса
+ * длины и стартового разнообразия с выводом о том, что именно её держит.
+ */
+function replayLine(rows: RaceMeasure[]): string {
+  const choice = mean(rows, (row) => row.choiceAvg);
+  const safe = mean(rows, (row) => row.safeShare);
+  const forced = mean(rows, (row) => row.forcedShare);
+  const spread = mean(rows, (row) => row.lengthSpread);
+  const variety = mean(rows, (row) => row.startVariety);
+  const index = mean(rows, (row) => row.replayIndex);
+  const fromStarts = variety < 0.1;
+  return (
+    `Реиграбельность ${index.toFixed(2)} из 1: на ходу ${choice.toFixed(1)} легальных хода (из них ${formatPercent(
+      safe,
+      0,
+    )} не ведут к краху), безальтернативных ходов ${formatPercent(forced, 0)}, разброс длины партии ${formatPercent(
+      spread,
+      0,
+    )} медианы, разных стартов ${formatPercent(variety, 0)}. ` +
+    (fromStarts
+      ? 'Разнообразие стартов почти нулевое: режим держится на том, как игрок читает доску, а не на том, что генератор дал другую задачу.'
+      : 'Генератор даёт разные доски, и длина партии гуляет: забеги между собой не путаются.') +
+    (forced < 0.02 ? ' Безальтернативных ходов нет - «решение» нельзя угадать по одному варианту.' : '')
+  );
 }
 
 /** Выводы замера «Парковки»: растёт ли сложность и где лестница упирается. */
@@ -973,10 +1295,18 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
   return lines.join('\n');
 }
 
-/** Текст прогона «Гонок»: длина партии до нерешаемой позиции. */
-function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }): string {
+/**
+ * Текст прогона «Гонок». Одна функция на два таба: «Гонки» дают строку на уровень,
+ * «Темп фигур» - строку на пару «уровень × правило» и сверху сводку по правилам,
+ * потому что 21 строку никто не читает с экрана, а вывод нужен по трём цифрам.
+ */
+function raceText(
+  rows: RaceMeasure[],
+  meta: { samples: number; seed: number; coins: number; modeColumn?: boolean },
+): string {
   const head = [
     'Уровень',
+    ...(meta.modeColumn ? ['Правило'] : []),
     'Старт',
     'Ширина в конце',
     'До нерешаемой (медиана)',
@@ -984,26 +1314,114 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
     'разброс',
     'Партия (медиана)',
     'Взятий',
-    'Без выпада: доом / партия / взятий',
+    meta.modeColumn ? 'Общий темп: доом / партия / взятий' : 'Без выпада: доом / партия / взятий',
+    'Выбор',
+    'Безопасных',
+    'Фигур/такт',
+    'Реиграб.',
+    'Награда',
     'Чем кончились',
   ];
   // Число берём из строк, а не из поля «досок»: заголовок обязан показывать то,
   // что реально прогналось, - на случай отмены и округлений в запросе.
   const ran = rows[0]?.samples ?? meta.samples;
+  const scope = meta.modeColumn
+    ? `три правила темпа (общий, одна фигура, по кругу) на одних зёрнах, база сравнения - боевое правило`
+    : `поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами`;
   const lines = [
-    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${ran} ${declension(ran, ['забег', 'забега', 'забегов'])} на уровень и на правило, зерно ${meta.seed}`,
+    `Прогон «Гонок»: ${scope}; по ${ran} ${declension(ran, ['забег', 'забега', 'забегов'])} на уровень и на правило, зерно ${meta.seed}, потолок длины забега ${RACE_CAP} ходов`,
     '',
     `| ${head.join(' | ')} |`,
     `| ${head.map(() => '---').join(' | ')} |`,
   ];
+  // Строка markdown-таблицы: ячейки склеивает один хелпер, иначе «|» разъезжается
+  // при первой же правке состава колонок.
+  const cells = (values: (string | number)[]): string => `| ${values.map((value) => ` ${value} `).join('|')} |`;
   for (const row of rows) {
+    const base = row.comparison;
     lines.push(
-      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${row.noStrike ? `${row.noStrike.doomMedian} / ${row.noStrike.lengthMedian} / ${row.noStrike.capturesAvg}` : 'нет сравнения'} | ${causesText(row.causes, row.samples)} |`,
+      cells([
+        row.level,
+        ...(meta.modeColumn ? [modeDef(row.mode).name] : []),
+        row.widthStart,
+        row.widthEnd.toFixed(1),
+        row.doomMedian,
+        row.doomAvg.toFixed(1),
+        `${row.doomMin}-${row.doomMax}`,
+        `${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)})${row.capped > 0 ? `, в потолок ушло ${row.capped}` : ''}`,
+        row.capturesAvg.toFixed(1),
+        base
+          ? `${base.doomMedian} / ${base.lengthMedian} / ${base.capturesAvg} - ${compareGainText(row)}`
+          : meta.modeColumn && row.mode === TEMPO_BASE
+            ? 'это база сравнения'
+            : 'нет сравнения',
+        row.choiceAvg.toFixed(2),
+        formatPercent(row.safeShare, 0),
+        `${row.moversAvg.toFixed(2)} (${PIECE_NAME[row.busiestType] ?? row.busiestType} ${Math.round(row.busiestShare * 100)}%)`,
+        `${row.replayIndex.toFixed(3)} (разброс ${formatPercent(row.lengthSpread, 0)}, старты ${formatPercent(row.startVariety, 0)}, форс ${formatPercent(row.forcedShare, 0)})`,
+        rewardText(row, meta.coins),
+        causesText(row.causes, row.samples),
+      ]),
     );
+  }
+  if (meta.modeColumn) {
+    const byMode = new Map<ModeId, RaceMeasure[]>();
+    for (const row of rows) byMode.set(row.mode, [...(byMode.get(row.mode) ?? []), row]);
+    const aggHead = [
+      'Правило',
+      'Строк',
+      'Фигур/такт',
+      'Партия, средняя',
+      'До нерешаемой',
+      'Взятий',
+      'Выпад',
+      'Выбор',
+      'Безопасных',
+      'Реиграб.',
+      'Награда сейчас',
+      'Награда при ставке',
+    ];
+    lines.push('', '### Сводка по правилам', '', `| ${aggHead.join(' | ')} |`, `| ${aggHead.map(() => '---').join(' | ')} |`);
+    for (const mode of TEMPO_MODES) {
+      const group = byMode.get(mode) ?? [];
+      if (group.length === 0) continue;
+      // Сводка по правилу: незавершённые партии не оплачиваются, и врать про
+      // «награду 50» в строке медленного темпа нельзя.
+      const runs = Math.max(1, group.reduce((sum, row) => sum + row.samples, 0));
+      const stuck = group.reduce((sum, row) => sum + row.capped, 0) / runs;
+      const reward =
+        stuck > 0.5 ? 0 : Math.round(mean(group, (row) => raceCoinReward(Math.round(row.lengthAvg))));
+      const bonus = Math.round(
+        mean(group, (row) => row.capturesMedian) * meta.coins +
+          Math.round(mean(group, (row) => row.strikesAvg) * Math.floor(meta.coins / 2)),
+      );
+      lines.push(
+        cells([
+          modeDef(mode).name,
+          group.reduce((sum, row) => sum + row.samples, 0),
+          mean(group, (row) => row.moversAvg).toFixed(2),
+          mean(group, (row) => row.lengthAvg).toFixed(0),
+          mean(group, (row) => row.doomMedian).toFixed(0),
+          mean(group, (row) => row.capturesAvg).toFixed(1),
+          mean(group, (row) => row.strikesAvg).toFixed(1),
+          mean(group, (row) => row.choiceAvg).toFixed(2),
+          formatPercent(mean(group, (row) => row.safeShare), 0),
+          mean(group, (row) => row.replayIndex).toFixed(3),
+          reward,
+          stuck > 0.5 ? '0: партия не кончается' : `${reward + bonus} (+${bonus})`,
+        ]),
+      );
+    }
   }
   lines.push('');
   lines.push(
-    '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Взятий» - сколько фигур снял бот: без взятий полоса забивается раньше. Колонка сравнения - тот же бот и те же зёрна на правиле без выпадата (`raceNoStrike`).',
+    '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Выбор» - сколько легальных ходов было у бота на ходу, «Безопасных» - доля ходов, после которых позиция ещё не проиграна и перебор ещё видит выход; 100% значит, что напряжение в правиле отсутствует. «Фигур/такт» - сколько фигур сдвигается за такт: 1.0 значит «по одной». «Реиграб.» - сводный индекс 0..1 (35% выбора, 25% безопасных ходов, 25% разброса длины, 15% разных стартов).',
+  );
+  lines.push(
+    '«Награда» - проекция: слева то, сколько платит движок сегодня (`raceCoinReward` - за пережитые ходы и только за проигранный забег), справа сколько было бы, если платить по `монет за взятие` из панели; выпад идёт за половину взятия. Колонка сравнения - тот же бот и те же зёрна на базовом правиле.',
+  );
+  lines.push(
+    'Уровень в «Гонках» не меняет поле и приток: из него берётся только зерно стартовой пробки, а сложность растёт от пережитых ходов. Поэтому строки лесенки - это разные старты одного поля, и расхождение между ними меньше разброса по зёрнам.',
   );
   return lines.join('\n');
 }

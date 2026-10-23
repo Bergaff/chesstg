@@ -128,8 +128,17 @@ export interface RaceSuiteRequest {
   levels: number[];
   samples: number;
   seed: number;
-  /** Прогнать те же зёрна без права на выпад и положить разницу в строку. */
+  /**
+   * Прогнать те же зёрна на базовом правиле (`compareMode`) и положить разницу
+   * в строку (`comparison`).
+   */
   compare?: boolean;
+  /** Какие правила меряем. По умолчанию - боевые «Гонки» одним списком. */
+  modes?: ModeId[];
+  /** С чем сравниваем: по умолчанию «Гонки без выпада». */
+  compareMode?: ModeId;
+  /** Потолок длины забега. При медленном темпе партии не кончаются вовсе. */
+  cap?: number;
 }
 
 export interface RaceSuiteHandlers {
@@ -155,17 +164,21 @@ export function runRaceSuite(request: RaceSuiteRequest, handlers: RaceSuiteHandl
 
     if (typeof Worker === 'undefined') {
       (async () => {
-        const total = request.levels.length;
-        for (let index = 0; index < total; index++) {
+        const modes = request.modes && request.modes.length > 0 ? request.modes : (['race'] as ModeId[]);
+        const jobs = request.levels.flatMap((level) => modes.map((mode) => ({ level, mode })));
+        for (let index = 0; index < jobs.length; index++) {
           if (cancelled) break;
           await new Promise((tick) => window.setTimeout(tick, 0));
           try {
-            const [row] = measureRaceLevels([request.levels[index]], {
+            const [row] = measureRaceLevels([jobs[index]!.level], {
               samples: request.samples,
               seed: request.seed,
               compare: request.compare,
+              mode: jobs[index]!.mode,
+              compareMode: request.compareMode,
+              cap: request.cap,
             });
-            handlers.onRow?.(row, index + 1, total);
+            handlers.onRow?.(row, index + 1, jobs.length);
           } catch (error) {
             reject(error instanceof Error ? error : new Error('race_measure_failed'));
             return;
@@ -210,6 +223,9 @@ export function runRaceSuite(request: RaceSuiteRequest, handlers: RaceSuiteHandl
       samples: request.samples,
       seed: request.seed,
       compare: request.compare === true,
+      modes: request.modes,
+      compareMode: request.compareMode,
+      cap: request.cap,
     });
   });
 

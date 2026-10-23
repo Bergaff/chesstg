@@ -370,7 +370,57 @@ describe('админка', () => {
     expect(screen.getByRole('button', { name: 'Прогнать гонки (7)' })).toBeTruthy();
     // Списка режимов с галочками больше нет: варианты фиксированы прогонами.
     expect(screen.queryByRole('checkbox', { name: 'Гонки на уклонение' })).toBeNull();
+
+    // «Темп фигур» - четвёртый прогон в том же окне: новой карточки он не заводит,
+    // и окно по-прежнему одно (пользователь просил не плодить секции).
+    fireEvent.click(screen.getByRole('button', { name: 'Темп фигур' }));
+    expect(screen.getByText('Гонки: за такт ходят все фигуры или по одной')).toBeTruthy();
+    expect(document.querySelectorAll('.adm-suite').length).toBe(1);
+    // Строка на пару «уровень × правило»: семь уровней по три правила.
+    expect(screen.getByRole('button', { name: /^Сравнить темп \(21\)/ })).toBeTruthy();
+    // Ставка награды за взятие живёт рядом с досками и зерном, а не в новом окне.
+    expect(screen.getByLabelText('Монет за взятие')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Диагональ' }));
+    expect(screen.queryByLabelText('Монет за взятие')).toBeNull();
   });
+
+  it('меряет темп фигур и проектирует награду за взятие', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '9' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Темп фигур' }));
+    fireEvent.change(screen.getByLabelText('Монет за взятие'), { target: { value: '3' } });
+    fireEvent.click(await screen.findByRole('button', { name: /^Сравнить темп \(3\)/ }));
+
+    const text = await screen.findByText(/^Отчёт лаборатории: Гонки: за такт/, undefined, { timeout: 120_000 });
+    // Правило стало строкой таблицы: без колонки «Правило» три темпа слиплись бы.
+    expect(text.textContent).toContain('| Уровень | Правило |');
+    for (const name of ['Гонки', 'Гонки: одна фигура за такт', 'Гонки: фигуры по кругу']) {
+      expect(text.textContent).toContain(name);
+    }
+    // Потолок длины прогона печатается в шапке: медленный темп партии не кончает,
+    // и цифра «240 хода» без потолка выглядела бы как длина партии.
+    expect(text.textContent).toContain('потолок длины забега 240 ходов');
+    expect(text.textContent).toContain('Сводка по правилам');
+    // Проекция награды: ставка 3 монеты за взятие обязана дать стрелку «было → стало».
+    expect(text.textContent).toMatch(/\d+ → \d+/);
+    const items = screen.getAllByRole('listitem');
+    expect(items.some((item) => /фигур за такт/.test(item.textContent ?? ''))).toBe(true);
+    expect(
+      items.some((item) => /потолок \d+ ходов|потолок длины/.test(item.textContent ?? '')),
+    ).toBe(true);
+    await waitFor(
+      () => {
+        const stuck = screen.queryAllByText(/считаем/);
+        if (stuck.length > 0) throw new Error(`полоса прогресса не ушла: ${stuck.map((node) => node.textContent).join(' / ')}`);
+      },
+      { timeout: 30_000 },
+    );
+  }, 180_000);
 
   it('сравнивает диагональ и отдаёт текст одним блоком', async () => {
     await mount();
@@ -421,7 +471,13 @@ describe('админка', () => {
     expect(text.textContent).toContain('Длина решаемой партии от уровня не зависит');
     expect(text.textContent).toContain('Выпад через линию');
     expect(text.textContent).toContain('Исходы 1000 забегов');
-    await waitFor(() => expect(screen.queryByText(/считаем/)).toBeNull(), { timeout: 30_000 });
+    await waitFor(
+      () => {
+        const stuck = screen.queryAllByText(/считаем/);
+        if (stuck.length > 0) throw new Error(`полоса прогресса не ушла: ${stuck.map((node) => node.textContent).join(' / ')}`);
+      },
+      { timeout: 30_000 },
+    );
   }, 180_000);
 
   it('меряет боевую «Парковку» длиной плана решателя', async () => {

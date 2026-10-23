@@ -11,6 +11,8 @@ export type LabMode =
   | 'jamExit4'
   | 'raceDodge'
   | 'raceNoStrike'
+  | 'raceTempoOne'
+  | 'raceTempoCycle'
   | 'campaignFreeDiag'
   | 'campaignStrictDiag'
   | 'jamStrictDiag';

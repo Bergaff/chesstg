@@ -123,6 +123,8 @@ export function isDoomed(state: GameState, depth = 3): boolean {
 /** Замер «Гонок»: сколько ходов партия остаётся решаемой. */
 export interface RaceMeasure {
   level: number;
+  /** Какое правило прогонялось: панель сравнивает строки по нему. */
+  mode: ModeId;
   samples: number;
   /** Ширина поля на старте и средняя в конце забега: поле растёт вширь. */
   widthStart: number;
@@ -141,13 +143,47 @@ export interface RaceMeasure {
   capped: number;
   /** Взятия за забег: без них полоса забивается за десять ходов. */
   capturesAvg: number;
+  /** Медиана и верхний дециль взятий: на них считается награда за фигуру. */
+  capturesMedian: number;
+  capturesP90: number;
+  /** Выпады через линию за забег: за них награда тоже должна считаться. */
+  strikesAvg: number;
+  /**
+   * Реиграбельность. Смысл один: забег не должен быть той же партией, что и
+   * предыдущий. `choiceAvg` - сколько легальных ходов было у игрока на ходу,
+   * `safeShare` - какая доля этих ходов не вела к краху, `forcedShare` - доля
+   * ходов, где альтернативы не было вовсе.
+   */
+  choiceAvg: number;
+  safeShare: number;
+  forcedShare: number;
+  /** Сколько фигур сдвигается за такт: 1 = темп «по одной», 3+ = общий темп. */
+  moversAvg: number;
+  /** Доля сдвигов самого активного типа фигур: 1 = за игроком бегает только она. */
+  busiestShare: number;
+  /** Какой тип сдвигался чаще всего. */
+  busiestType: string;
+  /** Доля забегов, стартовавших на разной доске. */
+  startVariety: number;
+  /** Разброс длины партии: (p90 - p10) / медиана. */
+  lengthSpread: number;
+  /** Итоговый индекс реиграбельности 0..1: 1 = забеги не похожи друг на друга. */
+  replayIndex: number;
   /** Чем кончились забеги: поимка, тупик, потолок. */
   causes: Record<string, number>;
   /**
-   * Те же зёрна без права на выпад (`raceNoStrike`): по разнице видно, что даёт
-   * правило. Появляется только при `compare: true`.
+   * Прогон тех же зёрен на базовом правиле (`compareMode`: по умолчанию «Гонки
+   * без выпада»). По разнице видно, что даёт проверяемое правило. Появляется
+   * только при `compare: true`.
    */
-  noStrike?: { doomMedian: number; lengthMedian: number; capturesAvg: number; samples: number };
+  comparison?: {
+    mode: ModeId;
+    doomMedian: number;
+    lengthMedian: number;
+    capturesAvg: number;
+    replayIndex: number;
+    samples: number;
+  };
 }
 
 export interface RaceMeasureOptions {
@@ -156,11 +192,15 @@ export interface RaceMeasureOptions {
   cap?: number;
   depth?: number;
   /**
-   * Прогнать те же зёрна без права на выпад и положить сравнение в строку.
+   * Прогнать те же зёрна на базовом правиле и положить сравнение в строку.
    * Дорого вдвое, поэтому включается только по запросу панели: иначе таблица
    * «Гонок» меряла бы то же самое дважды на каждом прогоне.
    */
   compare?: boolean;
+  /** Какое правило меряем. По умолчанию боевые «Гонки». */
+  mode?: ModeId;
+  /** С чем сравниваем при `compare`. По умолчанию «Гонки без выпада». */
+  compareMode?: ModeId;
 }
 
 /** Один забег жадным ботом: ровно то, что потом уходит в сводку по уровню. */
@@ -172,23 +212,92 @@ interface RaceSampleRun {
   doomedAt: number;
   cause: string;
   capped: boolean;
+  /** Выпады через линию: взятия без перемещения, считаются отдельно. */
+  strikes: number;
+  /** Сумма чисел легальных ходов по всем ходам партии. */
+  choices: number;
+  /** Ходы, после которых позиция ещё не проиграна и ещё не нерешаема. */
+  safe: number;
+  /** Ходы с единственным легальным ходом. */
+  forced: number;
+  /** Сколько сдвигов фигур дал этот забег. */
+  movers: number;
+  /** Доля сдвигов самого активного типа фигур в этом забеге и сам тип. */
+  busiestShare: number;
+  busiestType: string;
+  /** Подпись стартовой доски: по ней видно, что забег начался с другой позиции. */
+  signature: string;
 }
 
 /**
  * Забег жадным ботом. `mode` позволяет прогнать те же доски на варианте правил:
  * генератор у «Гонок» один, отличается только конфиг, поэтому сравнение честное.
  */
+/** Позиции фигур одной строкой: по ней сравниваем, кто сдвинулся за такт. */
+function enemyPositions(state: GameState): Map<string, string> {
+  const positions = new Map<string, string>();
+  for (const enemy of state.enemies) positions.set(enemy.id, `${enemy.x},${enemy.y}`);
+  return positions;
+}
+
+function boardSignature(state: GameState): string {
+  const pieces = [...enemyPositions(state)]
+    .map(([id, at]) => `${id}@${at}`)
+    .concat([`king@${state.player.x},${state.player.y}`])
+    .join('|');
+  return `${state.width}x${state.height}:${pieces}`;
+}
+
 function playRaceSample(level: number, seed: number, mode: ModeId, cap: number, depth: number): RaceSampleRun {
   let state = createRaceLevel(level, seed);
   if (mode !== state.mode) state = { ...state, mode };
+  const signature = boardSignature(state);
   let doomedAt = -1;
+  let strikes = 0;
+  let choices = 0;
+  let safe = 0;
+  let forced = 0;
+  let moves = 0;
+  let movers = 0;
+  // Активность считаем по типам, а не по идентификаторам фигур: в «Гонках» id
+  // живут до выхода с поля, и по id вышло бы, что «самая активная фигура» делает
+  // один ход из ста.
+  const activity = new Map<string, number>();
   while (state.status === 'playing' && state.moves < cap) {
-    if (doomedAt < 0 && isDoomed(state, depth)) doomedAt = state.moves;
+    const doomedNow = isDoomed(state, depth);
+    if (doomedAt < 0 && doomedNow) doomedAt = state.moves;
+    // «Осмысленный» ход: после него партия жива и перебор ещё видит выход. Проверка
+    // съезжает на следующий виток: `isDoomed` - самый дорогой вызов прогона, и
+    // второй вызов на тот же такт удвоил бы цену всей таблицы ради одной цифры.
+    if (moves > 0 && !doomedNow) safe += 1;
+    const options = legalMoves(state);
+    choices += options.length;
+    if (options.length === 1) forced += 1;
+    const before = enemyPositions(state);
+    const types = new Map(state.enemies.map((enemy) => [enemy.id, enemy.type]));
     const next = bestSurvivalMove(state) ?? playFirstMove(state);
     if (!next) break;
     state = next;
+    moves += 1;
+    if (state.lastEvent === 'strike') strikes += 1;
+    // Кто сдвинулся за такт. Новых фигур (приток) не считаем: они не ходили.
+    for (const [id, at] of enemyPositions(state)) {
+      if (!before.has(id)) continue;
+      if (before.get(id) === at) continue;
+      movers += 1;
+      const type = types.get(id) ?? '?';
+      activity.set(type, (activity.get(type) ?? 0) + 1);
+    }
   }
   const finished = state.status !== 'playing';
+  let busiest = 0;
+  let busiestType = 'нет';
+  for (const [type, value] of activity) {
+    if (value > busiest) {
+      busiest = value;
+      busiestType = type;
+    }
+  }
   return {
     moves: state.moves,
     width: state.width,
@@ -196,6 +305,14 @@ function playRaceSample(level: number, seed: number, mode: ModeId, cap: number, 
     doomedAt,
     cause: !finished ? 'capped' : (state.lastEvent ?? state.status),
     capped: !finished,
+    strikes,
+    choices,
+    safe,
+    forced,
+    movers,
+    busiestShare: movers > 0 ? busiest / movers : 0,
+    busiestType,
+    signature,
   };
 }
 
@@ -203,6 +320,18 @@ function playRaceSample(level: number, seed: number, mode: ModeId, cap: number, 
 interface RaceSummary {
   samples: number;
   widthEnd: number;
+  capturesMedian: number;
+  capturesP90: number;
+  strikesAvg: number;
+  choiceAvg: number;
+  safeShare: number;
+  forcedShare: number;
+  moversAvg: number;
+  busiestShare: number;
+  busiestType: string;
+  startVariety: number;
+  lengthSpread: number;
+  replayIndex: number;
   doomAvg: number;
   doomMedian: number;
   doomMin: number;
@@ -222,16 +351,52 @@ function raceSummary(runs: RaceSampleRun[]): RaceSummary {
   const sortedLength = [...lengths].sort((a, b) => a - b);
   const causes: Record<string, number> = {};
   const average = (values: number[]): number => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+  const capturesSorted = [...runs.map((run) => run.captures)].sort((a, b) => a - b);
+  const at = (sorted: number[], quantile: number): number =>
+    sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * quantile))] : 0;
   let widthEnd = 0;
   let captures = 0;
   let capped = 0;
+  let strikes = 0;
+  let choices = 0;
+  let safe = 0;
+  let forced = 0;
+  let moves = 0;
+  let movers = 0;
+  let busiestShare = 0;
+  const byType = new Map<string, number>();
   for (const run of runs) {
     widthEnd += run.width;
     captures += run.captures;
+    strikes += run.strikes;
+    choices += run.choices;
+    safe += run.safe;
+    forced += run.forced;
+    moves += run.moves;
+    movers += run.movers;
+    busiestShare += run.busiestShare;
+    byType.set(run.busiestType, (byType.get(run.busiestType) ?? 0) + 1);
     if (run.capped) capped += 1;
     causes[run.cause] = (causes[run.cause] ?? 0) + 1;
   }
   const samples = runs.length || 1;
+  const startVariety = runs.length ? new Set(runs.map((run) => run.signature)).size / samples : 0;
+  const choiceAvg = moves > 0 ? choices / moves : 0;
+  const safeShare = moves > 0 ? safe / moves : 0;
+  const forcedShare = moves > 0 ? forced / moves : 0;
+  const lengthMedian = sortedLength[Math.floor(sortedLength.length / 2)];
+  // Разброс длины normalized медианой: 0.5 значит «верхний дециль выше нижнего
+  // на половину партии». Без нормировки цифра росла бы просто с длиной поля.
+  const lengthSpread = lengthMedian > 0 ? (at(sortedLength, 0.9) - at(sortedLength, 0.1)) / lengthMedian : 0;
+  // Индекс реиграбельности: четыре слагаемых, каждое утоплено в 0..1. Выбор
+  // ценим выше всего - без него остальное не имеет значения; разнообразие
+  // стартов весит меньше всех, потому что оно свойство генератора, а не правила.
+  const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+  const replayIndex =
+    0.35 * clamp01(choiceAvg / 3) +
+    0.25 * clamp01(safeShare / 0.7) +
+    0.25 * clamp01(lengthSpread / 0.5) +
+    0.15 * clamp01(startVariety);
   return {
     samples: runs.length,
     widthEnd: widthEnd / samples,
@@ -246,6 +411,19 @@ function raceSummary(runs: RaceSampleRun[]): RaceSummary {
     lengthMedian: sortedLength[Math.floor(sortedLength.length / 2)],
     capped,
     capturesAvg: captures / samples,
+    capturesMedian: at(capturesSorted, 0.5),
+    capturesP90: at(capturesSorted, 0.9),
+    strikesAvg: strikes / samples,
+    choiceAvg,
+    safeShare,
+    forcedShare,
+    moversAvg: moves > 0 ? movers / moves : 0,
+    busiestShare: runs.length ? busiestShare / runs.length : 0,
+    busiestType:
+      [...byType].reduce((best, entry) => (entry[1] > best[1] ? entry : best), ['нет', 0])[0],
+    startVariety,
+    lengthSpread,
+    replayIndex,
     causes,
   };
 }
@@ -265,6 +443,8 @@ export function measureRaceLevels(
   const samples = Math.max(1, Math.min(2_000, options.samples ?? 24));
   const cap = Math.max(8, options.cap ?? 240);
   const depth = Math.max(1, options.depth ?? 3);
+  const mode = options.mode ?? ('race' as ModeId);
+  const compareMode = options.compareMode ?? ('raceNoStrike' as ModeId);
   const play = (level: number, mode: ModeId): RaceSampleRun[] => {
     const runs: RaceSampleRun[] = [];
     for (let i = 0; i < samples; i += 1) {
@@ -275,14 +455,18 @@ export function measureRaceLevels(
   };
 
   return levels.map((level) => {
-    const summary = raceSummary(play(level, 'race'));
-    const row: RaceMeasure = { level, widthStart: RACE_MIN_WIDTH, ...summary };
-    if (options.compare) {
-      const baseline = raceSummary(play(level, 'raceNoStrike'));
-      row.noStrike = {
+    const summary = raceSummary(play(level, mode));
+    const row: RaceMeasure = { level, mode, widthStart: RACE_MIN_WIDTH, ...summary };
+    // Правило не сравнивает само себя: второй прогон тех же зёрен дал бы нули,
+    // а панель показывала бы «ровно 0» вместо «это база».
+    if (options.compare && compareMode !== mode) {
+      const baseline = raceSummary(play(level, compareMode));
+      row.comparison = {
+        mode: compareMode,
         doomMedian: baseline.doomMedian,
         lengthMedian: baseline.lengthMedian,
         capturesAvg: +baseline.capturesAvg.toFixed(1),
+        replayIndex: +baseline.replayIndex.toFixed(3),
         samples: baseline.samples,
       };
     }

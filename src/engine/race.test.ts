@@ -87,6 +87,124 @@ function open(state: Partial<GameState> & { player: GameState['player'] }): Game
   } as GameState;
 }
 
+describe('Гонки: темп ответа фигур', () => {
+  /**
+   * Ладья стоит на колонке короля и доезжает до него за такт, конь_far стоит в
+   * углу и догонять не может: на этой паре видно, кто именно сдвинулся за такт.
+   */
+  const pair = (mode: string, moves = 0) =>
+    open({
+      mode,
+      moves,
+      player: { x: 3, y: 1 },
+      enemies: [
+        { id: 'e0', type: 'rook', x: 3, y: 5 },
+        { id: 'e1', type: 'knight', x: 0, y: 7 },
+      ],
+    } as Partial<GameState> & { player: GameState['player'] });
+
+  const at = (state: GameState, id: string) => {
+    const enemy = state.enemies.find((e) => e.id === id);
+    return enemy ? `${enemy.x},${enemy.y}` : 'нет на поле';
+  };
+
+  it('все сразу и по одной - разные правила, а не разный генератор', () => {
+    expect(rulesFor('race').enemyTempo).toBe('all');
+    expect(rulesFor('raceTempoOne')).toMatchObject({ enemyTempo: 'one', strike: RACE_STRIKE_ROWS });
+    expect(rulesFor('raceTempoCycle')).toMatchObject({ enemyTempo: 'cycle' });
+    // Variant отличается ровно флагом: те же доски, приток, полоса и рост поля.
+    for (const mode of ['raceTempoOne', 'raceTempoCycle'] as const) {
+      const rules = rulesFor(mode);
+      expect(rules).toMatchObject({
+        motion: 'greedy',
+        goal: 'survive',
+        player: 'king',
+        exitAtBottom: true,
+        kingRows: RACE_KING_ROWS,
+        slideCap: 2,
+        grow: true,
+      });
+    }
+  });
+
+  it('при one за такт сдвигается одна фигура, вторая стоит', () => {
+    const all = move(pair('race'), 1, 0);
+    const one = move(pair('raceTempoOne'), 1, 0);
+    // Ладья едет в обоих правилах: она ближайшая угроза. `slideCap: 2` - значит
+    // с (3,5) она доезжает до (3,3), а не до клетки у самого короля.
+    expect(at(all, 'e0')).toBe('3,3');
+    expect(at(one, 'e0')).toBe('3,3');
+    // Конь при общем темпе подтягивается, при `one` - нет: он не атакующий.
+    expect(at(all, 'e1')).toBe('1,5');
+    expect(at(one, 'e1')).toBe('0,7');
+    // Значит и ходов у короля в этом такту было меньше: темп меняет позицию,
+    // а не только красиво замедляет поле.
+    expect(one.enemies.length).toBe(all.enemies.length);
+  });
+
+  it('атакующей считается та фигура, что бьёт короля', () => {
+    // Король сам заходит на линию ладьи. Конь ближе по клеткам, но бьёт ладья:
+    // темп `one` обязан выбрать её, иначе «одна фигура за такт» превращается в
+    // «фигура, которая не мешает».
+    const state = open({
+      mode: 'raceTempoOne',
+      player: { x: 2, y: 1 },
+      enemies: [
+        { id: 'e0', type: 'knight', x: 1, y: 4 },
+        { id: 'e1', type: 'rook', x: 3, y: 3 },
+      ],
+    } as Partial<GameState> & { player: GameState['player'] });
+    const after = move(state, 1, 0);
+    expect(after.status).toBe('lost');
+    expect(after.capturedBy).toBe('rook');
+    expect(after.lastEvent).toBe('captured');
+    // Конь в этом такту не тронулся: двигается ровно одна фигура.
+    expect(at(after, 'e0')).toBe('1,4');
+  });
+
+  it('при cycle фигуры ходят по очереди, каждая ровно раз за два такта', () => {
+    let state = pair('raceTempoCycle');
+    state = move(state, 1, 0);
+    const first = { rook: at(state, 'e0'), knight: at(state, 'e1') };
+    state = move(state, -1, 0);
+    const second = { rook: at(state, 'e0'), knight: at(state, 'e1') };
+    // Первый такт - вторая в списке фигура, второй - первая. Ни одна не сходила
+    // дважды и ни одна не осталась в стороне за два такта.
+    expect(first.knight).not.toBe('0,7');
+    expect(first.rook).toBe('3,5');
+    expect(second.rook).not.toBe('3,5');
+    expect(second.knight).toBe(first.knight);
+  });
+
+  it('нижний ряд чистится в любом темпе: очередь ждёт, край - нет', () => {
+    // Пешечный низ: ладья у короля на колонке, вторая фигура стоит на нулевом
+    // ряду и никого не бьёт - она обязана уйти, даже когда такт не её.
+    const state = open({
+      mode: 'raceTempoOne',
+      player: { x: 3, y: 1 },
+      enemies: [
+        { id: 'e0', type: 'rook', x: 3, y: 6 },
+        { id: 'e1', type: 'rook', x: 0, y: 0 },
+      ],
+    } as Partial<GameState> & { player: GameState['player'] });
+    const after = move(state, 1, 0);
+    expect(at(after, 'e1')).toBe('нет на поле');
+    // А та, что бьёт, осталась и сходила: уход с края не отменяет угрозу.
+    expect(after.enemies.some((enemy) => enemy.id === 'e0')).toBe(true);
+  });
+
+  it('темп детерминирован: тот же журнал даёт то же состояние', () => {
+    // Ответ фигур без притока рандома обязан совпадать у клиента и сервера:
+    // выбор атакующей идёт по позиции до ходов, а не по «как получилось».
+    for (const mode of ['race', 'raceTempoOne', 'raceTempoCycle'] as const) {
+      const a = move(pair(mode), -1, 0);
+      const b = move(pair(mode), -1, 0);
+      expect(JSON.stringify(a.enemies)).toBe(JSON.stringify(b.enemies));
+      expect(a.lastEvent).toBe(b.lastEvent);
+    }
+  });
+});
+
 describe('Гонки: король против фигур сверху', () => {
   it('режим собран на короле и узком стартовом поле', () => {
     const rules = rulesFor('race');
