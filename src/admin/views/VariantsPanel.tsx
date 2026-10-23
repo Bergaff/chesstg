@@ -90,9 +90,9 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   race: {
     tab: 'Гонки',
     title: 'Гонки: сколько можно играть до нерешаемой позиции',
-    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), поля как ленты больше нет: фигура за такт делает ровно свой ход. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти. Справа то же поле без права на выпад: по разнице видно, что даёт правило.`,
+    note: `Король заперт в двух нижних рядах (${RACE_MIN_WIDTH}×${RACE_ROWS} на старте, рост вширь до ${RACE_WIDTH} колонок), поля как ленты больше нет: фигура за такт делает ровно свой ход. Жадный бот играет и на каждом ходе перебирает ответы фигур: «до нерешаемой» - номер хода, после которого от фигуры не уйти. Справа то же поле без права на выпад: по разнице видно, что даёт правило, - поэтому гонки берут половину досок на каждое правило.`,
     footnote:
-      '«Решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает, что игрок всегда умирает в позиции, где ходить было некуда. Фигура, дошедшая до нижнего ряда и не взявшая короля, сходит с поля - это замена уносившему ряду, иначе доска забивалась бы за пару десятков ходов.',
+      '«До нерешаемой доходят» - доля забегов, где перебор успевает найти позицию без хода: сто процентов означают, что конец партии читается заранее, а не приходит из-за угла. Фигура, дошедшая до нижнего ряда и не взявшая короля, сходит с поля - это замена уносившему ряду, иначе доска забивалась бы за пару десятков ходов. «Чем кончились» считается по тем же забегам, что и строка: «поимка 16 из 16» значит, что все партии этого уровня закончились поимкой.',
     run: 'Прогнать гонки',
   },
 };
@@ -482,7 +482,7 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
         'Ходов до нерешаемой',
         'Разброс',
         'Партия, ходов',
-        'Решаемых до конца',
+        'До нерешаемой доходят',
         'Взятий',
         'Что даёт выпад',
         'Чем кончились',
@@ -514,11 +514,11 @@ function RaceTable({ rows, levels, running }: { rows: RaceMeasure[]; levels: num
             <td className="is-mono">
               {item.lengthMedian} (в среднем {item.lengthAvg.toFixed(1)})
             </td>
-            <td>{formatPercent(1 - item.doomShare, 0)}</td>
+            <td>{formatPercent(item.doomShare, 0)}</td>
             <td>{item.capturesAvg.toFixed(1)}</td>
             <td className="is-mono">{strikeGainText(item)}</td>
             <td className="adm-muted">
-              {causesText(item.causes)}
+              {causesText(item.causes, item.samples)}
               {item.capped > 0 ? `, потолок ${item.capped}` : ''}
             </td>
           </tr>
@@ -570,12 +570,13 @@ function strikeGainText(row: RaceMeasure): string {
   return `доом ${sign(doom)}, партия ${sign(length)}, взятий ${sign(takes)}`;
 }
 
-function causesText(causes: Record<string, number>): string {
+function causesText(causes: Record<string, number>, total?: number): string {
   const entries = Object.entries(causes);
   if (entries.length === 0) return 'нет данных';
+  const suffix = total ? ` из ${total}` : '';
   return entries
     .sort((a, b) => b[1] - a[1])
-    .map(([cause, count]) => `${CAUSE_NAME[cause] ?? cause} ${count}`)
+    .map(([cause, count]) => `${CAUSE_NAME[cause] ?? cause} ${count}${suffix}`)
     .join(', ');
 }
 
@@ -625,15 +626,18 @@ function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }):
     'Без выпада: доом / партия / взятий',
     'Чем кончились',
   ];
+  // Число берём из строк, а не из поля «досок»: гонки считают половину запроса
+  // на каждое правило, и заголовок обязан показывать то, что реально прогналось.
+  const ran = rows[0]?.samples ?? meta.samples;
   const lines = [
-    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${meta.samples} забегов на уровень, зерно ${meta.seed}`,
+    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда, фигуры идут своими ходами; по ${ran} забегов на уровень и на правило, зерно ${meta.seed}`,
     '',
     `| ${head.join(' | ')} |`,
     `| ${head.map(() => '---').join(' | ')} |`,
   ];
   for (const row of rows) {
     lines.push(
-      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${row.noStrike ? `${row.noStrike.doomMedian} / ${row.noStrike.lengthMedian} / ${row.noStrike.capturesAvg}` : 'нет сравнения'} | ${causesText(row.causes)} |`,
+      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${row.noStrike ? `${row.noStrike.doomMedian} / ${row.noStrike.lengthMedian} / ${row.noStrike.capturesAvg}` : 'нет сравнения'} | ${causesText(row.causes, row.samples)} |`,
     );
   }
   lines.push('');

@@ -424,12 +424,19 @@ describe('админка', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Гонки' }));
     fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
+    // Сравнение двух правил делит запрос пополам, и заголовок обязан показывать
+    // то число, что реально прогналось, а не значение поля «досок».
+    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '8' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Прогнать гонки (1)' }));
 
     const text = await screen.findByText(/^Прогон «Гонок»/, undefined, { timeout: 60_000 });
     // Метрика - ходы до позиции, где перебор не оставляет ни одного спасения.
     expect(text.textContent).toContain('До нерешаемой (медиана)');
     expect(text.textContent).toContain('Чем кончились');
+    expect(text.textContent).toContain('по 4 забегов на уровень и на правило');
+    // Причины считаются по тем же забегам, что и вся строка: без знаменателя
+    // «поимка 4» читается как потерянная половина прогона.
+    expect(text.textContent).toMatch(/\d+ из 4/);
+    await waitFor(() => expect(screen.getAllByText(/из 4/).length).toBeGreaterThan(0));
   }, 90_000);
 });
