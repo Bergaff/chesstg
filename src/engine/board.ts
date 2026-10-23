@@ -326,13 +326,13 @@ export function exitStep(state: GameState, enemy: Enemy): Cell | 'escape' | null
 }
 
 /** Цель хода фигуры с учётом способа движения режима. */
-export function enemyTarget(state: GameState, enemy: Enemy): Cell | 'escape' | null {
+export function enemyTarget(state: GameState, enemy: Enemy, blockPlayerCell = false): Cell | 'escape' | null {
   const rules = rulesFor(state.mode);
   const motion = rules.motion;
   if (motion === 'static') return null;
   if (motion === 'down') return downStep(state, enemy);
   if (motion === 'exit') return exitStep(state, enemy);
-  return chooseEnemyMove(state, enemy);
+  return chooseEnemyMove(state, enemy, blockPlayerCell);
 }
 
 /**
@@ -359,9 +359,13 @@ export function attackerId(state: GameState, enemies: Enemy[] = state.enemies): 
  * Жадный ИИ: минимизируем манхэттенское расстояние до пешки.
  * Тай-брейки детерминированы, чтобы клиент и сервер считали одинаково.
  */
-export function chooseEnemyMove(state: GameState, enemy: Enemy): Cell | null {
+/**
+ * `blockPlayerCell` - ход на клетку игрока запрещён: так работает правило
+ * `noDiscoveryCapture` (вскрытое взятие не оплачивается) и щит.
+ */
+export function chooseEnemyMove(state: GameState, enemy: Enemy, blockPlayerCell = false): Cell | null {
   let moves = enemyMoves(state, enemy);
-  if (state.shield > 0) {
+  if (state.shield > 0 || blockPlayerCell) {
     moves = moves.filter((m) => !isPlayerAt(state, m.x, m.y));
   }
   if (moves.length === 0) return null;

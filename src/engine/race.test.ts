@@ -87,6 +87,83 @@ function open(state: Partial<GameState> & { player: GameState['player'] }): Game
   } as GameState;
 }
 
+describe('Гонки: вскрытое взятие запрещено', () => {
+  const at = (state: GameState, id: string) => {
+    const enemy = state.enemies.find((e) => e.id === id);
+    return enemy ? `${enemy.x},${enemy.y}` : 'нет на поле';
+  };
+
+  /**
+   * Король заходит на (2,1). Ладья стоит на той же колонке и БИЛА бы эту клетку,
+   * но её закрывает конь с (2,2) - то есть в начале ответа фигур клетка под боем
+   * быть не может. Конь своим ходом уходит с (2,2), линия вскрывается.
+   */
+  const discovery = (mode: string) =>
+    open({
+      mode,
+      player: { x: 3, y: 1 },
+      enemies: [
+        { id: 'e0', type: 'knight', x: 2, y: 2 },
+        { id: 'e1', type: 'rook', x: 2, y: 3 },
+      ],
+    } as Partial<GameState> & { player: GameState['player'] });
+
+  it('фигура, вскрывшая линию своим тактом, короля не снимает', () => {
+    const fair = move(discovery('race'), -1, 0);
+    expect(fair.status).toBe('playing');
+    expect(fair.lastEvent).not.toBe('captured');
+    // Конь ушёл с (2,2) - он свой ход сделал: из (2,2) ближе всего к (2,1) ведут
+    // (1,0) и (3,0), tie-break берёт левого. Ладья обязана была остаться в игре и
+    // продолжать наезжать, а не добивать вскрытой линией.
+    expect(at(fair, 'e0')).toBe('1,0');
+    expect(at(fair, 'e1')).toBe('2,2');
+    // Прежнее поведение на тех же фигурах: та же партия кончается смертью.
+    const old = move(discovery('raceDiscovery'), -1, 0);
+    expect(old.status).toBe('lost');
+    expect(old.capturedBy).toBe('rook');
+    expect(old.lastEvent).toBe('captured');
+  });
+
+  it('клетка, которая была под боем и до хода, бьёт как раньше', () => {
+    // Ладья на 6-й колонке того же ряда: король сам идёт к ней на линию, и это
+    // видно по подсветке `cell-risk` - правило ничего не прячет.
+    const state = open({
+      mode: 'race',
+      player: { x: 3, y: 1 },
+      enemies: [{ id: 'e0', type: 'rook', x: 6, y: 1 }],
+    } as Partial<GameState> & { player: GameState['player'] });
+    const after = move(state, 1, 0);
+    expect(after.status).toBe('lost');
+    expect(after.capturedBy).toBe('rook');
+  });
+
+  it('правило включено в бою и снято в лабораторном варианте', () => {
+    expect(rulesFor('campaign').noDiscoveryCapture).toBe(true);
+    expect(rulesFor('endless').noDiscoveryCapture).toBe(true);
+    expect(rulesFor('race').noDiscoveryCapture).toBe(true);
+    expect(rulesFor('raceDiscovery').noDiscoveryCapture).toBe(false);
+    // «Парковке» нечего вскрывать: фигуры стоят.
+    expect(rulesFor('jam').noDiscoveryCapture).toBe(false);
+    // Вариант отличается только флагом - сравнение честное.
+    expect(rulesFor('raceDiscovery')).toMatchObject({
+      enemyTempo: 'all',
+      strike: RACE_STRIKE_ROWS,
+      kingRows: RACE_KING_ROWS,
+      exitAtBottom: true,
+    });
+  });
+
+  it('темп `one` и запрет вскрытого взятия не мешают друг другу', () => {
+    // На медленном темпе атакующую выбирает attackerId по позиции до ходов:
+    // вскрытая ладья в этот список не попадает, и ходит конь.
+    const state = discovery('raceTempoOne');
+    const after = move(state, -1, 0);
+    expect(after.status).toBe('playing');
+    expect(at(after, 'e0')).toBe('1,0');
+    expect(at(after, 'e1')).toBe('2,3');
+  });
+});
+
 describe('Гонки: темп ответа фигур', () => {
   /**
    * Ладья стоит на колонке короля и доезжает до него за такт, конь_far стоит в

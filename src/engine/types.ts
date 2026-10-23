@@ -13,6 +13,7 @@ export type LabMode =
   | 'raceNoStrike'
   | 'raceTempoOne'
   | 'raceTempoCycle'
+  | 'raceDiscovery'
   | 'campaignFreeDiag'
   | 'campaignStrictDiag'
   | 'jamStrictDiag';

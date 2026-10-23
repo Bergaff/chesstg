@@ -123,9 +123,34 @@ function enemyPhase(state: GameState): void {
         ? queue[state.moves % queue.length].id
         : null;
 
+  // Вскрытое взятие запрещено (`noDiscoveryCapture`): снять игрока вправе только
+  // та фигура, которая била его клетку в начале фазы - до того, как кто-то успел
+  // сойти с линии. Список считаем один раз по позиции до ходов, иначе порядок
+  // движения фигур сам решал бы, кому «повезло» вскрыться.
+  const preAttack = rules.noDiscoveryCapture
+    ? new Set(
+        state.enemies
+          .filter((enemy) => enemyAttacksCell(state, enemy, state.player.x, state.player.y))
+          .map((enemy) => enemy.id),
+      )
+    : null;
+
   const escaped: string[] = [];
   for (const enemy of state.enemies) {
-    const target = enemyTarget(state, enemy);
+    let target = enemyTarget(state, enemy);
+    if (
+      preAttack &&
+      target &&
+      target !== 'escape' &&
+      !preAttack.has(enemy.id) &&
+      target.x === state.player.x &&
+      target.y === state.player.y
+    ) {
+      // Фигура не добивает, но продолжает наезжать: берём её лучший ход без
+      // клетки игрока. В режимах с другим движением (`down`, `exit`) запаса нет -
+      // там фигура просто стоит этот такт.
+      target = rules.motion === 'greedy' ? enemyTarget(state, enemy, true) : null;
+    }
     if (target === 'escape') {
       // В «Гонках» фигура, ушедшая за нижний край, покидает поле.
       escaped.push(enemy.id);

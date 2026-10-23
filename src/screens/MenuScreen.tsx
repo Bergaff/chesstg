@@ -72,31 +72,37 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
   }
 
   /**
-   * Одна строка на режим с уровнем: «Парковка», «Гонки». Замок не прячет row,
-   * а показывает, где он откроется: игроку видно, куда расти.
+   * Карточка режима: та же кнопка, что у кампании, а не строка в «Разделах».
+   * «Парковка» и «Гонки» - полноценные режимы со своим уровнем, рекордом и
+   * Незаконченным забегом, и прятать их ниже склада было не за что. Замок карточку
+   * не убирает: на ней видно, на каком уровне кампании режим откроется.
    */
-  function modeRow(mode: 'jam' | 'race', title: string, description: string) {
+  function modeCard(mode: 'jam' | 'race', title: string, description: string) {
     const progress = modes?.[mode];
     const run = active[mode];
     const unlocked = progress?.unlocked ?? true;
+    const best = progress?.bestMoves ?? progress?.best;
     return (
       <button
         type="button"
-        className={cn('menu-row', !unlocked && 'locked')}
+        className={cn('cta-block', 'cta-mode', !unlocked && 'locked')}
         onClick={() => onPlay(mode)}
         aria-disabled={!unlocked}
       >
-        <span className="menu-row-main">
-          <span className="menu-row-title">{title}</span>
-          <span className="menu-row-desc">
+        <span className="cta-body">
+          <span className="label">{run ? 'Незаконченная партия' : title}</span>
+          <span className="cta-title serif">{unlocked ? (run ? 'Продолжить' : 'Играть') : 'Закрыт'}</span>
+          <span className="cta-meta">
             {!unlocked
               ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
               : run
-                ? `Незаконченная партия, уровень ${run.level}, ход ${run.moves + 1}`
-                : `${description} Уровень ${progress?.level ?? 1}, пройдено ${Math.max(0, (progress?.maxLevel ?? 1) - 1)}`}
+                ? `Уровень ${run.level}, ход ${run.moves + 1}`
+                : mode === 'race'
+                  ? `${description} Уровень ${progress?.level ?? 1}${best ? `, рекорд ${best} ходов` : ', считается длина забега'}`
+                  : `${description} Уровень ${progress?.level ?? 1}, пройдено ${Math.max(0, (progress?.maxLevel ?? 1) - 1)}`}
           </span>
         </span>
-        <span className="menu-row-end">{unlocked ? '→' : 'закрыт'}</span>
+        <span className="cta-arrow" aria-hidden="true">→</span>
       </button>
     );
   }
@@ -142,6 +148,11 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         </span>
         <span className="cta-arrow" aria-hidden="true">→</span>
       </button>
+
+      <div className="mode-cards">
+        {modeCard('jam', 'Парковка', 'Пробка фигур: белых за нижний край, чёрных за верхний.')}
+        {modeCard('race', 'Гонки', 'Король в полосе против фигур сверху.')}
+      </div>
 
       <dl className="menu-stats">
         <div className="stat-row">
@@ -220,8 +231,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="menu-list">
-        {modeRow('jam', 'Парковка', 'Пробка фигур: уведите белых за нижний край, чёрных за верхний. Бить нельзя.')}
-        {modeRow('race', 'Гонки', 'Король против фигур, приходящих сверху. Считаются пережитые ходы.')}
         <button
           type="button"
           className={cn('menu-row', !profile.endlessUnlocked && 'locked')}

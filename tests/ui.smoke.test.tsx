@@ -270,6 +270,30 @@ describe('UI smoke', () => {
     expect(screen.getByText(/Откроется на 3 уровне кампании/)).toBeTruthy();
     expect(screen.getByText(/Откроется на 5 уровне кампании/)).toBeTruthy();
     expect(screen.getByText(/Уровень в «Парковке»/)).toBeTruthy();
+    // Режимы входят той же кнопкой, что кампания: заголовок-действие на карточке,
+    // а не тонкая строка в «Разделах», где её легко не заметить. Обе карточки
+    // закрыты - значит на них «Закрыт», а не пустое место.
+    expect(screen.getByText('Кампания').closest('button')?.textContent).toContain('Играть');
+    expect(screen.getAllByText('Закрыт').length).toBe(2);
+    expect(screen.getByText('Парковка').closest('button')?.className).toContain('cta-block');
+    expect(screen.getByText('Гонки').closest('button')?.className).toContain('cta-block');
+    expect(document.querySelector('.mode-cards')).not.toBeNull();
+  });
+
+  it('открытый режим зовёт в забег через карточку, а не через список', async () => {
+    profile.maxLevel = 9;
+    profile.level = 9;
+    profile.modes.campaign = { level: 9, maxLevel: 9, unlocked: true, unlockAtLevel: 1 };
+    profile.modes.race = { level: 3, maxLevel: 4, unlocked: true, unlockAtLevel: 5, bestMoves: 41 };
+    await boot();
+
+    const card = screen.getByText('Гонки').closest('button')!;
+    // В открытой карточке есть куда расти: уровень режима и рекорд забега.
+    expect(card.textContent).toContain('Играть');
+    expect(card.textContent).toContain('Уровень 3');
+    expect(card.textContent).toContain('41');
+    // Строки того же режима в «Разделах» больше нет: дубль плодит два входа.
+    expect(screen.queryByText(/Считаются пережитые ходы/)).toBeNull();
   });
 
   it('закрытый режим не запускает забег', async () => {
