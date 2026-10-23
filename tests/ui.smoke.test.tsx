@@ -363,11 +363,15 @@ describe('UI smoke', () => {
     expect(screen.getByText('Ходы 0')).toBeTruthy();
 
     const options = legalMoves(initial);
+    // Полоса: все подсвеченные клетки хода лежат в двух нижних рядах, и доска
+    // рисует её границу. Отметок поля больше нет, линия - единственная.
+    expect(options.every((move) => move.y < 2)).toBe(true);
+    expect(document.querySelectorAll('.board-bandline').length).toBe(1);
     // Клетка хода берётся по координатам, а не по подписи: подпись меняется,
     // когда ход взятие. Ряды в разметке идут сверху вниз, поэтому индекс ряда
-    // считается от верхнего края поля. Шаг берём вверх: любой другой в «Гонках»
-    // стоит ряда, и с первого ряда король уехал бы за край раньше хода.
-    const picked = options.find((move) => (move.dy ?? 1) === 1) ?? options[0];
+    // считается от верхнего края поля. Любой легальный ход теперь безопасен по
+    // краю: сдвиг ряда короля не трогает.
+    const picked = options[0];
     const target = { x: initial.player.x + picked.dx, y: initial.player.y + (picked.dy ?? 1) };
     const cells = [...grid.querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
     const cell = cells[(initial.height - 1 - target.y) * initial.width + target.x];
@@ -379,7 +383,7 @@ describe('UI smoke', () => {
     const sent = calls.filter((call) => call.url.endsWith('/save')).at(-1);
     const action = (sent?.body as { actions?: { dx?: number; dy?: number }[] } | undefined)?.actions?.[0];
     expect(action?.dx).toBe(picked.dx);
-    // Шаг вперёд в журнале пишется без dy: прежние партии от этого не разъезжаются.
+    // Шаг вверх в журнале пишется без dy: прежние партии от этого не разъезжаются.
     expect(action?.dy).toBe(picked.dy === 1 ? undefined : picked.dy);
   });
 

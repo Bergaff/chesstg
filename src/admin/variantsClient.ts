@@ -1,4 +1,12 @@
-import { analyzeVariant, measureJamLevels, type JamMeasure, type ModeId, type VariantReport } from '../engine';
+import {
+  analyzeVariant,
+  measureJamLevels,
+  measureRaceLevels,
+  type JamMeasure,
+  type ModeId,
+  type RaceMeasure,
+  type VariantReport,
+} from '../engine';
 
 export interface VariantSuiteRequest {
   modes: ModeId[];
@@ -95,6 +103,95 @@ export function runJamSuite(request: JamSuiteRequest, handlers: JamSuiteHandlers
       reject(new Error('worker_failed'));
     };
     worker.postMessage({ type: 'jam', levels: request.levels, samples: request.samples, seed: request.seed });
+  });
+
+  return {
+    done,
+    cancel: () => {
+      cancelled = true;
+      worker?.postMessage({ type: 'cancel' });
+    },
+  };
+}
+
+export interface RaceSuiteRequest {
+  levels: number[];
+  samples: number;
+  seed: number;
+}
+
+export interface RaceSuiteHandlers {
+  /** Один уровень прогнан: нерешаемая позиция найдена перебором. */
+  onRow?: (row: RaceMeasure, done: number, total: number) => void;
+}
+
+/**
+ * Прогон «Гонок» на новом правиле: для каждого уровня - сколько ходов партия
+ * остаётся решаемой. Перебор на каждый ход, поэтому в воркере: на главном
+ * потоке вкладка встала бы на минуты.
+ */
+export function runRaceSuite(request: RaceSuiteRequest, handlers: RaceSuiteHandlers = {}): VariantSuite {
+  let cancelled = false;
+  let worker: Worker | null = null;
+
+  const done = new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      worker?.terminate();
+      worker = null;
+      resolve();
+    };
+
+    if (typeof Worker === 'undefined') {
+      (async () => {
+        const total = request.levels.length;
+        for (let index = 0; index < total; index++) {
+          if (cancelled) break;
+          await new Promise((tick) => window.setTimeout(tick, 0));
+          try {
+            const [row] = measureRaceLevels([request.levels[index]], {
+              samples: request.samples,
+              seed: request.seed,
+            });
+            handlers.onRow?.(row, index + 1, total);
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('race_measure_failed'));
+            return;
+          }
+        }
+        resolve();
+      })();
+      return;
+    }
+
+    worker = new Worker(new URL('../workers/variants.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (event: MessageEvent) => {
+      const data = event.data as { type: string; row?: RaceMeasure; done?: number; total?: number; message?: string };
+      if (data.type === 'racrow' && data.row) {
+        if (cancelled) {
+          finish();
+          return;
+        }
+        handlers.onRow?.(data.row, data.done ?? 0, data.total ?? request.levels.length);
+        return;
+      }
+      if (data.type === 'racdone') {
+        finish();
+        return;
+      }
+      if (data.message === 'cancelled' || cancelled) {
+        finish();
+        return;
+      }
+      worker?.terminate();
+      worker = null;
+      reject(new Error(data.message ?? 'race_measure_failed'));
+    };
+    worker.onerror = () => {
+      worker?.terminate();
+      worker = null;
+      reject(new Error('worker_failed'));
+    };
+    worker.postMessage({ type: 'race', levels: request.levels, samples: request.samples, seed: request.seed });
   });
 
   return {

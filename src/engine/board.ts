@@ -34,11 +34,16 @@ export function isPlayerAt(state: GameState, x: number, y: number): boolean {
  * взятие по диагонали и двойной шаг с начальной позиции.
  */
 /**
- * Ходы короля («Гонки»): восемь соседних клеток. Взять фигуру можно так же, в
- * любую сторону, включая назад: это единственный способ расчистить поле, поэтому
- * квоты на взятия у режима нет.
+ * Ходы короля («Гонки»): восемь соседних клеток, но только внутри полосы
+ * `kingRows`. Взять фигуру можно так же, в любую сторону, включая назад: это
+ * единственный способ расчистить поле, поэтому квоты на взятия у режима нет.
  */
 function kingMoves(state: GameState): MoveOption[] {
+  // `kingRows` отсекает клетки вне полосы ещё до проверки занятости: подсказка,
+  // бот лаборатории и серверный разбор ходят по одному списку легальных ходов, и
+  // «нельзя выше» не должно ни у кого читаться по-своему.
+  const band = rulesFor(state.mode).kingRows;
+  const limit = band > 0 ? Math.min(band, state.height) : state.height;
   const result: MoveOption[] = [];
   for (const dx of [-1, 0, 1] as MoveDx[]) {
     for (const dy of [-1, 0, 1] as MoveDy[]) {
@@ -46,6 +51,7 @@ function kingMoves(state: GameState): MoveOption[] {
       const x = state.player.x + dx;
       const y = state.player.y + dy;
       if (!inside(state, x, y)) continue;
+      if (y >= limit) continue;
       const occupant = enemyAt(state, x, y);
       result.push(occupant ? { x, y, dx, dy, takes: occupant.type } : { x, y, dx, dy });
     }

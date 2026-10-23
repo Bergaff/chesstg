@@ -249,7 +249,7 @@ async function startRun(
 
 describe('старт забега', () => {
   it('партию прежней сборки закрывает и выдаёт новое поле', async () => {
-    // Активная строка изTime прежнего режима: «Парковка»-головоломка в забеге
+    // Активная строка из прежней сборки: «Парковка»-головоломка в забеге
     // кампании. Продолжить её нельзя, и отдавать её клиенту смысла нет.
     const probe = await startRun({ mode: 'campaign' }, null, {
       initial_state: JSON.stringify({ mode: 'jam', width: 5, height: 7, mid: 3, pieces: [], moves: 0, budget: 10, status: 'playing' }),

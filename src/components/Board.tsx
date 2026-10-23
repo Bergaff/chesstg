@@ -50,7 +50,6 @@ interface BoardProps {
    * Куда игрок хотел сходить этим ходом. Если клетка не изменилась, значит поле
    * приехало под него (конвейер), и шаг показывается импульсом.
    */
-  playerStep?: { moves: number; dx: number; dy: number } | null;
   /** Идёт ход фигур, ввод заблокирован. */
   settling?: boolean;
 }
@@ -79,7 +78,6 @@ export function Board({
   turn,
   moved = [],
   swept = [],
-  playerStep = null,
   settling = false,
 }: BoardProps): ReactNode {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -149,15 +147,6 @@ export function Board({
     playerBefore !== null && (playerBefore.x !== state.player.x || playerBefore.y !== state.player.y)
       ? playerBefore
       : null;
-  // Конвейер: игрок сходил вперёд, поле приехало на ряд ближе, король вернулся на
-  // свою клетку. Без импульса такой ход выглядит бездействием.
-  const playerPulse =
-    flow &&
-    playerStep !== null &&
-    playerStep.moves === state.moves &&
-    playerBefore !== null &&
-    playerBefore.x === state.player.x &&
-    playerBefore.y === state.player.y;
 
   return (
     <div className="board-measure" ref={wrapRef}>
@@ -275,25 +264,15 @@ export function Board({
                   )}
                   {isPlayer && (
                     <span
-                      key={`player-${x}-${y}-${playerPulse ? state.moves : 0}`}
-                      className={cn(
-                        'piece player-piece',
-                        `skin-${skin}`,
-                        playerSlide && 'player-slide',
-                        playerPulse && 'player-pulse',
-                      )}
+                      key={`player-${x}-${y}`}
+                      className={cn('piece player-piece', `skin-${skin}`, playerSlide && 'player-slide')}
                       style={
-                        playerPulse
+                        playerSlide
                           ? ({
-                              '--to-x': `${(playerStep?.dx ?? 0) * (cell + gap)}px`,
-                              '--to-y': `${-(playerStep?.dy ?? 0) * (cell + gap)}px`,
+                              '--from-x': `${(playerSlide.x - state.player.x) * (cell + gap)}px`,
+                              '--from-y': `${(playerSlide.y - state.player.y) * (cell + gap)}px`,
                             } as CSSProperties)
-                          : playerSlide
-                            ? ({
-                                '--from-x': `${(playerSlide.x - state.player.x) * (cell + gap)}px`,
-                                '--from-y': `${(playerSlide.y - state.player.y) * (cell + gap)}px`,
-                              } as CSSProperties)
-                            : undefined
+                          : undefined
                       }
                     >
                       <span className="player-mark">
@@ -310,6 +289,18 @@ export function Board({
               );
             }),
           )}
+          {/* Граница полосы игрока: за неё король не выходит. Линия именно
+              правило, а не декор, поэтому она тонкая, красная и пунктирная. */}
+          {rules.kingRows > 0 && cell > 0 && viewport.from < rules.kingRows ? (
+            <div
+              className="board-bandline"
+              aria-hidden="true"
+              style={{
+                bottom:
+                  (rules.kingRows - viewport.from) * cell + (rules.kingRows - 1 - viewport.from) * gap,
+              }}
+            />
+          ) : null}
         </div>
           {flow && swept.length > 0 && (
             <div className="board-ghosts" aria-hidden="true">

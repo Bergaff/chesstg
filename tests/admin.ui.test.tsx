@@ -347,32 +347,33 @@ describe('админка', () => {
     expect(await screen.findByText('Лаборатория расстановок')).toBeTruthy();
     expect(screen.getByText('Запустить разбор')).toBeTruthy();
     expect(screen.getByText('Сохранённые отчёты')).toBeTruthy();
-    // Прогон вариантов это часть лаборатории: выбор режимов, кнопка и текст для копирования.
-    expect(screen.getByText('Прогон сравнений')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Сравнить (7)' })).toBeTruthy();
-    expect(screen.getByText('«Парковка» и уход фигур')).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: 'Гонки на уклонение' })).toBeTruthy();
+    // Прогоны это часть лаборатории: три карточки, по одной на каждый режим.
+    expect(screen.getByText('Прогоны: кампания, парковка, гонки')).toBeTruthy();
+    expect(screen.getByText('Кампания: диагональ только бить или свободно')).toBeTruthy();
+    expect(screen.getByText('Парковка: сложность и реиграбельность')).toBeTruthy();
+    expect(screen.getByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Сравнить диагональ' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Замерить генератор (7)' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Прогнать гонки (7)' })).toBeTruthy();
+    // Списка режимов с галочками больше нет: варианты фиксированы прогонами.
+    expect(screen.queryByRole('checkbox', { name: 'Гонки на уклонение' })).toBeNull();
   });
 
-  it('считает отмеченные варианты и отдаёт текст одним блоком', async () => {
+  it('сравнивает диагональ и отдаёт текст одним блоком', async () => {
     await mount();
     fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
-    // Оставляем одну группу, чтобы прогон оставался быстрым: базовая «Парковка»
-    // и три её варианта.
-    fireEvent.click(screen.getByRole('button', { name: 'Снять все' }));
-    expect(screen.getByRole('button', { name: 'Сравнить (0)' }).hasAttribute('disabled')).toBe(true);
-    fireEvent.click(screen.getByRole('checkbox', { name: '«Парковка» и уход фигур' }));
-    expect(screen.getByRole('button', { name: 'Сравнить (4)' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Сравнить (4)' }));
+    // Минимум досок: прогон обязан закончиться внутри теста.
+    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Сравнить диагональ' }));
 
-    expect(await screen.findByText(/^Готово: 4 из 4 вариантов/)).toBeTruthy();
-    const text = await screen.findByText(/^Прогон сравнений, уровень/);
+    const text = await screen.findByText(/^Кампания: диагональ свободно или только бить/, undefined, { timeout: 30_000 });
     expect(text.textContent).toContain('| Режим | Поле | С решением |');
-    expect(text.textContent).toContain('Парковка + уход вбок');
-    expect(text.textContent).toContain('Индекс реиграбельности');
-  });
+    expect(text.textContent).toContain('Кампания, диагональ свободна');
+    expect(text.textContent).toContain('Кампания, диагональ только для взятия');
+    await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
+  }, 60_000);
 
   it('меряет боевую «Парковку» длиной плана решателя', async () => {
     await mount();
@@ -380,18 +381,40 @@ describe('админка', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
 
-    // У боевого режима своя метрика: не доля побед, а длина плана и запас бюджета.
-    expect(screen.getByText('Уровни «Парковки»')).toBeTruthy();
+    // У боевого режима своя метрика: не доля побед, а длина плана, развилки и
+    // разнообразие расстановок.
+    expect(screen.getByLabelText('Уровни для «Парковки» и «Гонок»')).toBeTruthy();
     expect(screen.getByRole('columnheader', { name: 'Сверх бюджета' })).toBeTruthy();
+    // Колонка реиграбельности есть и в кампании, и в парковке: проверяем обе.
+    expect(screen.getAllByRole('columnheader', { name: 'Реиграбельность' }).length).toBe(2);
+    expect(screen.getByRole('columnheader', { name: 'Развилка' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Прощение' })).toBeTruthy();
     // Два уровня и минимум досок: прогон обязан закончиться внутри теста, иначе
     // панель допишет состояние уже после разборки окружения.
-    fireEvent.change(screen.getByLabelText('Уровни «Парковки»'), { target: { value: '1,6' } });
+    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '1,6' } });
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Замерить генератор (2)' }));
 
-    expect(await screen.findByRole('button', { name: 'Скопировать таблицу' }, { timeout: 30_000 })).toBeTruthy();
+    const text = await screen.findByText(/^Замер генератора «Парковки»/, undefined, { timeout: 30_000 });
+    expect(text.textContent).toContain('«План, ходы» - длина решения решателя');
     await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
     // Решаемость у генератора обязана быть полной: план ищет решатель, а не удача.
     expect(screen.getAllByText('100.0%').length).toBe(2);
   }, 60_000);
+
+  it('меряет «Гонки» длиной партии до нерешаемой позиции', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    fireEvent.change(screen.getByLabelText('Уровни для «Парковки» и «Гонок»'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Прогнать гонки (1)' }));
+
+    const text = await screen.findByText(/^Прогон «Гонок»/, undefined, { timeout: 60_000 });
+    // Метрика - ходы до позиции, где перебор не оставляет ни одного спасения.
+    expect(text.textContent).toContain('До нерешаемой (медиана)');
+    expect(text.textContent).toContain('Чем кончились');
+  }, 90_000);
 });

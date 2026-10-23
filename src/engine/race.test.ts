@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   RACE_FIGURES_PER_COLUMN,
   RACE_KING_ROW,
+  RACE_KING_ROWS,
   RACE_MIN_WIDTH,
   RACE_MOVES_PER_LEVEL,
   RACE_ROWS,
@@ -28,10 +29,11 @@ function move(state: GameState, dx: MoveDx, dy: MoveDy = 0): GameState {
 }
 
 /**
- * Жадный бот: выжить, снять фигуру, не вставать под линию, не задерживаться
- * внизу (ряд уезжает каждый ход) и не лезть в строки рождения. Нужен не
- * «идеальной игрой», а тем же критерием, которым мерили напряжение притока: если
- * даже такой бот живёт десятки ходов, приток никого не убивает на ровном месте.
+ * Жадный бот: выжить, снять фигуру, не залезать в угол полосы
+ * полосы. Подъёма наверх в оценке нет: король заперт в двух нижних рядах, и
+ * спорить за высоту ему не за что. Нужен не «идеальной игрой», а тем же
+ * критерием, которым мерили напряжение притока: если даже такой бот живёт десятки
+ * ходов, приток никого не убивает на ровном месте.
  */
 function nearest(state: GameState): number {
   let best = 99;
@@ -55,13 +57,13 @@ function bestReply(state: GameState): GameState | null {
   for (const option of legalMoves(state)) {
     const next = move(state, option.dx, option.dy ?? 1);
     if (next.status !== 'playing') continue;
-    const rank =
+    let rank =
       next.enemies.length * 6 -
       legalMoves(next).length * 1.5 -
       nearest(next) * 2 +
-      (next.player.y <= 1 ? 2.5 - next.player.y : 0) +
-      (next.player.y >= next.height - 3 ? 1.5 : 0) -
-      next.player.y * 0.7;
+      (next.player.y >= next.height - 3 ? 1.5 : 0);
+    // Угол полосы - ловушка: половина ходов отрезана краем.
+    if (next.player.x === 0 || next.player.x === next.width - 1) rank += 1.2;
     if (rank < bestRank) {
       bestRank = rank;
       best = next;
@@ -94,13 +96,17 @@ describe('Гонки: король против фигур сверху', () => 
       wrapOnTop: false,
       scroll: true,
       spawnRows: RACE_SPAWN_ROWS,
+      kingRows: RACE_KING_ROWS,
     });
+    expect(RACE_KING_ROWS).toBe(2);
     const state = createRaceLevel(1, 12345);
     // Старт - три колонки при восьми рядах: «как шахматная доска», только уже.
     expect(state.width).toBe(RACE_MIN_WIDTH);
     expect(state.height).toBe(RACE_ROWS);
     expect(RACE_ROWS).toBe(8);
+    // Король рождается внутри полосы: второй ряд от низа.
     expect(state.player.y).toBe(RACE_KING_ROW);
+    expect(state.player.y).toBeLessThan(RACE_KING_ROWS);
     expect(state.status).toBe('playing');
     expect(state.spawned).toBe(0);
     // Стартовая пробка не должна снимать короля до первого хода.
@@ -112,57 +118,69 @@ describe('Гонки: король против фигур сверху', () => 
     }
   });
 
-  it('король ходит на клетку в любую сторону, назад включительно', () => {
-    const state = open({ player: { x: 1, y: 3 } });
+  it('король ходит в любую сторону, но только по двум нижним рядам', () => {
+    const state = open({ player: { x: 3, y: RACE_KING_ROWS - 1 } });
     const options = legalMoves(state);
-    expect(options.length).toBe(8);
-    expect(options.some((option) => option.dy === 1)).toBe(true);
+    // Восемь соседей минус три хода за верхнюю границу полосы.
+    expect(options.length).toBe(5);
+    expect(options.every((option) => option.y < RACE_KING_ROWS)).toBe(true);
     expect(options.some((option) => option.dy === -1)).toBe(true);
-    expect(options.every((option) => Math.abs(option.dx) <= 1 && Math.abs(option.dy ?? 1) <= 1)).toBe(true);
-    // У края options меньше, и шага за край нет.
-    const edge = legalMoves(open({ player: { x: 0, y: 3 } }));
+    expect(options.some((option) => option.dy === 0)).toBe(true);
+    expect(options.every((option) => Math.abs(option.dx) <= 1)).toBe(true);
+    // Явная попытка шагнуть выше полосы - ошибка правил, а не тихий отказ.
+    expect(() => move(state, 0, 1)).toThrow(/полос/);
+    // У левого края ходов меньше, и шага за край нет.
+    const edge = legalMoves(open({ player: { x: 0, y: 1 } }));
     expect(edge.every((option) => option.dx >= 0)).toBe(true);
+    expect(edge.length).toBe(3);
   });
 
-  it('ряд уезжает каждый ход и несёт короля вместе с фигурами', () => {
-    // Ладья стоит_far по тому же ряду: её собственный ход идёт по горизонтали,
-    // поэтому смена y у обеих сторон это ровно сдвиг поля, а не шахматный ход.
-    const home = open({ player: { x: 0, y: 3 }, enemies: [{ id: 'r', type: 'rook', x: 7, y: 3 }] });
+  it('сдвиг поля уносит фигуры, но не короля', () => {
+    // Ладья стоит далеко по ряду на единицу выше короля: её собственный ход идёт по
+    // горизонтали, поэтому смена y у фигуры - это ровно сдвиг поля.
+    const home = open({ player: { x: 0, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 7, y: 3 }] });
     const sideways = move(home, 1, 0);
-    expect(sideways.player).toEqual({ x: 1, y: 2 });
+    // Король остался на своём ряду: полоса никуда не едет.
+    expect(sideways.player).toEqual({ x: 1, y: 1 });
     expect(sideways.enemies.find((e) => e.id === 'r')!.y).toBe(2);
 
-    // Шаг вперёд придвигает поле, и король возвращается на свой ряд: «двигается,
-    // но остаётся во втором».
-    const forward = move(home, 0, 1);
-    expect(forward.player).toEqual({ x: 0, y: 3 });
-    expect(forward.enemies.find((e) => e.id === 'r')!.y).toBe(2);
+    // Фигура на нижнем ряду сходит с поля, и это не конец партии.
+    const edge = open({ player: { x: 4, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 1, y: 0 }] });
+    const swept = move(edge, 1, 0);
+    expect(swept.enemies.some((e) => e.id === 'r')).toBe(false);
+    expect(swept.lastEvent).toBe('swept');
+    expect(swept.status).toBe('playing');
   });
 
-  it('отступление на нижний ряд означает, что сдвиг унесёт короля за край', () => {
-    const home = open({ player: { x: 1, y: RACE_KING_ROW } });
-    const back = move(home, 0, -1);
-    expect(back.status).toBe('lost');
-    expect(back.lastEvent).toBe('swept');
-    // Тот же шаг вверх из того же ряда жив: король уходит с уносимой клетки.
-    expect(move(home, 0, 1).status).toBe('playing');
+  it('нижний ряд больше не смертельный: стоять на нём можно', () => {
+    const state = open({ player: { x: 1, y: 0 } });
+    // Шаг в сторону с нулевого ряда: раньше это было «ряд унёс короля».
+    const sideways = move(state, 1, 0);
+    expect(sideways.status).toBe('playing');
+    expect(sideways.player.y).toBe(0);
+    // И вверх из нуля - тоже легальный ход внутри полосы.
+    const up = move(state, 1, 1);
+    expect(up.status).toBe('playing');
+    expect(up.player).toEqual({ x: 2, y: 1 });
   });
 
-  it('внизу можно продержаться ровно один ход', () => {
-    let state = open({ player: { x: 1, y: 0 } });
-    // Стоим на нулевом ряду и ходим вверх: сдвиг возвращает нас на ноль, мы живы.
-    state = move(state, 0, 1);
-    expect(state.status).toBe('playing');
-    expect(state.player.y).toBe(0);
-    // А вот шаг в сторону с нулевого ряда - это уже сдвиг с поля.
-    expect(move(state, 1, 0).status).toBe('lost');
+  it('фигуру привозит поле: приехал на клетку короля - это взятие', () => {
+    // Король стоит на своей полосе и никуда не едет, а лента идёт: фигура,
+    // которой сдвиг дал клетку короля, снимает его, даже не потратив свой ход.
+    const home = open({ player: { x: 0, y: 0 }, enemies: [{ id: 'r', type: 'rook', x: 1, y: 1 }] });
+    const into = move(home, 1, 0);
+    expect(into.status).toBe('lost');
+    expect(into.capturedBy).toBe('rook');
+    expect(into.lastEvent).toBe('captured');
+    // Уход в другой ряд той же колонки - фигура приезжает мимо.
+    expect(move(home, 1, 1).status).toBe('playing');
   });
 
   it('шаг назад выигрывает темп, когда надо съесть фигуру', () => {
-    // Слон встал рядом с королём на нулевом ряду: взять его можно только шагом
-    // назад-вбок, и это законный ход, а не самоубийство - сдвиг считается после.
+    // Слон встал рядом с королём на нижнем ряду: взять его можно шагом
+    // назад-вбок, и это законный ход, а не самоубийство.
     const home = open({
-      player: { x: 2, y: RACE_KING_ROW },
+      player: { x: 2, y: RACE_KING_ROWS - 1 },
       enemies: [{ id: 'b', type: 'bishop', x: 1, y: 0 }],
     });
     const take = move(home, -1, -1);
@@ -187,11 +205,11 @@ describe('Гонки: король против фигур сверху', () => 
     const every = raceSpawnEvery(1);
     const state = open({
       width: RACE_MIN_WIDTH,
-      player: { x: 1, y: RACE_KING_ROW + 1 },
+      player: { x: 0, y: RACE_KING_ROW },
       spawned: RACE_FIGURES_PER_COLUMN - 1,
       moves: every - 1,
     });
-    const next = move(state, 0, 1);
+    const next = move(state, 1, 0);
     expect(next.spawned).toBe(RACE_FIGURES_PER_COLUMN);
     // Колонка прибавилась ровно на пороге пяти пришедших фигур.
     expect(next.width).toBe(RACE_MIN_WIDTH + 1);
@@ -202,23 +220,22 @@ describe('Гонки: король против фигур сверху', () => 
   });
 
   it('приток приходит по такту, а не каждый ход', () => {
-    const state = open({ width: RACE_MIN_WIDTH, player: { x: 1, y: RACE_KING_ROW + 1 } });
     const every = raceSpawnEvery(1);
-    let current = state;
+    let current = open({ width: RACE_MIN_WIDTH, player: { x: 0, y: RACE_KING_ROW } });
     for (let turn = 1; turn < every; turn++) {
-      current = move(current, 0, 1);
+      current = move(current, turn % 2 === 1 ? 1 : -1, 0);
       expect(current.enemies.filter((enemy) => enemy.id.startsWith('s')).length).toBe(0);
     }
-    current = move(current, 0, 1);
+    current = move(current, current.player.x === 0 ? 1 : -1, 0);
     expect(current.moves).toBe(every);
     expect(current.enemies.some((enemy) => enemy.id.startsWith(`s${every}-`))).toBe(true);
   });
 
-  it('фигура рождается в верхних рядах, а не на голове у короля', () => {
+  it('фигура рождается в верхних рядах, а не в полосе короля', () => {
     const every = raceSpawnEvery(1);
     const state = open({
       width: RACE_MIN_WIDTH,
-      player: { x: 0, y: RACE_KING_ROW + 1 },
+      player: { x: 0, y: RACE_KING_ROW },
       freeze: 1,
       moves: every - 1,
     });
@@ -233,42 +250,52 @@ describe('Гонки: король против фигур сверху', () => 
   });
 
   it('фигура, вставшая на клетку короля, заканчивает забег', () => {
-    // Ладья стоит в двух клетках по ряду короля: за ход она доезжает ровно на
-    // клетку короля, дальше её путь не пускает ограничение дальности скользящего
-    // хода (`slideCap: 2` в правилах «Гонок»).
+    // Ладья в том же ряду, что король: за ход она проезжает два шага
+    // (`slideCap: 2`) и встаёт ровно на клетку короля.
     const lined = open({
       width: RACE_MIN_WIDTH,
-      player: { x: 1, y: 4 },
-      enemies: [{ id: 'r', type: 'rook', x: 0, y: 4 }],
+      player: { x: 0, y: 1 },
+      enemies: [{ id: 'r', type: 'rook', x: 3, y: 2 }],
     });
-    const stuck = move(lined, 1, 0);
-    expect(stuck.status).toBe('lost');
-    expect(stuck.capturedBy).toBe('rook');
-    // Тот же шаг вверх спасает: ладье нужен ход, чтобы перестроиться.
-    expect(move(lined, 0, 1).status).toBe('playing');
+    const doomed = move(lined, 1, 0);
+    expect(doomed.status).toBe('lost');
+    expect(doomed.capturedBy).toBe('rook');
+    // Отход в другой ряд той же полосы спасает: ладье нужно время на перестроение.
+    expect(move(lined, 1, -1).status).toBe('playing');
   });
 
   it('заморозка держит и поле, и приток', () => {
-    const home = open({ width: RACE_MIN_WIDTH, player: { x: 1, y: 3 }, enemies: [{ id: 'r', type: 'rook', x: 0, y: 2 }] });
-    const frozen = move({ ...home, freeze: 1 }, 0, 1);
-    // Король поднялся, ряд за ним не поехал: заморозка - это передышка в ход.
-    expect(frozen.player).toEqual({ x: 1, y: 4 });
+    const home = open({
+      width: RACE_MIN_WIDTH,
+      player: { x: 1, y: 0 },
+      enemies: [{ id: 'r', type: 'rook', x: 0, y: 2 }],
+    });
+    const frozen = move({ ...home, freeze: 1 }, 1, 1);
+    // Король поднялся по полосе, ряд за ним не поехал: заморозка - передышка в ход.
+    expect(frozen.player).toEqual({ x: 2, y: 1 });
     expect(frozen.enemies.find((e) => e.id === 'r')!.y).toBe(2);
-    // Без заморозки тот же шаг оставил бы короля на третьем ряду.
-    expect(move(home, 0, 1).player.y).toBe(3);
+    // Без заморозки тот же шаг оставил бы ладью на ряду короля.
+    const thawed = move(home, 1, 1);
+    expect(thawed.player).toEqual({ x: 2, y: 1 });
+    expect(thawed.enemies.find((e) => e.id === 'r')!.y).toBe(1);
   });
 
-  it('на длинной серии ходов король не выпадает за поле и не выигрывает', () => {
+  it('на длинной серии король не выходит из полосы и не выигрывает', () => {
     let current: GameState = createRaceLevel(1, 2024);
     for (let turn = 0; turn < 60 && current.status === 'playing'; turn++) {
       const options = legalMoves(current);
       if (options.length === 0) break;
       const step = options[turn % options.length]!;
       const widthBefore = current.width;
+      const yBefore = current.player.y;
       current = move(current, (step.x - current.player.x) as MoveDx, (step.y - current.player.y) as MoveDy);
       expect(current.player.y).toBeGreaterThanOrEqual(0);
-      expect(current.player.y).toBeLessThan(RACE_ROWS);
+      expect(current.player.y).toBeLessThan(RACE_KING_ROWS);
       expect(current.width).toBeGreaterThanOrEqual(widthBefore);
+      // Сдвиг поля больше не двигает игрока: ряд у короля свой, и после хода он
+      // ровно тот, что был выбран.
+      expect(current.player.y).toBe(step.y);
+      expect(yBefore).toBeGreaterThanOrEqual(0);
       for (const enemy of current.enemies) {
         expect(enemy.y).toBeGreaterThanOrEqual(0);
         expect(enemy.y).toBeLessThan(RACE_ROWS);
@@ -279,7 +306,7 @@ describe('Гонки: король против фигур сверху', () => 
     }
   });
 
-  it('подсказка в забеге отдаёт клетки, а не пустоту', () => {
+  it('подсказка в забеге отдаёт клетки полосы, а не пустоту', () => {
     for (let seed = 0; seed < 10; seed++) {
       const state = createRaceLevel(1 + seed, 4242 + seed * 31);
       const cells = survivalHint(state, 2);
@@ -288,7 +315,8 @@ describe('Гонки: король против фигур сверху', () => 
         expect(cell.x).toBeGreaterThanOrEqual(0);
         expect(cell.x).toBeLessThan(state.width);
         expect(cell.y).toBeGreaterThanOrEqual(0);
-        expect(cell.y).toBeLessThan(RACE_ROWS);
+        // Подсказка не имеет права звать короля за красную линию.
+        expect(cell.y).toBeLessThan(RACE_KING_ROWS);
       }
     }
     const empty: GameState = { ...createRaceLevel(1, 5), enemies: [], status: 'lost' };
@@ -326,22 +354,12 @@ describe('Гонки: король против фигур сверху', () => 
     const first = createRaceLevel(2, 4242);
     let a = first;
     let b = first;
-    const journal: Array<[MoveDx, MoveDy]> = [
-      [0, 1],
-      [1, 0],
-      [-1, 1],
-      [0, 1],
-      [1, 1],
-      [0, 0],
-      [-1, 0],
-      [1, 0],
-      [0, 1],
-      [-1, 1],
-      [1, -1],
-      [0, 1],
-    ];
-    for (const [dx, dy] of journal) {
-      if (a.status !== 'playing' || b.status !== 'playing') break;
+    for (let turn = 0; turn < 12 && a.status === 'playing'; turn++) {
+      const options = legalMoves(a);
+      if (options.length === 0) break;
+      const step = options[(turn * 3) % options.length]!;
+      const dx = (step.x - a.player.x) as MoveDx;
+      const dy = (step.y - a.player.y) as MoveDy;
       a = move(a, dx, dy);
       b = move(b, dx, dy);
     }

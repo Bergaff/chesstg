@@ -1283,6 +1283,17 @@ a {
   pointer-events: none;
 }
 
+/* Граница полосы игрока в бегущих режимах: тонкий красный пунктир. Это не
+   декоративная линия поверх поля, а правило - за неё король не выходит. */
+.board-bandline {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  border-top: 2px dashed var(--danger);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
 .piece-swept {
   position: absolute;
   animation: piece-sweep 560ms cubic-bezier(0.4, 0.1, 0.72, 0.24) 1 forwards;
@@ -1296,24 +1307,6 @@ a {
   to {
     transform: translateY(calc(100% + 8px));
     opacity: 0;
-  }
-}
-
-/* Конвейер: король сходил вперёд, поле приехало на ряд ближе, и он вернулся на
-   свою клетку. Импульс показывает сам шаг, иначе ход выглядит бездействием. */
-.player-pulse {
-  animation: player-pulse 340ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
-}
-
-@keyframes player-pulse {
-  0% {
-    transform: translate(0, 0);
-  }
-  55% {
-    transform: translate(var(--to-x), var(--to-y));
-  }
-  100% {
-    transform: translate(0, 0);
   }
 }
 

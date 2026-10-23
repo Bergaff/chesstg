@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RACE_SPAWN_ROWS } from './race';
+import { RACE_KING_ROWS, RACE_SPAWN_ROWS } from './race';
 import {
   MODE_RULES,
   analyzeVariant,
@@ -70,6 +70,30 @@ describe('правила режимов', () => {
     // Вариант на уклонение сравнивает правила на статичной ширине.
     expect(MODE_RULES.raceDodge.grow).toBe(false);
     expect(MODE_RULES.raceDodge.scroll).toBe(false);
+    // Полоса игрока: флаг `kingRows` = сколько нижних рядов доступно королю.
+    expect(MODE_RULES.race.kingRows).toBe(RACE_KING_ROWS);
+    expect(MODE_RULES.campaign.kingRows).toBe(0);
+    expect(MODE_RULES.endless.kingRows).toBe(0);
+    expect(MODE_RULES.jam.kingRows).toBe(0);
+    // Вариант «на уклонение» - тот же король, поэтому полоса наследуется.
+    expect(MODE_RULES.raceDodge.kingRows).toBe(RACE_KING_ROWS);
+  });
+
+  it('полоса режет ходы короля, но не чужие фигуры', () => {
+    const rules = MODE_RULES.race;
+    // Полоса не может быть шире поля и обязана оставлять ряд под фигуры.
+    expect(rules.kingRows).toBeGreaterThan(0);
+    expect(rules.kingRows).toBeLessThan(MODE_RULES.race.rows(1));
+    // У игрока ровно те восемь соседей, что помещаются в полосу.
+    const state = base({ mode: 'race', width: 5, height: 8, player: { x: 2, y: rules.kingRows - 1 } });
+    const options = legalMoves(state);
+    expect(options).toHaveLength(5);
+    expect(options.every((move) => move.y < rules.kingRows)).toBe(true);
+    // А фигуры в полосу ходят все: правило про игрока, а не про ряды доски.
+    // Дальность у них своя (`slideCap`), поэтому ферзя ставим в двух шагах.
+    const at = { id: 'q', type: 'queen' as const, x: 2, y: 3 };
+    const enemy = enemyMoves({ ...state, enemies: [at] }, at);
+    expect(enemy.some((cell) => cell.y === rules.kingRows - 1)).toBe(true);
   });
 
   it('геометрия кампании идёт из режима', () => {
@@ -89,27 +113,27 @@ describe('правила режимов', () => {
   });
 
   it('в «Гонках» фигура бьёт по своей линии, а с линии можно уйти', () => {
-    // Короля держим в середине поля: с первого ряда вниз шагнут нельзя, там его
-    // уносит сдвигом, и проверка линии атаки превратилась бы в проверку края.
-    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 4 }] });
-    // Шаг вдоль ряда: король остаётся на колонке ладьи, и его снимают.
+    // Полоса в два нижних ряда: линия атаки читается по колонке, потому что
+    // ладья едет вниз вместе с полем и в любой момент встанет на ряд короля.
+    const lined = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 3 }] });
+    // Шаг вниз оставляет короля на колонке ладьи: сдвиг подвозит ладью и бьёт.
     expect(applyAction(lined, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
-    // Тот же ход в сторону с линии - ладье нужен ход на перестроение.
+    // Тот же шаг в сторону - ладье нужен ход на перестроение.
     expect(applyAction(lined, { type: 'move', dx: 1, dy: 0 }).status).toBe('playing');
 
     // Дальность скользящего хода в «Гонках» ограничена двумя клетками (`slideCap`),
-    // поэтому ладья с четырёх рядов до короля не долетает: у игрока есть ход,
-    // чтобы уйти с линии, и он видит прилёт заранее, а не получает смерть за ход.
-    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 7 }] });
-    expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 3)).toBe(false);
-    expect(applyAction(outOfReach, { type: 'move', dx: 0, dy: 1 }).status).toBe('playing');
-    // Та же ладья на ряд ближе долетает: шаг вперёд её не обманывает, потому что
+    // поэтому ладья с трёх клеток не долетает: у игрока есть ход, чтобы уйти с
+    // линии, и он видит прилёт заранее, а не получает смерть за ход.
+    const outOfReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 4, y: 1 }] });
+    expect(enemyMoves(outOfReach, outOfReach.enemies[0]).some((cell) => cell.x === 1 && cell.y === 1)).toBe(false);
+    expect(applyAction(outOfReach, { type: 'move', dx: 0, dy: -1 }).status).toBe('playing');
+    // Та же ладья на клетку ближе долетает: шаг вниз её не обманывает, потому что
     // сдвиг ряда не меняет дистанцию между королём и фигурами.
-    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 3 }, enemies: [{ id: 'e0', type: 'rook', x: 1, y: 6 }] });
-    expect(applyAction(inReach, { type: 'move', dx: 0, dy: 1 }).status).toBe('lost');
+    const inReach = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'rook', x: 3, y: 1 }] });
+    expect(applyAction(inReach, { type: 'move', dx: 0, dy: -1 }).status).toBe('lost');
 
     // Никакого «рядового падения» нет: после сдвига фигура тратит ровно свой ход.
-    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 3 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 5 }] });
+    const far = base({ mode: 'race', width: 5, height: 8, player: { x: 0, y: 1 }, enemies: [{ id: 'e0', type: 'knight', x: 4, y: 5 }] });
     const step = applyAction(far, { type: 'move', dx: 1, dy: 0 });
     const horse = step.enemies.find((e) => e.id === 'e0')!;
     // Ряд уехал на клетку вниз (с 5 на 4), остальное - ход коня: |dx| + |dy| = 3.
@@ -199,8 +223,8 @@ describe('квота взятий', () => {
     expect(capturesLeft(base({ mode: 'campaign', captures: 40 }))).toBe(Number.POSITIVE_INFINITY);
     expect(legalMoves(state).some((move) => Boolean(move.takes))).toBe(true);
     // Король бьёт во все стороны и без квоты: иначе забег превращается в ожидание.
-    const race = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 2, y: 2 }] });
-    expect(legalMoves(race).some((move) => move.dy === 1 && Boolean(move.takes))).toBe(true);
+    const race = base({ mode: 'race', width: 5, height: 8, player: { x: 1, y: 1 }, enemies: [{ id: 'e0', type: 'pawn', x: 2, y: 0 }] });
+    expect(legalMoves(race).some((move) => move.dy === -1 && Boolean(move.takes))).toBe(true);
     expect(capturesLeft(race)).toBe(Number.POSITIVE_INFINITY);
   });
 });
@@ -359,11 +383,10 @@ describe('переключатели вариантов', () => {
     expect(state.status).toBe('playing');
     expect(state.player.y).toBe(0);
     expect(state.lastEvent).toBe('wrap');
-    // Боевые «Гонки» перелива не дают: король ходит назад сам, ему это не нужно.
-    // И конвейер его держит: шаг вверх возвращает на второй ряд, а поле сдвигает.
-    const kingTurn = applyAction({ ...near, mode: 'race' }, { type: 'move', dx: 0, dy: 1 });
-    // Король шагнул вверх и уехал рядом с полем на ряд вниз: итог - тот же ряд.
-    expect(kingTurn.player.y).toBe(4);
+    // Боевые «Гонки» перелива не дают: там король, а король живёт в полосе из
+    // двух нижних рядов и шаг вверх оставляет его на месте, пока поле едет.
+    const kingTurn = applyAction({ ...near, mode: 'race', height: 8, player: { x: 1, y: 0 } }, { type: 'move', dx: 0, dy: 1 });
+    expect(kingTurn.player).toEqual({ x: 1, y: 1 });
     expect(kingTurn.lastEvent).not.toBe('wrap');
   });
 

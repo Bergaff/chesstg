@@ -325,31 +325,37 @@ body {
   flex: 0 0 auto;
 }
 
-.adm-variant-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 14px;
-  margin-bottom: 6px;
-}
-
-.adm-variant-group {
+/* Карточка прогона: заголовок, пояснение, свои кнопки и своя таблица.
+   Рамка одна на всю карточку, чтобы три блока не читались как три колонки. */
+.adm-suite {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 2px;
-  padding: 10px 12px 2px;
+  padding: 12px 14px 14px;
   background: var(--bg-soft);
 }
 
-.adm-variant-group .adm-note {
-  margin-top: 6px;
-  font-size: 10.5px;
-  line-height: 1.5;
+.adm-suite-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.adm-variant-group .adm-checks {
-  margin: 6px 0 10px;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  gap: 6px;
+.adm-suite-title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--brass);
+  font-weight: 600;
+}
+
+.adm-suite-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
 }
 
 .adm-check.is-group {

@@ -1,4 +1,12 @@
-import { analyzeVariant, measureJamLevels, type JamMeasure, type ModeId, type VariantReport } from '../engine';
+import {
+  analyzeVariant,
+  measureJamLevels,
+  measureRaceLevels,
+  type JamMeasure,
+  type ModeId,
+  type RaceMeasure,
+  type VariantReport,
+} from '../engine';
 
 /**
  * Прогон вариантов правил в отдельном потоке.
@@ -21,6 +29,8 @@ type WorkerRequest =
   | { type: 'run'; index: number; mode: ModeId; level: number; samples: number; seed: number }
   /** Замер генератора «Парковки»: уровни по списку, прогресс по уровням. */
   | { type: 'jam'; levels: number[]; samples: number; seed: number }
+  /** Прогон «Гонок» на правиле полосы: длина игры до нерешаемой позиции. */
+  | { type: 'race'; levels: number[]; samples: number; seed: number }
   | { type: 'cancel' };
 
 const scope = self as unknown as WorkerScope;
@@ -45,6 +55,25 @@ scope.addEventListener('message', (event) => {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'jam_measure_failed';
       scope.postMessage({ type: 'jamerror', message });
+    }
+    return;
+  }
+
+  if (request.type === 'race') {
+    cancelled = false;
+    try {
+      for (let position = 0; position < request.levels.length; position++) {
+        if (cancelled) throw new Error('cancelled');
+        const [row] = measureRaceLevels([request.levels[position]], {
+          samples: request.samples,
+          seed: request.seed,
+        });
+        scope.postMessage({ type: 'racrow', row: row as RaceMeasure, done: position + 1, total: request.levels.length });
+      }
+      scope.postMessage({ type: 'racdone' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'race_measure_failed';
+      scope.postMessage({ type: 'racerror', message });
     }
     return;
   }

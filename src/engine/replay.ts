@@ -2,10 +2,14 @@ import { auditState, difficultyBand, SURVIVAL_DEPTH, type AuditResult } from './
 import { legalMoves } from './board';
 import { isSurvivalGoal, rulesFor } from './modes';
 import { applyAction } from './rules';
-import { createJamPuzzle } from './jam';
+import { createJamPuzzle, isJamState, solveJamExits } from './jam';
+import { createRaceLevel } from './specials';
+import { RACE_MIN_WIDTH } from './race';
 import { createSpecialLevel } from './specials';
 import type { ModeId } from './modes';
 import type { GameState } from './types';
+import { RuleError } from './types';
+import { applyJamAction, jamLegalActions, type JamAction, type JamState } from './jam';
 
 /**
  * Анализ реиграбельности и сравнение вариантов правил.
@@ -86,6 +90,131 @@ function average(values: number[]): number {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
+/**
+ * Позиция, из которой игрок уже не спасается: перебраны все его ходы (фигуры
+ * отвечают детерминированно), и каждый ответ ведёт к смерти в пределах `depth`
+ * полуходов. Это и есть «нерешаемая ситуация» бегущего режима: не мат в один
+ * ход, а положение, где полоса закрыта настолько, что исход предрешён.
+ *
+ * Глубина 3 - компромисс: при 1 метрика превращается в «бьют прямо сейчас», при
+ * 5 считает варианты, которые игрок за доской не успевает увидеть. Полоса из
+ * `kingRows` рядов даёт максимум восемь клеток, поэтому полный перебор дешёв и
+ * его можно включать в каждый ход прогона.
+ */
+export function isDoomed(state: GameState, depth = 3): boolean {
+  if (state.status !== 'playing') return true;
+  if (depth <= 0) return false;
+  const options = legalMoves(state);
+  if (options.length === 0) return true;
+  for (const option of options) {
+    let next: GameState;
+    try {
+      next = applyAction(state, { type: 'move', dx: option.dx, dy: option.dy ?? 1 });
+    } catch {
+      continue;
+    }
+    // Ход, после которого партия кончилась, спасением не считается.
+    if (next.status !== 'playing') continue;
+    if (!isDoomed(next, depth - 1)) return false;
+  }
+  return true;
+}
+
+/** Замер «Гонок»: сколько ходов партия остаётся решаемой. */
+export interface RaceMeasure {
+  level: number;
+  samples: number;
+  /** Ширина поля на старте и средняя в конце забега: конвейер растёт вширь. */
+  widthStart: number;
+  widthEnd: number;
+  /** Ходы до нерешаемой позиции. */
+  doomAvg: number;
+  doomMedian: number;
+  doomMin: number;
+  doomMax: number;
+  /** Доля забегов, где позиция стала нерешаемой раньше конца партии. */
+  doomShare: number;
+  /** Сколько ходов игрок реально выдержал. */
+  lengthAvg: number;
+  lengthMedian: number;
+  /** Прогоны, упёршиеся в потолок: длина не измерима. */
+  capped: number;
+  /** Взятия за забег: без них полоса забивается за десять ходов. */
+  capturesAvg: number;
+  /** Чем кончились забеги: поимка, тупик, потолок. */
+  causes: Record<string, number>;
+}
+
+export interface RaceMeasureOptions {
+  samples?: number;
+  seed?: number;
+  cap?: number;
+  depth?: number;
+}
+
+/**
+ * Прогон «Гонок» на правиле полосы: жадный бот (тот же выбор, что у подсказки)
+ * играет до конца партии, а мы mierим длину игры до позиции, где исход
+ * предрешён. Цифры - верхняя граница того, что читается глазами, а не потолок
+ * движка: бот не считает на два темпа вперёд и потому иногда умирает раньше.
+ */
+export function measureRaceLevels(
+  levels: readonly number[],
+  options: RaceMeasureOptions = {},
+): RaceMeasure[] {
+  const samples = Math.max(1, Math.min(400, options.samples ?? 24));
+  const cap = Math.max(8, options.cap ?? 240);
+  const depth = Math.max(1, options.depth ?? 3);
+  return levels.map((level) => {
+    const doom: number[] = [];
+    const lengths: number[] = [];
+    const causes: Record<string, number> = {};
+    let widthEnd = 0;
+    let captures = 0;
+    let capped = 0;
+    for (let i = 0; i < samples; i += 1) {
+      const seed = ((options.seed ?? 4242) ^ (level * 7919) ^ (i * 104729)) >>> 0;
+      let state = createRaceLevel(level, seed);
+      let doomedAt = -1;
+      while (state.status === 'playing' && state.moves < cap) {
+        if (doomedAt < 0 && isDoomed(state, depth)) doomedAt = state.moves;
+        const next = bestSurvivalMove(state) ?? playFirstMove(state);
+        if (!next) break;
+        state = next;
+      }
+      const finished = state.status !== 'playing';
+      lengths.push(state.moves);
+      widthEnd += state.width;
+      captures += state.captures ?? 0;
+      if (!finished) capped += 1;
+      const cause = !finished ? 'capped' : (state.lastEvent ?? state.status);
+      causes[cause] = (causes[cause] ?? 0) + 1;
+      if (doomedAt >= 0) doom.push(doomedAt);
+    }
+    const sortedDoom = [...doom].sort((a, b) => a - b);
+    const sortedLength = [...lengths].sort((a, b) => a - b);
+    return {
+      level,
+      samples,
+      widthStart: RACE_MIN_WIDTH,
+      widthEnd: widthEnd / samples,
+      // Если ни один забег не стал нерешаемым (бот умер от другого или упёрся в
+      // потолок), берём длину партии: иначе в отчёте ноль выглядит как подарок.
+      doomAvg: doom.length > 0 ? average(doom) : average(lengths),
+      doomMedian:
+        doom.length > 0 ? sortedDoom[Math.floor(sortedDoom.length / 2)] : sortedLength[Math.floor(sortedLength.length / 2)],
+      doomMin: doom.length > 0 ? sortedDoom[0] : sortedLength[0],
+      doomMax: doom.length > 0 ? sortedDoom[sortedDoom.length - 1] : sortedLength[sortedLength.length - 1],
+      doomShare: doom.length / samples,
+      lengthAvg: average(lengths),
+      lengthMedian: sortedLength[Math.floor(sortedLength.length / 2)],
+      capped,
+      capturesAvg: captures / samples,
+      causes,
+    };
+  });
+}
+
 export interface RolloutResult {
   moves: number;
   status: GameState['status'];
@@ -112,17 +241,17 @@ function bestSurvivalMove(state: GameState): GameState | null {
   for (const option of legalMoves(state)) {
     const next = applyAction(state, { type: 'move', dx: option.dx, dy: option.dy ?? 1 });
     if (next.status !== 'playing') continue;
-    const rank =
+    let rank =
       next.enemies.length * 6 -
       legalMoves(next).length * 1.5 -
       nearestDistance(next) * 2 +
-      // Бегущее поле несёт короля вниз каждый ход, поэтому низ поля - не укрытие,
-      // а шаг до края: бот обязан это учитывать, иначе замер гонок врёт.
-      (next.player.y <= 1 ? 2.5 - next.player.y : 0) +
-      (next.player.y >= next.height - 3 ? 1.5 : 0) -
-      // Бегущее поле: ряд, на котором ты стоишь, уезжает вниз, поэтому высота -
-      // это запас темпа. Без этого шага бот жмётся к краю и замер врёт.
-      next.player.y * 0.7;
+      (next.player.y >= next.height - 3 ? 1.5 : 0);
+    // Полоса в два ряда: высота больше не валюта - вверх ходить нельзя, и спорить
+    // за ряды боту не за что. А вот угол остаётся ловушкой: из него половина
+    // ходов отрезана краем, и приехавшая в полосу фигура закрывает всё.
+    if (rulesFor(next.mode).kingRows > 0 && (next.player.x === 0 || next.player.x === next.width - 1)) {
+      rank += 1.2;
+    }
     if (rank < bestRank) {
       bestRank = rank;
       best = next;
@@ -323,16 +452,102 @@ export interface JamMeasure {
   solvedShare: number;
   /** Сколько планов не влезло в бюджет: на боевом режиме это откат генератора. */
   overBudget: number;
+  /** Ветвление на плане: сколько ходов в среднем доступно игроку на шаге. */
+  avgChoice: number;
+  /**
+   * Прощение первого шага: доля ходов вне плана (первые шесть вариантов), после
+   * которых решатель всё ещё доводит поле до пустой доски. Ноль означает «один
+   * неверный ход - и задача мертва»: такая головоломка не переигрывается, её
+   * заучивают.
+   */
+  forgiveness: number;
+  /** Бюджет ходов и запас над планом: сколько можно ходить вхолостую. */
+  budgetAvg: number;
+  slackAvg: number;
+  /** Уникальные расстановки в выборке: главный признак реиграбельности. */
+  uniqueLayouts: number;
+  /** Средняя разница между соседними расстановками, 0..1 (по занятым клеткам). */
+  layoutDistance: number;
+  /** Сводный индекс сложности 0..1: длина плана, отсутствие прощения и запаса. */
+  difficulty: number;
+  /** Сводный индекс реиграбельности 0..1: разнообразие генератора и развилки. */
+  replayIndex: number;
+}
+
+/**
+ * Пальцы генератора: расстановки сравниваются по множество занятыми клеток, и
+ * расстояние - это Жаккар, а не «совпал ли id фигуры». Две доски с одним
+ * набором клеток, но разными родами, всё-таки разные задачи, поэтому род и
+ * цвет входят в отпечаток клетки.
+ */
+function jamLayoutKey(state: JamState): string {
+  return state.pieces
+    .map((piece) => `${piece.type}${piece.side}${piece.x}${piece.y}`)
+    .sort()
+    .join('|');
+}
+
+function jamLayoutCells(state: JamState): Set<string> {
+  return new Set(state.pieces.map((piece) => `${piece.type}${piece.side}${piece.x},${piece.y}`));
+}
+
+/**
+ * Развилки на готовом плане: на каждом шаге считаем, сколько ходов вообще
+ * легально. Плюс прощение: те же развилки на первом шаге, но с проверкой - не
+ * убивает ли задача ход вне плана. Считается решателем, потому что «остался ли
+ * ответ» - вопрос не числа ходов, а существования плана.
+ */
+function jamPlanBranching(
+  state: JamState,
+  plan: readonly JamAction[],
+): { choices: number[]; forgiven: number; tried: number } {
+  const choices: number[] = [];
+  let forgiven = 0;
+  let tried = 0;
+  let current = state;
+  let step = 0;
+  for (const action of plan) {
+    const options = jamLegalActions(current);
+    choices.push(options.length);
+    if (step === 0) {
+      for (const option of options.slice(0, 6)) {
+        if (plan.length > 0 && option.id === plan[0].id && option.to.x === plan[0].to.x && option.to.y === plan[0].to.y) {
+          continue;
+        }
+        try {
+          const after = applyJamAction(current, option, RuleError);
+          tried += 1;
+          if (solveJamExits(after).ok) forgiven += 1;
+        } catch {
+          /* ход вне плана мог быть запрещён правилами: его не считаем */
+        }
+      }
+    }
+    try {
+      current = applyJamAction(current, action, RuleError);
+    } catch {
+      break;
+    }
+    step += 1;
+  }
+  return { choices, forgiven, tried };
 }
 
 export function measureJamLevels(levels: number[], samples = 20, seed = 20261022): JamMeasure[] {
   return levels.map((level) => {
     const costs: number[] = [];
+    const choices: number[] = [];
     let solved = 0;
     let over = 0;
     let pieces = 0;
+    let forgiven = 0;
+    let tried = 0;
+    let budget = 0;
+    let slack = 0;
     let width = 0;
     let height = 0;
+    const keys = new Set<string>();
+    const layouts: Array<Set<string>> = [];
     for (let index = 0; index < samples; index++) {
       const state = createJamPuzzle(level, seed + index * 7919);
       width = state.width;
@@ -342,8 +557,27 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
       if (plan.length > 0) solved += 1;
       costs.push(plan.length);
       if (plan.length > state.budget) over += 1;
+      keys.add(jamLayoutKey(state));
+      layouts.push(jamLayoutCells(state));
+      const branching = jamPlanBranching(state, plan);
+      choices.push(...branching.choices);
+      forgiven += branching.forgiven;
+      tried += branching.tried;
+      budget += state.budget;
+      slack += Math.max(0, state.budget - plan.length);
     }
     const sorted = [...costs].sort((a, b) => a - b);
+    // Расстояние между соседними расстановками: если генератор на новом зерне
+    // выдаёт ту же доску, расстояние ноль, и задача протухает за один проход.
+    const distance = average(
+      layouts.slice(1).map((cells, index) => {
+        const previous = layouts[index];
+        let shared = 0;
+        for (const cell of cells) if (previous.has(cell)) shared += 1;
+        const union = previous.size + cells.size - shared;
+        return union > 0 ? 1 - shared / union : 0;
+      }),
+    );
     return {
       level,
       samples,
@@ -355,6 +589,28 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
       maxCost: sorted[sorted.length - 1] ?? 0,
       solvedShare: +(solved / samples).toFixed(3),
       overBudget: over,
+      avgChoice: +(choices.length ? average(choices) : 0).toFixed(2),
+      forgiveness: +(tried > 0 ? forgiven / tried : 1).toFixed(3),
+      budgetAvg: +(budget / samples).toFixed(1),
+      slackAvg: +(slack / samples).toFixed(1),
+      uniqueLayouts: keys.size,
+      layoutDistance: +distance.toFixed(3),
+      // Реиграбельность - про генератор, а не про длину плана: та же доска с
+      // другим планом остаётся той же задачей. 6 развилок на шаге считается
+      // достаточно, чтобы второй проход не был заучиванием.
+      replayIndex: +(
+        0.45 * Math.min(1, keys.size / samples) +
+        0.3 * Math.min(1, distance) +
+        0.25 * Math.min(1, (choices.length ? average(choices) : 0) / 6)
+      ).toFixed(3),
+      // Сложность - про игрока: длинный план, отсутствие прощения и тонкий
+      // запас бюджета. 60 ходов - потолок лестницы (уровень 40), 12 ходов запаса
+      // - порог, выше которого можно ходить наугад.
+      difficulty: +(
+        0.45 * Math.min(1, average(costs) / 60) +
+        0.3 * (1 - Math.min(1, tried > 0 ? forgiven / tried : 1)) +
+        0.25 * Math.max(0, 1 - Math.min(1, slack / samples / 12))
+      ).toFixed(3),
     };
   });
 }

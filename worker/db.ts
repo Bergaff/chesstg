@@ -10,6 +10,7 @@ import {
   PAID_SKINS,
   PLAYABLE_MODES,
   RACE_KING_ROW,
+  RACE_KING_ROWS,
   RACE_ROWS,
   randomSeed,
   shortCode,
@@ -331,15 +332,13 @@ export function initialMatchesMode(state: unknown, mode: string): boolean {
     typeof value.player?.x === 'number' &&
     typeof value.player?.y === 'number';
   if (!shaped) return false;
-  // Гонки играют королём, и генератор ставит его в первый ряд от низа. Прежний
-  // конвейер начинал с другого ряда и считал ряды, а не ходы: такой забег новый
-  // клиент досчитал бы не тем правилом, поэтому ряд входит в проверку формы.
   if (mode === 'race') {
-    // Ряд и высота поля входят в проверку: прежний конвейер играл на двенадцати
-    // рядах и с другим рядом короля, а правило теперь - «ряд уезжает каждый
-    // ход». Такой забег клиент досчитал бы не тем правилом, поэтому он закрывается
-    // как выход, а не продолжается.
-    return value.player?.y === RACE_KING_ROW && value.height === RACE_ROWS;
+    // Ряд и высота поля входят в проверку: конвейер менял и геометрию, и правило
+    // про игрока. Стартовый забег обязан начинаться там, где его ждёт клиент, -
+    // в полосе из `RACE_KING_ROWS` нижних рядов, на ряду генератора. Партия со
+    // старого 12-рядного конвейера закрывается как выход, а не продолжается.
+    const band = typeof value.player?.y === 'number' && value.player.y >= 0 && value.player.y < RACE_KING_ROWS;
+    return value.player?.y === RACE_KING_ROW && band && value.height === RACE_ROWS;
   }
   return true;
 }

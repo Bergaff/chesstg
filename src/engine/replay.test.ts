@@ -5,8 +5,13 @@ import {
   RACE_VARIANTS,
   analyzeVariant,
   compareVariants,
+  isDoomed,
   measureJamLevels,
+  measureRaceLevels,
 } from './replay';
+import { createRaceLevel } from './specials';
+import { RACE_KING_ROWS } from './race';
+import { legalMoves } from './board';
 import { SURVIVAL_DEPTH, auditState, survivalTargetFor } from './audit';
 import { MODE_RULES, rulesFor } from './modes';
 import { createSpecialLevel } from './specials';
@@ -112,6 +117,68 @@ describe('прогон сравнений', () => {
     // Пробка обязана усложняться: план на 12-м уровне длиннее, чем на первом.
     expect(rows[1].avgCost).toBeGreaterThan(rows[0].avgCost);
   }, 60_000);
+
+  it('нерешаемая позиция находится перебором, а не эвристикой', () => {
+    // Угол без взятий и с ладьёй на той же линии: любой ход проигрывает в три
+    // полухода, и `isDoomed` обязан это увидеть.
+    const free = createRaceLevel(10, 4242);
+    expect(isDoomed(free, 3)).toBe(false);
+    // Чистое поле: фигур нет вообще - тем более не нерешаемо.
+    const empty = { ...free, enemies: [] };
+    expect(isDoomed(empty, 3)).toBe(false);
+    // Закрытая партия: исход уже предрешён движком.
+    const over = { ...free, status: 'lost' as const };
+    expect(isDoomed(over, 3)).toBe(true);
+    // Глубина 0 спорить не о чем: позиция не выиграна, но и не проверена.
+    expect(isDoomed(free, 0)).toBe(false);
+    // Полоса не оставляет ходов: перебор обязан назвать позицию нерешаемой.
+    const blocked = {
+      ...free,
+      width: 1,
+      player: { x: 0, y: 0 },
+      enemies: [
+        { id: 'a', type: 'rook' as const, x: 0, y: 6 },
+        { id: 'b', type: 'rook' as const, x: 0, y: 7 },
+      ],
+    };
+    if (legalMoves(blocked).length === 0) expect(isDoomed(blocked, 3)).toBe(true);
+  });
+
+  it('прогон «Гонок» меряет длину решаемой партии', () => {
+    const rows = measureRaceLevels([10, 20], { samples: 3, seed: 707, cap: 160 });
+    expect(rows.map((row) => row.level)).toEqual([10, 20]);
+    for (const row of rows) {
+      // Медиана до нерешаемой позиции не нулевая: забег обязан читаться.
+      expect(row.doomMedian).toBeGreaterThanOrEqual(4);
+      expect(row.doomMin).toBeLessThanOrEqual(row.doomMedian);
+      expect(row.doomMax).toBeGreaterThanOrEqual(row.doomMedian);
+      expect(row.lengthMedian).toBeGreaterThanOrEqual(row.doomMedian);
+      // Полоса в два ряда: игрок всегда в ней и не выигрывает - победы нет.
+      expect(row.widthStart).toBeLessThan(row.widthEnd);
+      expect(row.capped).toBe(0);
+      expect(row.capturesAvg).toBeGreaterThanOrEqual(0);
+      expect(Object.values(row.causes).reduce((a, b) => a + b, 0)).toBe(row.samples);
+    }
+    // Ни один забег не кончился победой: режим без финиша.
+    for (const row of rows) expect(row.causes.won ?? 0).toBe(0);
+    expect(RACE_KING_ROWS).toBe(2);
+  }, 120_000);
+
+  it('замер парковки считает развилки и разнообразие расстановок', () => {
+    const [low, high] = measureJamLevels([1, 20], 5, 313);
+    for (const row of [low, high]) {
+      expect(row.uniqueLayouts).toBeGreaterThan(1);
+      expect(row.layoutDistance).toBeGreaterThan(0.5);
+      expect(row.avgChoice).toBeGreaterThan(1);
+      expect(row.replayIndex).toBeGreaterThan(0.5);
+      expect(row.forgiveness).toBeGreaterThanOrEqual(0);
+      expect(row.forgiveness).toBeLessThanOrEqual(1);
+      expect(row.budgetAvg).toBeGreaterThan(row.avgCost);
+      expect(row.slackAvg).toBeGreaterThanOrEqual(0);
+      expect(row.difficulty).toBeGreaterThan(0);
+      expect(row.difficulty).toBeLessThanOrEqual(1);
+    }
+  }, 120_000);
 
   it('сравнение возвращает отчёты по порядку и без расхождений на равных правилах', () => {
     const reports = compareVariants(['jam', 'campaignFreeDiag'], 6, 4, 909);

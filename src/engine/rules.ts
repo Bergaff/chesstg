@@ -91,14 +91,17 @@ function pickSpawnType(pool: readonly string[], rng: Rng): GameState['enemies'][
 
 /**
  * Такт поля в бегущих режимах: весь ряд уезжает на клетку вниз, нижний ряд
- * сходит с поля и уносит то, что на нём стояло. Сдвиг несёт и короля: за доску он
- * не держится, поэтому каждый ход надо подниматься, шаг в сторону или назад стоит
- * ряда, а долгое стояние внизу кончается тем, что ряд уносит короля за край. Это
- * и поражение, и ответ на «король двигается, но остаётся на втором ряду»: он
- * остаётся ровно пока ходит вверх.
- * Фигура и король едут одним и тем же движением, поэтому относительное положение
- * не меняется: ловит короля только собственный ход фигуры из `enemyPhase`.
- * Заморозка ставит на паузу и поле тоже, щит от сдвига не спасает - он от хода
+ * сходит с поля и уносит то, что на нём стояло. Игрока сдвиг не трогает: у
+ * режима есть полоса (`kingRows`), и король живёт в ней, а волна протекает мимо.
+ * Прежняя смерть «ряд унёс короля за край» убрана: с двумя разрешёнными рядами
+ * она превращала забег в «один шаг не туда и всё», и вместо чтения поля игрок
+ * дергался.
+ *
+ * Но лента по-прежнему привозит фигуры: если после сдвига фигура встала на
+ * клетку короля, партия кончена - это то же самое «фигура на моей клетке», что
+ * и ход в `enemyPhase`, просто фигуру туда несёт поле. Иначе фигура осела бы на
+ * короле, и читать доску стало бы невозможно.
+ * Заморозка ставит на паузу и поле тоже, щит от сдвига не спасает: он от хода
  * фигуры.
  */
 function scrollPhase(state: GameState): void {
@@ -106,25 +109,24 @@ function scrollPhase(state: GameState): void {
   if (!rules.scroll || state.freeze > 0 || state.status !== 'playing') return;
   const kept: typeof state.enemies = [];
   let swept = 0;
+  let arrived: GameState['enemies'][number] | null = null;
   for (const enemy of state.enemies) {
     const y = enemy.y - 1;
     if (y < 0) {
       swept += 1;
       continue;
     }
-    kept.push({ ...enemy, y });
+    const moved = { ...enemy, y };
+    if (moved.x === state.player.x && moved.y === state.player.y) arrived = moved;
+    kept.push(moved);
   }
   state.enemies = kept;
-  const y = state.player.y - 1;
-  if (y < 0) {
-    // Ряд унёс короля за край. Своей фигуры на его клетке оказаться не могло:
-    // сдвиг общий, поэтому опасен только собственный ход фигуры.
-    state.status = 'lost';
-    state.lastEvent = 'swept';
-    return;
-  }
-  state.player = { x: state.player.x, y };
   if (swept > 0) state.lastEvent = 'swept';
+  if (arrived) {
+    state.status = 'lost';
+    state.capturedBy = arrived.type;
+    state.lastEvent = 'captured';
+  }
 }
 
 function enemyPhase(state: GameState): void {
@@ -216,6 +218,10 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
     if (!option) {
       // Сообщения те же, что и раньше, по ним сверяет отказ клиент.
       if (king && y < 0) throw new RuleError('За границей поля');
+      // Полоса игрока: вне неё клетки нет, даже если формально она в доске.
+      if (king && rules.kingRows > 0 && y >= rules.kingRows) {
+        throw new RuleError('Выше полосы ходить нельзя');
+      }
       if (y >= state.height) throw new RuleError('Верхняя граница поля');
       if (x < 0 || x >= state.width) throw new RuleError('За границей поля');
       if (dy === 2) throw new RuleError('Двойной ход доступен только с начальной позиции');
@@ -290,8 +296,9 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   const rules = rulesFor(state.mode);
   const stuckByRules = rules.motion === 'static' || rules.goal === 'survive';
   const noProgress = waitingForNothing && before === boardSignature(state);
-  // Сдвиг уже унёс короля за край? Тогда причина конца - `swept`, а не тупик:
-  // на мёртвом поле `legalMoves` пустеет, и без проверки ряд терял своё событие.
+  // Партия могла кончиться ещё ходом фигуры. Тогда причиной конца остаётся
+  // поимка, а не тупик: на мёртвом поле `legalMoves` пустеет, и без проверки
+  // `captured` перетиралось бы `stuck`.
   if (stuckByRules && state.status === 'playing' && noMovesLeft(state)) {
     state.status = 'lost';
     state.lastEvent = 'stuck';

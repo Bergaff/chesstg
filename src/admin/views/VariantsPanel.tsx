@@ -1,75 +1,47 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  MODE_ORDER,
-  analyzeVariant,
   boardForMode,
   modeDef,
-  modeFamily,
+  RACE_MIN_WIDTH,
+  RACE_ROWS,
+  RACE_WIDTH,
   type JamMeasure,
   type ModeId,
+  type RaceMeasure,
   type VariantReport,
 } from '../../engine';
 import { Panel, StatusLine, Table, formatPercent } from '../ui';
-import { runJamSuite, runVariantSuite } from '../variantsClient';
+import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
 
 /**
- * Сравнение вариантов правил одним прогоном.
+ * Лаборатория прогонов.
  *
- * Отвечает на вопросы, которые нельзя задать одиночным расстановкой: сколько
- * держится король под притоком фигур, что даёт уход фигур с площадки и что меняет
- * запрет свободной диагонали. Отмечаете режимы, считаете, забираете текст таблицы
- * целиком.
+ * Три карточки - по одной на вопрос, который нельзя задать одной расстановкой:
  *
- * «Парковка» в этом списке гостит на правах отдельного замера: боевой режим это
- * головоломка из `jam.ts`, и её метрика длина плана решателя, а не доля побед.
- * Для неё внизу свой блок, он считает те же зерна, что и игра.
+ * 1. «Кампания»: что меняет право вставать на пустую диагональ. Те же доски,
+ *    два варианта правил, и мы смотрим, где задача интереснее.
+ * 2. «Парковка»: насколько генератор вообще даёт разные задачи и сколько в них
+ *    выбора. Победа тут тривиальна (план есть почти всегда), поэтому меряется
+ *    длина плана, развилки на нём и отличия расстановок.
+ * 3. «Гонки»: сколько ходов партия остаётся решаемой. Игрок заперт в полосе из
+ *    двух нижних рядов, и финал забега - позиция, где от фигуры не уйти. Это и
+ *    есть «до нерешаемой ситуации»: её перебирает `isDoomed`, а не эвристика.
+ *
+ * Всё считается в воркере (см. `variantsClient`): перебор на каждый ход
+ * короля занимает секунды на доску, и на главном потоке вкладка бы встала.
  */
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
-const SAMPLE_PRESETS = [16, 64, 100, 250, 1000];
+const SAMPLE_PRESETS = [16, 64, 100, 250];
 const MIN_SAMPLES = 4;
 const MAX_SAMPLES = 2000;
-const DEFAULT_PICKS: ModeId[] = ['jam', 'jamExit2', 'jamExit4', 'race', 'raceDodge', 'campaign', 'campaignStrictDiag'];
-/** Лестница уровней для замера «Парковки»: те же срезы, что и в `docs/modes.md`. */
-const JAM_LADDER = '1,3,8,12,20,30,40';
+/** Кампания сравнивается двумя вариантами одних и тех же досок. */
+const DIAGONAL_PAIR: ModeId[] = ['campaignFreeDiag', 'campaignStrictDiag'];
+/** Лестница уровней для «Парковки» и «Гонок»: те же срезы, что и в `docs/modes.md`. */
+const LEVELS_LADDER = '1,3,8,12,20,30,40';
 
-interface Group {
-  id: string;
-  title: string;
-  note: string;
-  modes: ModeId[];
-}
-
-/** Группы только для того, чтобы список режимов читался по families. */
-const GROUPS: Group[] = [
-  {
-    id: 'playable',
-    title: 'Боевые режимы',
-    note: 'Те, что уже в игре. Нужны как база сравнения: без неё цифры вариантов ничего не значат. У «Бесконечного» цели нет, разбор до финиша к нему не применим.',
-    modes: ['campaign', 'endless'],
-  },
-  {
-    id: 'jam',
-    title: '«Парковка» и уход фигур',
-    note: 'Пешечный движок на тех же флагах: стена фигур, право уходить с площадки в два или четыре направления, запрет свободной диагонали. Боевая «Парковка» считается в блоке внизу.',
-    modes: ['jam', 'jamExit2', 'jamExit4', 'jamStrictDiag'],
-  },
-  {
-    id: 'race',
-    title: '«Гонки» и уклонение',
-    note: 'Боевые «Гонки» это король против фигур, приходящих с двух верхних рядов: счёт в пережитых ходах, длина забега меряется прогоном жадного бота. Во втором варианте бегает пешка, верхний ряд переливает её в нижний.',
-    modes: ['race', 'raceDodge'],
-  },
-  {
-    id: 'diag',
-    title: 'Диагональ',
-    note: 'Тот же генератор и та же доска, менялось только право вставать на пустую диагональ.',
-    modes: ['campaignFreeDiag', 'campaignStrictDiag'],
-  },
-];
-
-const HEAD = [
+const DIAGONAL_HEAD = [
   'Режим',
   'Поле',
   'С решением',
@@ -79,80 +51,74 @@ const HEAD = [
   'Ушло',
   'Выбор',
   'Форс',
-  'Жизнь',
   'Разных досок',
   'Отличие соседних',
   'Реиграбельность',
 ];
 
-/** В бесконечном режиме победы нет, поэтому разбор до финиша к нему не применим. */
-const NO_GOAL: ModeId[] = ['endless'];
-
 export function VariantsPanel({ level }: { level: number }): ReactNode {
-  const [picks, setPicks] = useState<ModeId[]>(DEFAULT_PICKS);
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
   const [seed, setSeed] = useState(DEFAULT_SEED);
-  const [running, setRunning] = useState(false);
-  const [done, setDone] = useState(0);
-  const [sample, setSample] = useState<{ mode: ModeId; done: number; total: number } | null>(null);
+  const [levels, setLevels] = useState(LEVELS_LADDER);
+
   const [reports, setReports] = useState<VariantReport[]>([]);
+  const [running, setRunning] = useState(false);
+  const [sample, setSample] = useState<{ mode: ModeId; done: number; total: number } | null>(null);
   const [error, setError] = useState('');
-  const [copied, setCopied] = useState('');
   const [stopped, setStopped] = useState(false);
-  const [jamLevels, setJamLevels] = useState(JAM_LADDER);
+  const [note, setNote] = useState('');
+
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
   const [jamRunning, setJamRunning] = useState(false);
   const [jamDone, setJamDone] = useState({ done: 0, total: 0 });
   const [jamError, setJamError] = useState('');
+
+  const [raceRows, setRaceRows] = useState<RaceMeasure[]>([]);
+  const [raceRunning, setRaceRunning] = useState(false);
+  const [raceDone, setRaceDone] = useState({ done: 0, total: 0 });
+  const [raceError, setRaceError] = useState('');
+
   const busyRef = useRef(false);
+  const suiteRef = useRef<{ cancel: () => void } | null>(null);
   const jamBusyRef = useRef(false);
   const jamSuiteRef = useRef<{ cancel: () => void } | null>(null);
+  const raceBusyRef = useRef(false);
+  const raceSuiteRef = useRef<{ cancel: () => void } | null>(null);
   const stopRef = useRef(false);
-  const suiteRef = useRef<{ cancel: () => void } | null>(null);
 
-  const ordered = useMemo(
-    () => picks.slice().sort((a, b) => MODE_ORDER.indexOf(a) - MODE_ORDER.indexOf(b)),
-    [picks],
+  const parsedLevels = useMemo(
+    () =>
+      levels
+        .split(',')
+        .map((value) => Math.max(1, Math.min(120, Number(value.trim()) || 0)))
+        .filter((value) => value > 0)
+        .slice(0, 12),
+    [levels],
   );
+
   const byMode = useMemo(() => new Map(reports.map((report) => [report.mode, report])), [reports]);
 
-  const toggle = (mode: ModeId) => {
-    setPicks((current) => (current.includes(mode) ? current.filter((item) => item !== mode) : [...current, mode]));
-  };
-
-  const toggleGroup = (group: Group) => {
-    setPicks((current) => {
-      const all = group.modes.every((mode) => current.includes(mode));
-      const rest = current.filter((mode) => !group.modes.includes(mode));
-      return all ? rest : [...rest, ...group.modes];
-    });
-  };
-
-  const run = () => {
-    if (busyRef.current || ordered.length === 0) return;
+  const runDiagonal = () => {
+    if (busyRef.current) return;
     busyRef.current = true;
     stopRef.current = false;
     setRunning(true);
     setError('');
-    setCopied('');
-    setDone(0);
+    setNote('');
     setStopped(false);
-    setSample({ done: 0, total: samples, mode: ordered[0] });
     setReports([]);
+    setSample({ mode: DIAGONAL_PAIR[0], done: 0, total: samples });
     const suite = runVariantSuite(
-      { modes: ordered, level, samples, seed },
+      { modes: DIAGONAL_PAIR, level, samples, seed },
       {
-        onSample: (mode, sampleDone, sampleTotal) => setSample({ done: sampleDone, total: sampleTotal, mode }),
-        onReport: (item) => {
-          setReports((current) => [...current, item]);
-          setDone((current) => current + 1);
-        },
+        onSample: (mode, done, total) => setSample({ mode, done, total }),
+        onReport: (item) => setReports((current) => [...current, item]),
       },
     );
     suiteRef.current = suite;
     suite.done
-      .catch((error: unknown) => {
-        if (!stopRef.current) setError(error instanceof Error ? error.message : 'Прогон не удался');
+      .catch((runError: unknown) => {
+        if (!stopRef.current) setError(runError instanceof Error ? runError.message : 'Прогон не удался');
       })
       .finally(() => {
         setRunning(false);
@@ -162,34 +128,27 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       });
   };
 
-  const parsedLevels = useMemo(
-    () =>
-      jamLevels
-        .split(',')
-        .map((value) => Math.max(1, Math.min(120, Number(value.trim()) || 0)))
-        .filter((value) => value > 0)
-        .slice(0, 12),
-    [jamLevels],
-  );
-
   const runJam = () => {
     if (jamBusyRef.current || parsedLevels.length === 0) return;
     jamBusyRef.current = true;
+    stopRef.current = false;
     setJamRunning(true);
     setJamError('');
     setJamRows([]);
     setJamDone({ done: 0, total: parsedLevels.length });
     const suite = runJamSuite(
       { levels: parsedLevels, samples, seed },
-      { onRow: (row, doneRows, totalRows) => {
+      {
+        onRow: (row, done, total) => {
           setJamRows((current) => [...current, row]);
-          setJamDone({ done: doneRows, total: totalRows });
-        } },
+          setJamDone({ done, total });
+        },
+      },
     );
     jamSuiteRef.current = suite;
     suite.done
-      .catch((error: unknown) => {
-        if (!stopRef.current) setJamError(error instanceof Error ? error.message : 'Замер не удался');
+      .catch((runError: unknown) => {
+        if (!stopRef.current) setJamError(runError instanceof Error ? runError.message : 'Замер не удался');
       })
       .finally(() => {
         setJamRunning(false);
@@ -198,58 +157,55 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
       });
   };
 
-  const stopJam = () => {
-    stopRef.current = true;
-    jamSuiteRef.current?.cancel();
+  const runRace = () => {
+    if (raceBusyRef.current || parsedLevels.length === 0) return;
+    raceBusyRef.current = true;
+    stopRef.current = false;
+    setRaceRunning(true);
+    setRaceError('');
+    setRaceRows([]);
+    setRaceDone({ done: 0, total: parsedLevels.length });
+    const suite = runRaceSuite(
+      { levels: parsedLevels, samples: Math.max(MIN_SAMPLES, Math.min(120, Math.round(samples / 2))), seed },
+      {
+        onRow: (row, done, total) => {
+          setRaceRows((current) => [...current, row]);
+          setRaceDone({ done, total });
+        },
+      },
+    );
+    raceSuiteRef.current = suite;
+    suite.done
+      .catch((runError: unknown) => {
+        if (!stopRef.current) setRaceError(runError instanceof Error ? runError.message : 'Прогон не удался');
+      })
+      .finally(() => {
+        setRaceRunning(false);
+        raceBusyRef.current = false;
+        raceSuiteRef.current = null;
+      });
   };
 
-  const stop = () => {
+  const stopAll = () => {
     stopRef.current = true;
     setStopped(true);
     suiteRef.current?.cancel();
+    jamSuiteRef.current?.cancel();
+    raceSuiteRef.current?.cancel();
   };
 
-  const report = useMemo(() => buildText(reports, { level, samples, seed }), [reports, level, samples, seed]);
+  const conclusion = useMemo(() => diagonalConclusion(reports), [reports]);
 
-  const copy = async () => {
-    const ok = await writeClipboard(report);
-    setCopied(ok ? 'Скопировано. Вставляй прямо в чат.' : 'Буфер обмена недоступен, выдели текст и скопируй вручную.');
-  };
-
-  const copyJam = async () => {
-    const ok = await writeClipboard(jamText(jamRows, { samples, seed }));
-    setCopied(ok ? 'Таблица парковки скопирована.' : 'Буфер обмена недоступен, выдели текст и скопируй вручную.');
+  const copy = async (text: string) => {
+    const ok = await writeClipboard(text);
+    setNote(ok ? 'Скопировано. Вставляй прямо в чат или в `docs/modes.md`.' : 'Буфер обмена недоступен, выдели текст вручную.');
   };
 
   return (
     <Panel
-      title="Прогон сравнений"
-      note={`Уровень ${level}: доска и число фигур из его полос, отбор по полосе режима. 1000 досок на вариант: лёгкие режимы считаются секунды, «Гонки на уклонение» и строгая диагональ до полуминуты, на 24 уровне дольше`}
+      title="Прогоны: кампания, парковка, гонки"
+      note={`Уровень ${level} задаёт доску и число фигур для кампании; «Парковка» и «Гонки» считают свою лестницу уровней. 1000 досок на вариант это секунды, перебор «Гонок» - десятки секунд, поэтому всё в воркере`}
     >
-      <div className="adm-variant-groups">
-        {GROUPS.map((group) => (
-          <div key={group.id} className="adm-variant-group">
-            <label className="adm-check is-group">
-              <GroupCheck
-                group={group}
-                picks={picks}
-                onToggle={() => toggleGroup(group)}
-              />
-              <span>{group.title}</span>
-            </label>
-            <p className="adm-note">{group.note}</p>
-            <div className="adm-checks">
-              {group.modes.map((mode) => (
-                <label key={mode} className={`adm-check${modeFamily(mode) === mode ? '' : ' is-variant'}`}>
-                  <input type="checkbox" checked={picks.includes(mode)} onChange={() => toggle(mode)} />
-                  <span>{modeDef(mode).name}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
       <div className="adm-row-actions">
         <label className="adm-field is-inline">
           <span className="adm-label">Досок на вариант</span>
@@ -274,6 +230,16 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             onChange={(event) => setSeed(Math.abs(Number(event.target.value)) || 1)}
           />
         </label>
+        <label className="adm-field is-inline">
+          <span className="adm-label">Уровни для «Парковки» и «Гонок»</span>
+          <input
+            type="text"
+            value={levels}
+            onChange={(event) => setLevels(event.target.value)}
+            placeholder={LEVELS_LADDER}
+            disabled={jamRunning || raceRunning}
+          />
+        </label>
       </div>
 
       <div className="adm-checks">
@@ -283,138 +249,122 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             type="button"
             className={`adm-chip${samples === value ? ' is-active' : ''}`}
             onClick={() => setSamples(value)}
-            disabled={running}
+            disabled={running || jamRunning || raceRunning}
           >
             {value}
           </button>
         ))}
-      </div>
-
-      <div className="adm-row-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={run}
-          disabled={running || ordered.length === 0}
-        >
-          {running ? `Вариант ${done + 1} из ${ordered.length}` : `Сравнить (${ordered.length})`}
-        </button>
-        {running && (
-          <button type="button" className="btn btn-outline" onClick={stop}>
+        {(running || jamRunning || raceRunning) && (
+          <button type="button" className="btn btn-quiet" onClick={stopAll}>
             Остановить
           </button>
         )}
-        <button type="button" className="btn btn-quiet" onClick={() => setPicks(DEFAULT_PICKS)} disabled={running}>
-          Сбросить выбор
-        </button>
-        <button
-          type="button"
-          className="btn btn-quiet"
-          onClick={() => setPicks([])}
-          disabled={running || picks.length === 0}
-        >
-          Снять все
-        </button>
-        {reports.length > 0 && (
-          <button type="button" className="btn btn-quiet" onClick={() => void copy()}>
-            Скопировать текст
-          </button>
-        )}
       </div>
 
-      {running && sample && (
-        <p className="adm-progress" aria-live="polite">
-          {modeDef(sample.mode).name}: {sample.done} из {sample.total}
-        </p>
-      )}
+      {note && <StatusLine kind="ok">{note}</StatusLine>}
 
-      {error && <StatusLine kind="error">{error}</StatusLine>}
-      {copied && <StatusLine kind="ok">{copied}</StatusLine>}
-
-      <Table head={HEAD} empty="Отметь режимы галочками выше и нажми «Сравнить»">
-        {ordered.map((mode) => {
-          const item = byMode.get(mode);
-          const geo = boardForMode(mode, level);
-          if (!item) {
+      <section className="adm-suite">
+        <div className="adm-suite-head">
+          <h3 className="adm-suite-title">Кампания: диагональ только бить или свободно</h3>
+          <p className="adm-note">
+            Один и тот же генератор, две версии права на пустую диагональ. Смотрим длину решения, развилки и
+            реиграбельность: если «диагональ только бить» не хуже, правило можно оставить как есть.
+          </p>
+        </div>
+        <div className="adm-row-actions">
+          <button type="button" className="btn btn-outline" onClick={runDiagonal} disabled={running}>
+            {running && sample ? `${modeDef(sample.mode).name}: ${sample.done} из ${sample.total}` : 'Сравнить диагональ'}
+          </button>
+          {reports.length > 0 && (
+            <button type="button" className="btn btn-quiet" onClick={() => void copy(diagonalText(reports, { level, samples, seed }))}>
+              Скопировать
+            </button>
+          )}
+        </div>
+        {error && <StatusLine kind="error">{error}</StatusLine>}
+        <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона вариантов">
+          {DIAGONAL_PAIR.map((mode) => {
+            const item = byMode.get(mode);
+            const geo = boardForMode(mode, level);
+            if (!item) {
+              return (
+                <tr key={mode}>
+                  <td>{modeDef(mode).name}</td>
+                  <td className="is-mono">
+                    {geo.width}×{geo.height}
+                  </td>
+                  <td colSpan={DIAGONAL_HEAD.length - 2} className="adm-muted">
+                    {running ? 'считаем' : 'нет данных'}
+                  </td>
+                </tr>
+              );
+            }
             return (
               <tr key={mode}>
                 <td>{modeDef(mode).name}</td>
                 <td className="is-mono">
                   {geo.width}×{geo.height}
                 </td>
-                <td colSpan={HEAD.length - 2} className="adm-muted">
-                  {running ? 'считаем' : 'нет данных'}
+                <td>{formatPercent(item.solvableShare, 1)}</td>
+                <td>{item.avgScore}</td>
+                <td>{item.avgSteps.toFixed(2)}</td>
+                <td>{item.avgCaptures.toFixed(2)}</td>
+                <td>{item.avgEscapes.toFixed(2)}</td>
+                <td>{item.avgChoiceSteps.toFixed(2)}</td>
+                <td>{formatPercent(item.forcedShare, 0)}</td>
+                <td>
+                  {item.uniqueLayouts} из {item.samples}
+                  {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
                 </td>
+                <td>{formatPercent(item.layoutDistance, 1)}</td>
+                <td>{item.replayIndex}</td>
               </tr>
             );
-          }
-          return (
-            <tr key={mode}>
-              <td>{modeDef(mode).name}</td>
-              <td className="is-mono">
-                {geo.width}×{geo.height}
-              </td>
-              <td>{NO_GOAL.includes(mode) ? 'нет цели' : formatPercent(item.solvableShare, 1)}</td>
-              <td>{item.avgScore}</td>
-              <td>{item.avgSteps.toFixed(2)}</td>
-              <td>{item.avgCaptures.toFixed(2)}</td>
-              <td>{item.avgEscapes.toFixed(2)}</td>
-              <td>{item.avgChoiceSteps.toFixed(2)}</td>
-              <td>{formatPercent(item.forcedShare, 0)}</td>
-              <td className="is-mono">{survivalText(item)}</td>
-              <td>
-                {item.uniqueLayouts} из {item.samples}
-                {item.fallbacks > 0 ? `, откатов ${item.fallbacks}` : ''}
-              </td>
-              <td>{formatPercent(item.layoutDistance, 1)}</td>
-              <td>{item.replayIndex}</td>
-            </tr>
-          );
-        })}
-      </Table>
+          })}
+        </Table>
+        {conclusion && <p className="adm-suite-note">{conclusion}</p>}
+        {reports.length > 0 && <pre className="adm-code adm-copyable">{diagonalText(reports, { level, samples, seed })}</pre>}
+      </section>
 
-      {reports.length > 0 && (
-        <>
-          <div className="adm-row-actions">
-            <span className="adm-muted">
-              {stopped ? 'Остановлено на' : 'Готово:'} {reports.length} из {ordered.length} вариантов, {samples} досок
-              каждый{running ? ', считаем дальше' : ''}
-            </span>
-          </div>
-          <pre className="adm-code adm-copyable">{report}</pre>
-        </>
-      )}
-
-      <div className="adm-variant-jam">
+      <section className="adm-suite">
+        <div className="adm-suite-head">
+          <h3 className="adm-suite-title">Парковка: сложность и реиграбельность</h3>
+          <p className="adm-note">
+            Головоломка без финиша по времени: важна длина плана, число развилок на нём и то, насколько генератор
+            даёт разные доски. «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема: низкое
+            прощение значит «один неверный ход, и всё», то есть головоломку заучивают, а не решают.
+          </p>
+        </div>
         <div className="adm-row-actions">
-          <label className="adm-field is-inline">
-            <span className="adm-label">Уровни «Парковки»</span>
-            <input
-              type="text"
-              value={jamLevels}
-              onChange={(event) => setJamLevels(event.target.value)}
-              disabled={jamRunning}
-              placeholder={JAM_LADDER}
-            />
-          </label>
           <button type="button" className="btn btn-outline" onClick={runJam} disabled={jamRunning || parsedLevels.length === 0}>
             {jamRunning ? `Уровень ${jamDone.done} из ${jamDone.total || parsedLevels.length}` : `Замерить генератор (${parsedLevels.length})`}
           </button>
-          {jamRunning && (
-            <button type="button" className="btn btn-quiet" onClick={stopJam}>
-              Остановить
-            </button>
-          )}
           {jamRows.length > 0 && (
-            <button type="button" className="btn btn-quiet" onClick={() => void copyJam()}>
-              Скопировать таблицу
+            <button type="button" className="btn btn-quiet" onClick={() => void copy(jamText(jamRows, { samples, seed }))}>
+              Скопировать
             </button>
           )}
         </div>
         {jamError && <StatusLine kind="error">{jamError}</StatusLine>}
+        {jamRows.length > 0 && <pre className="adm-code adm-copyable">{jamText(jamRows, { samples, seed })}</pre>}
         <Table
-          head={['Уровень', 'Поле', 'Фигур', 'План, ходы', 'Разброс', 'Решаемых', 'Сверх бюджета']}
-          empty="Замер считает расстановки тем же генератором, что выдаёт бою: длина плана решателя и доля полей, которые решатель взял"
+          head={[
+            'Уровень',
+            'Поле',
+            'Фигур',
+            'План, ходы',
+            'Разброс',
+            'Решаемых',
+            'Сверх бюджета',
+            'Развилка',
+            'Прощение',
+            'Запас',
+            'Уникальных',
+            'Отличие досок',
+            'Сложность',
+            'Реиграбельность',
+          ]}
+          empty="Замер берёт расстановки тем же генератором, что выдаёт бою"
         >
           {parsedLevels.map((value) => {
             const item = jamRows.find((row) => row.level === value);
@@ -422,7 +372,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
               return (
                 <tr key={value}>
                   <td>{value}</td>
-                  <td colSpan={6} className="adm-muted">
+                  <td colSpan={13} className="adm-muted">
                     {jamRunning ? 'считаем' : 'нет данных'}
                   </td>
                 </tr>
@@ -441,94 +391,225 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
                 </td>
                 <td>{formatPercent(item.solvedShare, 1)}</td>
                 <td className={item.overBudget > 0 ? 'is-warn' : undefined}>{item.overBudget}</td>
+                <td>{item.avgChoice}</td>
+                <td>{formatPercent(item.forgiveness, 0)}</td>
+                <td className="is-mono">
+                  {item.slackAvg} из {item.budgetAvg}
+                </td>
+                <td>
+                  {item.uniqueLayouts} из {item.samples}
+                </td>
+                <td>{formatPercent(item.layoutDistance, 1)}</td>
+                <td>{item.difficulty}</td>
+                <td>{item.replayIndex}</td>
               </tr>
             );
           })}
         </Table>
-      </div>
+      </section>
+
+      <section className="adm-suite">
+        <div className="adm-suite-head">
+          <h3 className="adm-suite-title">Гонки: сколько можно играть до нерешаемой позиции</h3>
+          <p className="adm-note">
+            Король заперт в двух нижних рядах ({RACE_MIN_WIDTH}×{RACE_ROWS} на старте, рост вширь до {RACE_WIDTH}{' '}
+            колонок), сдвиг поля его не убивает. Прогон играет жадным ботом и на каждом ходе перебирает ответы фигур:
+            «до нерешаемой» - номер хода, после которого от фигуры уже не уйти ни одним ходом.
+          </p>
+        </div>
+        <div className="adm-row-actions">
+          <button type="button" className="btn btn-outline" onClick={runRace} disabled={raceRunning || parsedLevels.length === 0}>
+            {raceRunning ? `Уровень ${raceDone.done} из ${raceDone.total || parsedLevels.length}` : `Прогнать гонки (${parsedLevels.length})`}
+          </button>
+          {raceRows.length > 0 && (
+            <button type="button" className="btn btn-quiet" onClick={() => void copy(raceText(raceRows, { samples, seed }))}>
+              Скопировать
+            </button>
+          )}
+        </div>
+        {raceError && <StatusLine kind="error">{raceError}</StatusLine>}
+        {raceRows.length > 0 && <pre className="adm-code adm-copyable">{raceText(raceRows, { samples, seed })}</pre>}
+        <Table
+          head={[
+            'Уровень',
+            'Ширина в конце',
+            'Ходов до нерешаемой',
+            'Разброс',
+            'Партия, ходов',
+            'Решаемых до конца',
+            'Взятий',
+            'Чем кончились',
+          ]}
+          empty="Прогон считает перебором: ход, после которого любой ответ фигур ведёт к смерти"
+        >
+          {parsedLevels.map((value) => {
+            const item = raceRows.find((row) => row.level === value);
+            if (!item) {
+              return (
+                <tr key={value}>
+                  <td>{value}</td>
+                  <td colSpan={7} className="adm-muted">
+                    {raceRunning ? 'считаем' : 'нет данных'}
+                  </td>
+                </tr>
+              );
+            }
+            return (
+              <tr key={value}>
+                <td>{value}</td>
+                <td className="is-mono">{item.widthEnd.toFixed(1)}</td>
+                <td className="is-mono">
+                  {item.doomMedian} (в среднем {item.doomAvg.toFixed(1)})
+                </td>
+                <td className="is-mono">
+                  {item.doomMin}-{item.doomMax}
+                </td>
+                <td className="is-mono">
+                  {item.lengthMedian} (в среднем {item.lengthAvg.toFixed(1)})
+                </td>
+                <td>{formatPercent(1 - item.doomShare, 0)}</td>
+                <td>{item.capturesAvg.toFixed(1)}</td>
+                <td className="adm-muted">{causesText(item.causes)}{item.capped > 0 ? `, потолок ${item.capped}` : ''}</td>
+              </tr>
+            );
+          })}
+        </Table>
+      </section>
 
       <p className="adm-note">
-        Индекс реиграбельности это 40% разнообразия генератора, 25% отличия соседних уровней, 25% шагов с
-        выбором и 10% отсутствия безальтернативных ходов. «Ушло» это сколько фигур покинуло поле по пути
-        решения, «Жизнь» средняя длина забега в ходах: у короля её считает прогон жадного бота, потому что
-        деревом поиска восемь направлений на двенадцати рядах не перебираются,
-        «откаты» сколько досок генератор сдал без отбора по полосе.
+        «Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10%
+        отсутствия безальтернативных ходов. «Ушло» - сколько фигур покинуло поле по пути решения. В гонках
+        «решаемых до конца» - доля забегов, где партия кончилась прежде, чем позиция стала нерешаемой: ноль означает,
+        что игрок всегда умирает в позиции, где ходить было некуда.
       </p>
     </Panel>
   );
 }
 
-/** Групповой чекбокс показывает неполный выбор полосы, иначе он вводит в заблуждение. */
-function GroupCheck({ group, picks, onToggle }: { group: Group; picks: ModeId[]; onToggle: () => void }): ReactNode {
-  const ref = useRef<HTMLInputElement>(null);
-  const all = group.modes.every((mode) => picks.includes(mode));
-  const some = group.modes.some((mode) => picks.includes(mode));
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = !all && some;
-  }, [all, some]);
-  return <input ref={ref} type="checkbox" checked={all} onChange={onToggle} />;
+/** Короткий вывод по двум вариантам диагонали: что лучше, и насколько. */
+function diagonalConclusion(reports: VariantReport[]): string {
+  if (reports.length < 2) return '';
+  const byIndex = [...reports].sort((a, b) => b.replayIndex - a.replayIndex);
+  const best = byIndex[0];
+  const worst = byIndex[byIndex.length - 1];
+  const delta = +(best.replayIndex - worst.replayIndex).toFixed(3);
+  if (delta < 0.02) {
+    return `Разницы по реиграбельности почти нет (${delta}): вариант с диагональю можно выбирать по вкусу, а не по цифрам.`;
+  }
+  const steps = best.avgSteps - worst.avgSteps;
+  return (
+    `Выигрыш у «${modeDef(best.mode).name}» (+${delta} к реиграбельности, решение ${
+      best.avgSteps
+    } хода против ${worst.avgSteps}, ${steps >= 0 ? 'длиннее' : 'короче'}). ` +
+    `Разных досок: ${best.uniqueLayouts}/${best.samples} против ${worst.uniqueLayouts}/${worst.samples}.`
+  );
 }
 
-/** Текст замера генератора: его же вставляем в `docs/modes.md`, поэтому формат markdown. */
+/** Причины конца забега человеческим языком: ключи `lastEvent` админу ничего не говорят. */
+const CAUSE_NAME: Record<string, string> = {
+  captured: 'поимка',
+  stuck: 'тупик',
+  swept: 'унесло ряд',
+  won: 'победа',
+  capped: 'потолок просчёта',
+};
+
+function causesText(causes: Record<string, number>): string {
+  const entries = Object.entries(causes);
+  if (entries.length === 0) return 'нет данных';
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .map(([cause, count]) => `${CAUSE_NAME[cause] ?? cause} ${count}`)
+    .join(', ');
+}
+
+/** Текст замера генератора «Парковки»: его же вставляем в `docs/modes.md`. */
 function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): string {
-  const head = ['Уровень', 'Поле', 'Фигур', 'План, ходы', 'Мин', 'Макс', 'Решаемых', 'Сверх бюджета'];
+  const head = [
+    'Уровень',
+    'Поле',
+    'Фигур',
+    'План, ходы',
+    'Мин',
+    'Макс',
+    'Решаемых',
+    'Сверх бюджета',
+    'Развилка',
+    'Прощение',
+    'Запас',
+    'Уникальных',
+    'Сложность',
+    'Реиграб.',
+  ];
   const lines = [`Замер генератора «Парковки», по ${meta.samples} полей на уровень, зерно ${meta.seed}`, ''];
   lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
   for (const row of rows) {
     lines.push(
-      `| ${row.level} | ${row.width}x${row.height} | ${row.avgPieces} | ${row.avgCost} | ${row.minCost} | ${row.maxCost} | ${(row.solvedShare * 100).toFixed(1)}% | ${row.overBudget} |`,
+      `| ${row.level} | ${row.width}x${row.height} | ${row.avgPieces} | ${row.avgCost} | ${row.minCost} | ${row.maxCost} | ${(row.solvedShare * 100).toFixed(1)}% | ${row.overBudget} | ${row.avgChoice} | ${(row.forgiveness * 100).toFixed(0)}% | ${row.slackAvg}/${row.budgetAvg} | ${row.uniqueLayouts}/${row.samples} | ${row.difficulty} | ${row.replayIndex} |`,
     );
   }
   lines.push('');
-  lines.push('«План, ходы» длина решения, которое нашёл решатель, «Сверх бюджета» поля, где план не влез в данный бюджет.');
+  lines.push(
+    '«План, ходы» - длина решения решателя, «Сверх бюджета» - поля, где план не влез в бюджет, «Развилка» - среднее число легальных ходов на шаге, «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема, «Запас» - сколько ходов бюджета остаётся после плана, «Сложность» и «Реиграб.» - сводные индексы 0..1.',
+  );
   return lines.join('\n');
 }
 
-function survivalText(report: VariantReport): string {
-  if (!report.survival) return 'н/д';
-  const { avg, min, max, capped } = report.survival;
-  return `${avg} (${min}-${max})${capped > 0 ? `, упор ${capped}` : ''}`;
-}
-
-function buildText(
-  reports: VariantReport[],
-  meta: { level: number; samples: number; seed: number },
-): string {
-  const lines: string[] = [
-    `Прогон сравнений, уровень ${meta.level}, по ${meta.samples} досок на вариант, зерно ${meta.seed}`,
+/** Текст прогона «Гонок»: длина партии до нерешаемой позиции. */
+function raceText(rows: RaceMeasure[], meta: { samples: number; seed: number }): string {
+  const head = ['Уровень', 'Старт', 'Ширина в конце', 'До нерешаемой (медиана)', 'среднее', 'разброс', 'Партия (медиана)', 'Взятий', 'Чем кончились'];
+  const lines = [
+    `Прогон «Гонок», поле ${RACE_MIN_WIDTH}x${RACE_ROWS} с ростом вширь до ${RACE_WIDTH}, полоса короля - два нижних ряда; по ${meta.samples} забегов на уровень, зерно ${meta.seed}`,
     '',
-    `| ${HEAD.join(' | ')} |`,
-    `| ${HEAD.map(() => '---').join(' | ')} |`,
+    `| ${head.join(' | ')} |`,
+    `| ${head.map(() => '---').join(' | ')} |`,
   ];
-  for (const item of reports) {
-    const geo = boardForMode(item.mode, meta.level);
-    const cells = [
-      modeDef(item.mode).name,
-      `${geo.width}x${geo.height}`,
-      NO_GOAL.includes(item.mode) ? 'нет цели' : `${(item.solvableShare * 100).toFixed(1)}%`,
-      `${item.avgScore}`,
-      item.avgSteps.toFixed(2),
-      item.avgCaptures.toFixed(2),
-      item.avgEscapes.toFixed(2),
-      item.avgChoiceSteps.toFixed(2),
-      `${(item.forcedShare * 100).toFixed(0)}%`,
-      survivalText(item),
-      `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
-      `${(item.layoutDistance * 100).toFixed(1)}%`,
-      `${item.replayIndex}`,
-    ];
-    lines.push(`| ${cells.join(' | ')} |`);
+  for (const row of rows) {
+    lines.push(
+      `| ${row.level} | ${row.widthStart} | ${row.widthEnd.toFixed(1)} | ${row.doomMedian} | ${row.doomAvg.toFixed(1)} | ${row.doomMin}-${row.doomMax} | ${row.lengthMedian} (avg ${row.lengthAvg.toFixed(1)}) | ${row.capturesAvg.toFixed(1)} | ${causesText(row.causes)} |`,
+    );
   }
   lines.push('');
   lines.push(
-    'Индекс реиграбельности: 40% разнообразия генератора, 25% отличия соседних уровней, 25% шагов с выбором, 10% отсутствия безальтернативных ходов.',
+    '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Взятий» - сколько фигур снял бот: без взятий полоса забивается раньше.',
   );
-  lines.push(
-    '«Ушло» это сколько фигур покинуло поле по пути решения, «Жизнь» средняя длина уклонения в ходах, «откатов» сколько досок генератор сдал без отбора по полосе.',
-  );
-  if (reports.some((item) => NO_GOAL.includes(item.mode))) {
-    lines.push('«Бесконечный» помечен как «нет цели»: победы в нём нет, поэтому нули это не дефект, а отсутствие финиша.');
+  return lines.join('\n');
+}
+
+/** Текст сравнения диагонали в markdown. */
+function diagonalText(
+  reports: VariantReport[],
+  meta: { level: number; samples: number; seed: number },
+): string {
+  const lines = [
+    `Кампания: диагональ свободно или только бить, уровень ${meta.level}, по ${meta.samples} досок, зерно ${meta.seed}`,
+    '',
+    `| ${DIAGONAL_HEAD.join(' | ')} |`,
+    `| ${DIAGONAL_HEAD.map(() => '---').join(' | ')} |`,
+  ];
+  for (const item of reports) {
+    const geo = boardForMode(item.mode, meta.level);
+    lines.push(
+      `| ${[
+        modeDef(item.mode).name,
+        `${geo.width}x${geo.height}`,
+        `${(item.solvableShare * 100).toFixed(1)}%`,
+        `${item.avgScore}`,
+        item.avgSteps.toFixed(2),
+        item.avgCaptures.toFixed(2),
+        item.avgEscapes.toFixed(2),
+        item.avgChoiceSteps.toFixed(2),
+        `${(item.forcedShare * 100).toFixed(0)}%`,
+        `${item.uniqueLayouts}/${item.samples}${item.fallbacks > 0 ? ` (откатов ${item.fallbacks})` : ''}`,
+        `${(item.layoutDistance * 100).toFixed(1)}%`,
+        `${item.replayIndex}`,
+      ].join(' | ')} |`,
+    );
   }
+  lines.push('');
+  lines.push(
+    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» и «форс» - развилки на пути решения; «реиграбельность» - сводный индекс.',
+  );
   return lines.join('\n');
 }
 

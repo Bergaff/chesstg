@@ -10,7 +10,9 @@ import {
   toProfile,
 } from './db';
 import { RACE_KING_ROW, RACE_MIN_WIDTH, RACE_ROWS, RACE_WIDTH } from '../src/engine';
+import { replayRun } from '../src/engine';
 import { isPrefix, jsonAction, parseActions, parseRunMode } from './http';
+import type { GameState } from '../src/engine';
 import type { UserRow } from './types';
 
 /** Строка игрока с минимальным набором полей: остальные для прогресса не важны. */
@@ -204,6 +206,19 @@ describe('активная партия и поле прежней сборки'
   it('головоломку отличает от прежней песочницы с тем же mode', () => {
     expect(runShapeMatchesMode(runRow())).toBe(true);
     expect(runShapeMatchesMode(runRow({ initial_state: JSON.stringify(sandbox) }))).toBe(false);
+  });
+
+  it('журнал прежних правил не проигрывается: такую партию старт закрывает', () => {
+    // До правила полосы король ехал вместе с рядом, и шаг вверх из второго ряда
+    // был легален. Теперь он выводит за границу полосы, реплей падает, и `app.ts`
+    // через `resumableByReplay` закрывает такую партию как выход - игроку не
+    // нужно ничего обнулять руками в базе.
+    const actions = parseActions([{ type: 'move', dx: 0, dy: 1 }], 'race');
+    expect(actions.length).toBe(1);
+    expect(() => replayRun(king as unknown as GameState, actions)).toThrow(/полос/);
+    // Тот же журнал разбирался и в прежних правилах: отказывает только воспроизведение
+    // по новым, поэтому проверка формы (`runShapeMatchesMode`) тут проходит.
+    expect(runShapeMatchesMode({ mode: 'race', initial_state: JSON.stringify(king) })).toBe(true);
   });
 
   it('у гонок требует короля в стартовом ряду', () => {
