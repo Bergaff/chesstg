@@ -228,6 +228,16 @@ describe.runIf(apiReachable)('API integration', () => {
     const install = await api('/api/skins/install', { method: 'POST', body: JSON.stringify({ id: 999999 }) });
     expect(install.status).toBe(404);
 
+    // Публикация без взноса - путь льготного списка. Обычному аккаунту сервер
+    // отвечает 403 и отправляет в магазин: взнос и есть фильтр очереди.
+    const freePublish = await api('/api/skins/publish', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'Без взноса', glyph: '♟', tokens: readableTokens } }),
+    });
+    expect(freePublish.status).toBe(403);
+    expect(freePublish.data.error).toBe('payment_required');
+    expect(freePublish.data.message).toContain('магаз');
+
     // Тема, за которую не платили, не надевается - кроме витрины сезона и наград.
     const locked = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'royal' }) });
     expect([200, 403]).toContain(locked.status);

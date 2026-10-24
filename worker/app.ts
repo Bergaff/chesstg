@@ -69,7 +69,7 @@ import { build as BUILD } from '../version.json';
 import {
   activeRuns,
   customSkinOf,
-  eternalLives,
+  qaAccount,
   getOrCreateUser,
   getRun,
   getUserById,
@@ -89,7 +89,7 @@ import {
   toProfile,
 } from './db';
 import { fail, HttpError, isPrefix, parseActions, parseRunMode, parseStartOptions, readJson, nowMs } from './http';
-import { createInvoice, fulfillPayment, getPayment, isProductSku, refundPayment } from './payments';
+import { createInvoice, fulfillPayment, getPayment, isProductSku, publishSkinShare, refundPayment } from './payments';
 import {
   answerCallbackQuery,
   answerPreCheckout,
@@ -227,7 +227,7 @@ function isLocalOrigin(origin: string): boolean {
 
 async function sessionBody(env: WorkerEnv, authCtx: AppEnv['Variables']['auth'], extra: Record<string, unknown> = {}) {
   return {
-    profile: toProfile(authCtx.user, nowMs(), eternalLives(env, authCtx.user)),
+    profile: toProfile(authCtx.user, nowMs(), qaAccount(env, authCtx.user)),
     config: publicConfig(env),
     active: await activeRuns(env, authCtx.user.id),
     invitedCount: await invitedCount(env, authCtx.user.id),
@@ -515,7 +515,7 @@ app.get('/api/auth/link', async (c) => {
     .run()
     .catch(() => undefined);
 
-  return c.json({ status: 'linked', token: session, merged, profile: toProfile(user, nowMs(), eternalLives(c.env, user)), config: publicConfig(c.env) });
+  return c.json({ status: 'linked', token: session, merged, profile: toProfile(user, nowMs(), qaAccount(c.env, user)), config: publicConfig(c.env) });
 });
 
 /** Выход на сайте: токен подписан и ничего не хранит, поэтому достаточно удалить его у клиента. */
@@ -584,10 +584,10 @@ app.post('/api/run/start', async (c) => {
   }
 
   const lives = materializeLives(user.lives, user.lives_at, nowMs());
-  // Вечные сердца из `QA_LIVES_IDS` проходят мимо гейта: проверяющий не должен
+  // Вечные сердца и все льготы из `QA_LIVES_IDS`: проверяющий не должен
   // упираться в «жизни закончились» на середине забега.
-  const eternalStart = eternalLives(c.env, user);
-  if (lives.lives <= 0 && !eternalStart) {
+  const qaStart = qaAccount(c.env, user);
+  if (lives.lives <= 0 && !qaStart) {
     fail(402, 'no_lives', 'Жизни закончились. Подожди восстановления или возьми бонус.', {
       lives: 0,
       nextLifeAt: lives.livesAt + 30 * 60 * 1000,
@@ -727,7 +727,7 @@ app.post('/api/run/:id/finish', async (c) => {
   if (run.status !== 'active') {
     const storedResult = run.result ? JSON.parse(run.result) : { outcome: run.status };
     const user = await refreshLives(c.env, authCtx.user);
-    return c.json({ result: { ...storedResult, alreadyFinished: true }, profile: toProfile(user, nowMs(), eternalLives(c.env, user)) });
+    return c.json({ result: { ...storedResult, alreadyFinished: true }, profile: toProfile(user, nowMs(), qaAccount(c.env, user)) });
   }
 
   const body = await readJson(c);
@@ -762,7 +762,8 @@ app.post('/api/run/:id/finish', async (c) => {
   let user = await refreshLives(c.env, authCtx.user, now);
   // Вечные сердца: списание жизни пропускается целиком, награда, рекорды и
   // уровни режима считаются как обычно - режим про сердца, а не про льготы.
-  const eternal = eternalLives(c.env, user);
+  // Флаг льгот: жизни не списываются, «Пепел» считается выданным заранее.
+  const eternal = qaAccount(c.env, user);
   const outcome: 'won' | 'lost' | 'quit' =
     snapshot.status === 'won' ? 'won' : snapshot.status === 'lost' ? 'lost' : 'quit';
 
@@ -828,7 +829,7 @@ app.post('/api/run/:id/finish', async (c) => {
     // `replay` возвращает состояние любого режима, а взятия есть только у гонок с
     // кампанией - «Парковка» проходит по этой же ветке, если её когда-нибудь
     // допишут до журнала ходов.
-    if (survived >= ASH_RECORD_MOVES && !ownedSkins(user).includes('ash')) ashAward = true;
+    if (survived >= ASH_RECORD_MOVES && !ownedSkins(user, eternal).includes('ash')) ashAward = true;
     const taken = 'pieces' in state ? 0 : (state.captures ?? 0);
     reward = outcome === 'lost' ? raceCoinReward(survived, taken) : 0;
     if (newBest || raceLevelForMoves(survived) > progress.level) {
@@ -969,10 +970,10 @@ app.post('/api/run/:id/finish', async (c) => {
   if (Number(batch[0]?.meta?.changes ?? 0) === 0) {
     const again = await getRun(c.env, run.id);
     const storedResult = again?.result ? JSON.parse(again.result) : result;
-    return c.json({ result: { ...storedResult, alreadyFinished: true }, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
+    return c.json({ result: { ...storedResult, alreadyFinished: true }, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
   }
 
-  return c.json({ result, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
+  return c.json({ result, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
 });
 
 // ─────────────────────────────── Бонусы ───────────────────────────────
@@ -1089,7 +1090,7 @@ app.post('/api/shop/bonus', async (c) => {
 
   return c.json({
     ok: true,
-    profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)),
+    profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)),
     inventory: { hint: fresh.inv_hint, freeze: fresh.inv_freeze, undo: fresh.inv_undo },
   });
 });
@@ -1102,14 +1103,36 @@ app.post('/api/profile/skin', async (c) => {
   // Владелец темы решает сам, а «не открыто» отвечает только за то, за что
   // заплатили: бесплатные темы, своя тема и тема с витрины сезона открываются
   // без счёта - проверка одна на все три случая, `skinAvailable`.
-  if (!skinAvailable(authCtx.user, skin)) fail(403, 'skin_locked', 'Тема не открыта');
+  if (!skinAvailable(authCtx.user, skin, nowMs(), qaAccount(c.env, authCtx.user))) {
+    fail(403, 'skin_locked', 'Тема не открыта');
+  }
 
   await c.env.DB.prepare('UPDATE users SET skin = ?, updated_at = ? WHERE id = ?')
     .bind(skin, nowMs(), authCtx.user.id)
     .run();
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
-  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
+  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
+});
+
+/**
+ * Публикация своей темы без взноса. Путь один: аккаунт из `QA_LIVES_IDS`.
+ * Остальным очередь открывает счёт на звёзды - взнос и есть фильтр, и платить
+ * за чужую проверку из воздуха сервер не разрешает.
+ */
+app.post('/api/skins/publish', async (c) => {
+  const authCtx = auth(c);
+  if (!qaAccount(c.env, authCtx.user)) {
+    fail(403, 'payment_required', 'Публикация темы стоит звёзд: счёт создаётся в магазине');
+  }
+  const body = await readJson(c);
+  const check = checkSkin(body.skin);
+  if (!check.ok) {
+    fail(422, 'skin_unreadable', check.error ?? 'Тему не видно на доске', { readability: check.readability });
+  }
+  await publishSkinShare(c.env, authCtx.user, check.skin);
+  const fresh = await getUserById(c.env, authCtx.user.id);
+  return c.json({ ok: true, status: 'pending', profile: toProfile(fresh ?? authCtx.user, nowMs(), true) });
 });
 
 /**
@@ -1154,7 +1177,7 @@ app.post('/api/profile/skin-custom', async (c) => {
       .run();
     const cleared = await getUserById(c.env, authCtx.user.id);
     if (!cleared) fail(500, 'user_missing');
-    return c.json({ ok: true, profile: toProfile(cleared, nowMs(), eternalLives(c.env, cleared)) });
+    return c.json({ ok: true, profile: toProfile(cleared, nowMs(), qaAccount(c.env, cleared)) });
   }
 
   const check = checkSkin(body.skin);
@@ -1170,7 +1193,7 @@ app.post('/api/profile/skin-custom', async (c) => {
   return c.json({
     ok: true,
     readability: check.readability,
-    profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)),
+    profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)),
   });
 });
 
@@ -1249,7 +1272,7 @@ app.post('/api/skins/install', async (c) => {
   ]);
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
-  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
+  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
 });
 
 // ─────────────────────────────── Реклама ───────────────────────────────
@@ -1348,7 +1371,7 @@ app.post('/api/ads/reward', async (c) => {
   if (!fresh) fail(500, 'user_missing');
   user = fresh;
   logEventInBackground(c.env, c.executionCtx, user.id, 'ad_reward', 1, { kind });
-  const profile = toProfile(user, nowMs(), eternalLives(c.env, user));
+  const profile = toProfile(user, nowMs(), qaAccount(c.env, user));
   return c.json({
     ok: true,
     kind,

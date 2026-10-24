@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   eternalLives,
+  ownedSkins,
+  qaAccount,
   parseModeLevels,
+  selectedSkin,
+  skinAvailable,
   profileModes,
   resumableRun,
   runShapeMatchesMode,
@@ -156,6 +160,28 @@ describe('прогресс режимов в JSON-колонке', () => {
     const row = user({ lives: 1, lives_at: Date.now() });
     expect(toProfile(row, 1000, true)).toMatchObject({ lives: 5, eternalLives: true, nextLifeAt: null });
     expect(toProfile(row, 1000, false).eternalLives).toBe(false);
+  });
+
+  it('льготный список открывает все темы, но ничего не пишет в базу', () => {
+    const env = { QA_LIVES_IDS: '42' } as never;
+    const row = user({ tg_id: 42, skins: 'classic', skin: 'neon' });
+    expect(qaAccount(env, row)).toBe(true);
+    // Без льготы владение - ровно то, что лежит в CSV.
+    expect(ownedSkins(row)).toEqual(['classic']);
+    expect(selectedSkin(row, 1, false)).toBe('classic');
+    // Список даёт и купленное, и наградное: «Пепел» за звёзды не продаётся,
+    // и без льготы проверяющий не увидел бы её на доске вовсе.
+    const free = ownedSkins(row, true);
+    expect(free).toEqual(expect.arrayContaining(['classic', 'gold', 'neon', 'royal', 'ash']));
+    expect(free).not.toContain('custom');
+    // Надеть тему льготе можно, и витрина сезона при этом ни при чём.
+    expect(skinAvailable(row, 'neon', 1, false)).toBe(false);
+    expect(skinAvailable(row, 'neon', 1, true)).toBe(true);
+    expect(selectedSkin(row, 1, true)).toBe('neon');
+    const profile = toProfile(row, 1, true);
+    expect(profile.qa).toBe(true);
+    expect(profile.skins).toContain('ash');
+    expect(toProfile(row, 1, false).qa).toBe(false);
   });
 });
 

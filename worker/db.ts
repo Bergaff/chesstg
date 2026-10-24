@@ -52,12 +52,18 @@ export function publicConfig(env: WorkerEnv) {
   };
 }
 
-export function ownedSkins(user: UserRow): SkinId[] {
+export function ownedSkins(user: UserRow, qa = false): SkinId[] {
   const owned = user.skins
     .split(',')
     .map((s) => s.trim())
     .filter((s): s is SkinId => isSkinId(s));
-  return [...new Set<SkinId>(['classic', ...owned])];
+  const set = new Set<SkinId>(['classic', ...owned]);
+  // Аккаунт из QA-списка владеет всеми темами, наградные включая: проверять
+  // контраст, чужие установки и очередь публикации нужно без тестового
+  // кошелька. В базу ничего не дописывается - снимешь переменную, и темы снова
+  // надо покупать. «custom» сюда не попадает: своя тема либо собрана, либо нет.
+  if (qa) for (const id of Object.keys(SKINS)) if (id !== 'custom') set.add(id as SkinId);
+  return [...set];
 }
 
 /**
@@ -82,25 +88,26 @@ export function customSkinOf(user: UserRow): CustomSkin | null {
  * и тема-«custom» без самой темы. Возврат денег и перенос аккаунта пишут в
  * `skin` что попало, и игра обязана реагировать доской, а не падением.
  */
-export function selectedSkin(user: UserRow, now = Date.now()): SkinId {
+export function selectedSkin(user: UserRow, now = Date.now(), qa = false): SkinId {
   const wanted = user.skin;
   if (wanted === 'custom') return customSkinOf(user) ? 'custom' : 'classic';
   if (!isSkinId(wanted)) return 'classic';
-  return skinAvailable(user, wanted, now) ? wanted : 'classic';
+  return skinAvailable(user, wanted, now, qa) ? wanted : 'classic';
 }
 
-/** Открыта ли тема: куплена, бесплатна или стоит на витрине этого сезона. */
-export function skinAvailable(user: UserRow, id: SkinId, now = Date.now()): boolean {
+/** Открыта ли тема: куплена, бесплатна, с витрины сезона или по льготному списку. */
+export function skinAvailable(user: UserRow, id: SkinId, now = Date.now(), qa = false): boolean {
   if (id === 'classic' || id === 'graphite') return true;
   if (id === 'custom') return customSkinOf(user) !== null;
+  if (qa) return true;
   if (SKINS[id].reward) return ownedSkins(user).includes(id);
   if (ownedSkins(user).includes(id)) return true;
   return showcaseSkin(now) === id;
 }
 
-export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
+export function toProfile(user: UserRow, now = Date.now(), qa = false) {
   const lives = materializeLives(user.lives, user.lives_at, now);
-  const nextLifeInMs = eternal ? 0 : msUntilNextLife(lives.lives, lives.livesAt, now);
+  const nextLifeInMs = qa ? 0 : msUntilNextLife(lives.lives, lives.livesAt, now);
   return {
     id: user.id,
     name: user.first_name || (user.is_guest ? 'Гость' : 'Игрок'),
@@ -111,9 +118,12 @@ export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
     coins: user.coins,
     // Вечные сердца показываются полным рядом и с флагом: проверяющий должен
     // видеть, что список сработал, а не молча получать пять сердец.
-    lives: eternal ? MAX_LIVES : lives.lives,
+    lives: qa ? MAX_LIVES : lives.lives,
     maxLives: MAX_LIVES,
-    eternalLives: eternal,
+    eternalLives: qa,
+    // Один флаг на все льготы списка: магазин по нему прячет цены, меню - вход
+    // в лабораторию. Решает сервер, клиент только рисует.
+    qa,
     nextLifeAt: nextLifeInMs > 0 ? now + nextLifeInMs : null,
     nextLifeInMs,
     serverNow: now,
@@ -122,8 +132,8 @@ export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
     endlessBestMoves: user.endless_best_moves,
     endlessUnlocked: user.max_level > 10,
     adFree: Boolean(user.ad_free),
-    skins: ownedSkins(user),
-    skin: selectedSkin(user, now),
+    skins: ownedSkins(user, qa),
+    skin: selectedSkin(user, now, qa),
     customSkin: customSkinOf(user),
     showcaseSkin: showcaseSkin(now),
     ashRecordMoves: ASH_RECORD_MOVES,
@@ -267,7 +277,13 @@ export function resetModeLevelsProbe(): void {
  * или отсутствующая переменная значит «режима нет», поэтому на проде без
  * настройки ничего не меняется.
  */
-export function eternalLives(env: WorkerEnv, user: Pick<UserRow, 'tg_id'>): boolean {
+/**
+ * Аккаунт в списке `QA_LIVES_IDS`. Список один на все льготы: вечные сердца,
+ * все темы поля, публикация без взноса и вход в лабораторию из меню. Два
+ * отдельных списка однажды разъехались бы, и проверяющий гадаль бы, почему
+ * сердца вечные, а тему не надеть.
+ */
+export function qaAccount(env: WorkerEnv, user: Pick<UserRow, 'tg_id'>): boolean {
   const raw = env.QA_LIVES_IDS?.trim();
   if (!raw || user.tg_id == null) return false;
   const id = String(user.tg_id);
@@ -276,10 +292,15 @@ export function eternalLives(env: WorkerEnv, user: Pick<UserRow, 'tg_id'>): bool
     .some((token) => token.length > 0 && token === id);
 }
 
+/** Вечные сердца - частный случай льгот из `qaAccount`; имя оставлено ради HUD. */
+export function eternalLives(env: WorkerEnv, user: Pick<UserRow, 'tg_id'>): boolean {
+  return qaAccount(env, user);
+}
+
 export async function refreshLives(env: WorkerEnv, user: UserRow, now = Date.now()): Promise<UserRow> {
   // Вечным аккаунтам строку не пишем: снимешь переменную - и регенерация
   // продолжится с того же момента, что и была.
-  if (eternalLives(env, user)) return user.lives === MAX_LIVES ? user : { ...user, lives: MAX_LIVES };
+  if (qaAccount(env, user)) return user.lives === MAX_LIVES ? user : { ...user, lives: MAX_LIVES };
   const lives = materializeLives(user.lives, user.lives_at, now);
   if (lives.lives === user.lives && lives.livesAt === user.lives_at) return user;
   await env.DB.prepare('UPDATE users SET lives = ?, lives_at = ?, updated_at = ? WHERE id = ?')

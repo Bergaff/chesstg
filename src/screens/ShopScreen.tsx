@@ -169,8 +169,22 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
     }
   }
 
+  /**
+   * Публикация своей темы. Обычному игроку - счёт на взнос и ожидание webhook;
+   * аккаунт из льготного списка `QA_LIVES_IDS` попадает в очередь напрямую,
+   * иначе проверяющий не увидит ни модерацию, ни галерею без тестового кошелька.
+   */
   async function shareSkin(skin: CustomSkin): Promise<boolean> {
-    return buyProduct('share', { skin });
+    if (!profile.qa) return buyProduct('share', { skin });
+    try {
+      await api<{ ok: boolean }>('/api/skins/publish', { method: 'POST', body: { skin } });
+      await refresh();
+      hapticNotify('success');
+      return true;
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : 'Публикация не прошла', 'error');
+      return false;
+    }
   }
 
   async function installSkin(item: GalleryItem) {

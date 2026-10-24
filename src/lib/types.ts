@@ -38,6 +38,12 @@ export interface Profile {
    * настроенного воркера, поэтому отсутствие поля значит «обычный аккаунт».
    */
   eternalLives?: boolean;
+  /**
+   * Тот же льготный список, но про всё остальное: темы поля открыты, публикация
+   * без взноса, вход в лабораторию в меню. Держится одним флагом с
+   * `eternalLives`, чтобы льготы не разъезжались по кусочкам.
+   */
+  qa?: boolean;
   nextLifeAt: number | null;
   nextLifeInMs: number;
   serverNow: number;

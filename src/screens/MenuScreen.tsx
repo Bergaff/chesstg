@@ -33,8 +33,12 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
   const cooldownLeft = Math.max(0, cooldownUntil - now);
 
   const campaignRun = active.campaign;
-  const endlessRun = active.endless;
   const modes = profile.modes;
+
+  // Рекорд «Гонок» - пережитые ходы. На карточке режима он есть всегда, а здесь
+  // строкой ниже уровня: в «Гонках» нет финиша, и без цифры непонятно, до чего
+  // ты дожил на самом деле.
+  const raceBest = modes?.race?.bestMoves ?? modes?.race?.best ?? 0;
 
   async function claimCoins() {
     if (adLoading || cooldownLeft > 0 || profile.adFree) return;
@@ -63,25 +67,33 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
     }
   }
 
-  function playEndless() {
-    if (!profile.endlessUnlocked) {
-      toast('Бесконечный режим откроется после 10 уровня', 'info');
-      return;
-    }
-    onPlay('endless');
-  }
-
   /**
    * Карточка режима: та же кнопка, что у кампании, а не строка в «Разделах».
-   * «Парковка» и «Гонки» - полноценные режимы со своим уровнем, рекордом и
-   * Незаконченным забегом, и прятать их ниже склада было не за что. Замок карточку
-   * не убирает: на ней видно, на каком уровне кампании режим откроется.
+   * «Парковка», «Гонки» и бесконечный режим - полноценные режимы со своим
+   * уровнем, рекордом и незаконченным забегом, и прятать их ниже склада было не
+   * за что. Замок карточку не убирает: на ней видно, на каком уровне кампании
+   * режим откроется.
+   *
+   * Название режима живёт на карточке всегда: когда «Продолжить» replaces подпись
+   * входа, игрок не понимает, куда именно его возвращают, - о незаконченной
+   * партии говорит своя строка.
    */
-  function modeCard(mode: 'jam' | 'race', title: string, description: string) {
+  function modeCard(mode: 'jam' | 'race' | 'endless', title: string, description: string) {
     const progress = modes?.[mode];
     const run = active[mode];
-    const unlocked = progress?.unlocked ?? true;
+    const unlocked = mode === 'endless' ? profile.endlessUnlocked : (progress?.unlocked ?? true);
+    const cleared = Math.max(0, (progress?.maxLevel ?? 1) - 1);
     const best = progress?.bestMoves ?? progress?.best;
+    const record =
+      mode === 'race'
+        ? best
+          ? `, рекорд ${best} ходов`
+          : ', считается длина забега'
+        : mode === 'endless'
+          ? profile.endlessBest > 0
+            ? `, рекорд ${profile.endlessBest} клеток`
+            : ', рекорда ещё нет'
+          : `, пройдено ${cleared}`;
     return (
       <button
         type="button"
@@ -90,16 +102,18 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         aria-disabled={!unlocked}
       >
         <span className="cta-body">
-          <span className="label">{run ? 'Незаконченная партия' : title}</span>
+          <span className="label">{title}</span>
           <span className="cta-title serif">{unlocked ? (run ? 'Продолжить' : 'Играть') : 'Закрыт'}</span>
           <span className="cta-meta">
             {!unlocked
               ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
               : run
-                ? `Уровень ${run.level}, ход ${run.moves + 1}`
-                : mode === 'race'
-                  ? `${description} Уровень ${progress?.level ?? 1}${best ? `, рекорд ${best} ходов` : ', считается длина забега'}`
-                  : `${description} Уровень ${progress?.level ?? 1}, пройдено ${Math.max(0, (progress?.maxLevel ?? 1) - 1)}`}
+                ? mode === 'endless'
+                  ? `Незаконченный забег: высота ${run.score}, ход ${run.moves + 1}`
+                  : `Незаконченная партия: уровень ${run.level}, ход ${run.moves + 1}`
+                : mode === 'endless'
+                  ? `${description} ${profile.endlessBest > 0 ? `Рекорд ${profile.endlessBest} клеток` : 'Рекорда ещё нет'}`
+                  : `${description} Уровень ${progress?.level ?? 1}${record}`}
           </span>
         </span>
         <span className="cta-arrow" aria-hidden="true">→</span>
@@ -126,13 +140,33 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       <section className="masthead">
         <span className="label masthead-kicker">Шахматные головоломки в Telegram</span>
         <h1 className="masthead-title serif">
-          <span>Край</span>
-          <em>доски</em>
+          <span>Край</span> <em>доски</em>
         </h1>
         <p className="masthead-sub">
           Пешка идёт к последней линии, пробка фигур - к своему краю, король держится в полосе. Один неверный шаг заканчивает партию.
         </p>
       </section>
+
+      <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>
+        <span className="cta-body">
+          <span className="label">Кампания</span>
+          <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
+          <span className="cta-meta">
+            {campaignRun
+              ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
+              : profile.levelsCleared > 0
+                ? `Уровень ${profile.level}, пройдено ${profile.levelsCleared}`
+                : 'Уровень 1, путь начинается'}
+          </span>
+        </span>
+        <span className="cta-arrow" aria-hidden="true">→</span>
+      </button>
+
+      <div className="mode-cards">
+        {modeCard('jam', 'Парковка', 'Пробка фигур: белых за нижний край, чёрных за верхний.')}
+        {modeCard('race', 'Гонки', 'Король в полосе против фигур сверху.')}
+        {modeCard('endless', 'Бесконечный режим', 'Пешка идёт всё выше, сложность растёт каждые пять ходов.')}
+      </div>
 
       <div className="account">
         <span className="label">Сохранение прогресса</span>
@@ -176,25 +210,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         )}
       </div>
 
-      <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>
-        <span className="cta-body">
-          <span className="label">{campaignRun ? 'Незаконченная партия' : 'Кампания'}</span>
-          <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
-          <span className="cta-meta">
-            {campaignRun
-              ? `Уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
-              : profile.levelsCleared > 0
-                ? `Уровень ${profile.level}, пройдено ${profile.levelsCleared}`
-                : 'Уровень 1, путь начинается'}
-          </span>
-        </span>
-        <span className="cta-arrow" aria-hidden="true">→</span>
-      </button>
-
-      <div className="mode-cards">
-        {modeCard('jam', 'Парковка', 'Пробка фигур: белых за нижний край, чёрных за верхний.')}
-        {modeCard('race', 'Гонки', 'Король в полосе против фигур сверху.')}
-      </div>
 
       <dl className="menu-stats">
         <div className="stat-row">
@@ -209,14 +224,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <dt>Уровень в «Гонках»</dt>
           <dd className="serif">
             {modes?.race?.level ?? 1}
-            {modes?.race?.best ? <span className="race-best"> · {modes.race.best} ходов</span> : null}
-          </dd>
-        </div>
-        <div className="stat-row">
-          <dt>Рекорд в бесконечном режиме</dt>
-          <dd className="serif">
-            {formatNumber(profile.endlessBest)}
-            <small>клеток</small>
+            {raceBest ? <span className="race-best"> · {formatNumber(raceBest)} ходов</span> : null}
           </dd>
         </div>
         <div className="stat-row">
@@ -231,25 +239,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="menu-list">
-        <button
-          type="button"
-          className={cn('menu-row', !profile.endlessUnlocked && 'locked')}
-          onClick={playEndless}
-          aria-disabled={!profile.endlessUnlocked}
-        >
-          <span className="menu-row-main">
-            <span className="menu-row-title">Бесконечный режим</span>
-            <span className="menu-row-desc">
-              {!profile.endlessUnlocked
-                ? 'Откроется после десятого уровня'
-                : endlessRun
-                  ? `Незаконченный забег, высота ${endlessRun.score}`
-                  : `Рекорд ${profile.endlessBest} клеток, сложность растёт каждые пять ходов`}
-            </span>
-          </span>
-          <span className="menu-row-end">{profile.endlessUnlocked ? '→' : 'закрыт'}</span>
-        </button>
-
         <button type="button" className="menu-row" onClick={goShop}>
           <span className="menu-row-main">
             <span className="menu-row-title">Магазин</span>
@@ -266,13 +255,21 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span className="menu-row-end">→</span>
         </button>
 
-        <a className="menu-row" href="/admin">
-          <span className="menu-row-main">
-            <span className="menu-row-title">Лаборатория</span>
-            <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
-          </span>
-          <span className="menu-row-end">→</span>
-        </a>
+        {/*
+          Разбор расстановок и статистика - служебная часть, и в общем меню она
+          только путает: игроку некуда вести ссылку на чужую кухню. Показываем её
+          аккаунтам из льготного списка `QA_LIVES_IDS`, у остальных строки нет.
+          Сам /admin при этом закрыт паролем для всех.
+        */}
+        {profile.qa && (
+          <a className="menu-row" href="/admin">
+            <span className="menu-row-main">
+              <span className="menu-row-title">Лаборатория</span>
+              <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
+            </span>
+            <span className="menu-row-end">→</span>
+          </a>
+        )}
 
       </div>
 

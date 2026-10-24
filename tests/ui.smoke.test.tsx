@@ -80,11 +80,14 @@ const config: AppConfig = {
   adsgram: { blockId: '', src: '' },
 };
 
+/** Незаконченные партии: тест подставляет свой забег и смотрит на карточку. */
+let activeRuns: SessionResponse['active'] = {};
+
 function session(): SessionResponse {
   return {
     profile,
     config,
-    active: {},
+    active: activeRuns,
     invitedCount: 0,
     challenge: null,
     referral: null,
@@ -136,6 +139,7 @@ let calls: Array<{ url: string; body: unknown }> = [];
 
 beforeEach(() => {
   calls = [];
+  activeRuns = {};
   localStorage.clear();
   Object.assign(profile, structuredClone(baseProfile));
   initial = createCampaignLevel(1, SEED);
@@ -273,8 +277,12 @@ describe('UI smoke', () => {
     expect(screen.getByText(/Мировая таблица и друзья/)).toBeTruthy();
     expect(screen.getByText(/Гостевой режим/)).toBeTruthy();
     expect(screen.getByText('Реклама за монеты')).toBeTruthy();
-    const lab = screen.getByText('Лаборатория').closest('a');
-    expect(lab?.getAttribute('href')).toBe('/admin');
+    // Служебная лаборатория в общем меню не показывается: игроку некуда вести
+    // ссылку на чужую кухню. Её видит только льготный аккаунт из QA-списка.
+    expect(screen.queryByText('Лаборатория')).toBeNull();
+    // «Край доски» - одна строка: заголовок на двух читается как два заголовка.
+    const title = screen.getByRole('heading', { level: 1 });
+    expect(title.textContent).toBe('Край доски');
   });
 
   it('тема поля доезжает до доски, а не только до плашки в магазине', async () => {
@@ -404,10 +412,95 @@ describe('UI smoke', () => {
     // а не тонкая строка в «Разделах», где её легко не заметить. Обе карточки
     // закрыты - значит на них «Закрыт», а не пустое место.
     expect(screen.getByText('Кампания').closest('button')?.textContent).toContain('Играть');
-    expect(screen.getAllByText('Закрыт').length).toBe(2);
+    // Три карточки закрыты: «Парковка», «Гонки» и бесконечный режим.
+    expect(screen.getAllByText('Закрыт').length).toBe(3);
     expect(screen.getByText('Парковка').closest('button')?.className).toContain('cta-block');
     expect(screen.getByText('Гонки').closest('button')?.className).toContain('cta-block');
     expect(document.querySelector('.mode-cards')).not.toBeNull();
+    // Блок про вход - ниже режимов: сначала видно, куда идти.
+    const account = document.querySelector('.account')!;
+    const cards = document.querySelector('.mode-cards')!;
+    // eslint-disable-next-line no-bitwise
+    expect(account.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('бесконечный режим входит той же кнопкой, что остальные режимы', async () => {
+    await boot();
+    const card = screen.getByText('Бесконечный режим').closest('button')!;
+    expect(card.className).toContain('cta-mode');
+    expect(card.textContent).toContain('Закрыт');
+    expect(card.textContent).toContain('Откроется на 11 уровне кампании');
+    // Строки в «Разделах» больше нет: два входа в один режим только путают.
+    expect(document.querySelectorAll('.menu-list .menu-row').length).toBe(2);
+    // Рекорд бесконечного режима убран из цифр под меню: он на самой карточке,
+    // а строка «N клеток» спорила с ней и устаревала на глазах.
+    expect(screen.queryByText('Рекорд в бесконечном режиме')).toBeNull();
+  });
+
+  it('открытый бесконечный режим показывает рекорд на карточке и зовёт в забег', async () => {
+    profile.endlessUnlocked = true;
+    profile.endlessBest = 37;
+    profile.modes.endless = { level: 4, maxLevel: 4, unlocked: true, unlockAtLevel: 11 };
+    await boot();
+
+    const card = screen.getByText('Бесконечный режим').closest('button')!;
+    expect(card.textContent).toContain('Играть');
+    expect(card.textContent).toContain('Рекорд 37 клеток');
+    fireEvent.click(card);
+    await waitFor(() =>
+      expect(calls.some((call) => call.url === '/api/run/start' && (call.body as { mode?: string })?.mode === 'endless')).toBe(true),
+    );
+  });
+
+  it('название режима остаётся на кнопке, когда есть незаконченная партия', async () => {
+    activeRuns = { campaign: run };
+    await boot();
+    const card = screen.getByText('Кампания').closest('button')!;
+    // «Продолжить» без подписи режима непонятно: куда именно возвращают.
+    expect(card.textContent).toContain('Кампания');
+    expect(card.textContent).toContain('Продолжить');
+    expect(card.textContent).toContain('Незаконченная партия');
+  });
+
+  it('название режима карточки не пропадает ради незаконченного забега', async () => {
+    profile.maxLevel = 9;
+    profile.level = 9;
+    profile.modes.campaign = { level: 9, maxLevel: 9, unlocked: true, unlockAtLevel: 1 };
+    profile.modes.race = { level: 3, maxLevel: 4, unlocked: true, unlockAtLevel: 5, bestMoves: 41 };
+    activeRuns = { race: run };
+    await boot();
+    const race = screen.getByText('Гонки').closest('button')!;
+    expect(race.textContent).toContain('Гонки');
+    expect(race.textContent).toContain('Продолжить');
+    expect(race.textContent).toContain('Незаконченная партия');
+    // Подпись «Незаконченная партия» больше не съедает название режима.
+    expect(screen.queryByText('Незаконченная партия', { selector: '.label' })).toBeNull();
+  });
+
+  it('льготный аккаунт видит лабораторию, темы без цен и публикацию без взноса', async () => {
+    profile.qa = true;
+    // Льготы выдаёт сервер: профиль приходит уже со всеми темами.
+    profile.skins = ['classic', 'graphite', 'gold', 'neon', 'royal', 'ash'];
+    await boot();
+
+    const lab = screen.getByText('Лаборатория').closest('a');
+    expect(lab?.getAttribute('href')).toBe('/admin');
+
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    await screen.findByText('Бонусы на партию');
+    fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
+    await screen.findByText(/Коллекция открыта/);
+    // Ни одной цены: всё уже открыто, а не «купите набор».
+    expect(screen.queryAllByText('20 звёзд')).toHaveLength(0);
+    expect(screen.queryByText('Набор за 50 звёзд')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Собрать свою тему/ }));
+    await screen.findByText(/Своя тема поля/);
+    const publish = screen.getByRole('button', { name: /^Показать всем$/ });
+    expect(publish.textContent).toBe('Показать всем');
+    fireEvent.click(publish);
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/skins/publish')).toBe(true));
+    expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
   });
 
   it('открытый режим зовёт в забег через карточку, а не через список', async () => {
@@ -689,5 +782,6 @@ describe('UI smoke', () => {
     expect(screen.getByText('10')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/shop/bonus')).toBe(true);
   });
+
 
 });

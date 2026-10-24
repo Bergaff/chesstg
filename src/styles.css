@@ -307,17 +307,15 @@ a {
 .masthead-title {
   font-family: var(--serif);
   font-weight: 400;
-  font-size: clamp(38px, 11vw, 50px);
-  line-height: 0.98;
+  // Название держим в одну строку: на двух оно читается как два разных
+  // заголовка, а «доски» уезжают за край там, где «Край доски» влезает целиком.
+  font-size: clamp(28px, 8.4vw, 40px);
+  line-height: 1.02;
   letter-spacing: -0.025em;
-}
-
-.masthead-title span {
-  display: block;
+  white-space: nowrap;
 }
 
 .masthead-title em {
-  display: block;
   font-style: italic;
   color: var(--accent);
 }
@@ -328,6 +326,11 @@ a {
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
+  // Подписка набрана по ширине: рваный правый край на трёх строках выглядит
+  // черновиком, а узкая колонка держит переносы короткими.
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
 }
 
 .cta-block {
@@ -412,7 +415,9 @@ a {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 14px;
+  // Блок про вход стоит ниже режимов: сначала игрок видит, куда идти, и только
+  // под этим - что прогресс никуда не денется.
+  margin-top: 18px;
   padding: 12px 0 2px;
   border-top: 1px solid var(--line);
 }

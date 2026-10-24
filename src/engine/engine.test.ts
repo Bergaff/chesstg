@@ -8,6 +8,9 @@ import {
   createCampaignLevel,
   createEndlessRun,
   enemyMoves,
+  ENDLESS_GROWTH,
+  ensureEndlessSpace,
+  hasLivingMove,
   legalMoves,
   materializeLives,
   msUntilNextLife,
@@ -223,6 +226,44 @@ describe('бесконечный режим', () => {
       expect(legalMoves(run).length).toBeGreaterThan(0);
       expect(anyEnemyAttacksPlayer(run)).toBe(false);
     }
+  });
+
+  /**
+   * Мёртвая позиция - не сложность, а лотерея: партия кончается раньше, чем
+   * игрок успевает что-то решить. Случайный рой на старте закрывал все три
+   * направления примерно в 4% забегов, поэтому отбор старта проверяет живой
+   * ход, а не только «пешке есть куда ступить».
+   */
+  it('старт бесконечного режима оставляет живой ход', () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const run = createEndlessRun(seed * 104729);
+      expect(hasLivingMove(run)).toBe(true);
+    }
+  });
+
+  it('свежая полоса поля не отнимает последний живой ход', () => {
+    let pruned = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      const base = createEndlessRun(seed * 31337);
+      // Пешку ставим в самый верхний ряд, старые фигуры убираем: полоса
+      // достраивается ровно над головой, и это единственный момент, когда рост
+      // поля может закрыть выход целиком. Tier 5 - плотность 5 фигур на полосу.
+      const run: GameState = {
+        ...base,
+        tier: 5,
+        enemies: [],
+        player: { x: base.player.x, y: base.height - 1 },
+      };
+      const heightBefore = run.height;
+      ensureEndlessSpace(run);
+      expect(run.height).toBe(heightBefore + ENDLESS_GROWTH);
+      expect(hasLivingMove(run)).toBe(true);
+      // Полоса ставит пять фигур; меньше - значит выход закрывали, и охрана
+      // сработала. Без этой проверки тест мог бы ничего не проверять.
+      const spawned = run.enemies.filter((e) => e.y >= heightBefore).length;
+      if (spawned < 5) pruned++;
+    }
+    expect(pruned).toBeGreaterThan(0);
   });
 
   it('поле достраивается вверх и заполняется врагами', () => {

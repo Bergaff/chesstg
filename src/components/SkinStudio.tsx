@@ -176,7 +176,8 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     setBusy('share');
     try {
       const paid = await onShare(check.skin);
-      if (paid) toast('Взнос принят, тема в очереди на проверку', 'success');
+      // Для льготного аккаунта взноса не было - не о чём и благодарить.
+      if (paid) toast(profile.qa ? 'Тема в очереди на проверку' : 'Взнос принят, тема в очереди на проверку', 'success');
     } finally {
       setBusy(null);
     }
@@ -320,7 +321,13 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
           {busy === 'save' ? 'Надеваем' : 'Надеть бесплатно'}
         </button>
         <button type="button" className="btn btn-outline" onClick={() => void share()} disabled={busy !== null || !read.ok}>
-          {busy === 'share' ? 'Выставляем счёт' : `Показать всем: ${PRODUCTS.share.stars}`}
+          {busy === 'share'
+            ? profile.qa
+              ? 'Отправляем'
+              : 'Выставляем счёт'
+            : profile.qa
+              ? 'Показать всем'
+              : `Показать всем: ${PRODUCTS.share.stars}`}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onClose}>
           Позже

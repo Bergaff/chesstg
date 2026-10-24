@@ -47,6 +47,37 @@ export interface ShareDraft {
   skin: CustomSkin;
 }
 
+/**
+ * Одна тема - одна заявка: иначе можно поставить в очередь десять копий и
+ * смотреть, какая пройдёт.
+ */
+export async function hasOpenShare(env: WorkerEnv, userId: string): Promise<boolean> {
+  const waiting = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM skin_shares WHERE user_id = ? AND status IN ('draft', 'pending', 'approved')`,
+  )
+    .bind(userId)
+    .first<{ n: number }>();
+  return Number(waiting?.n ?? 0) > 0;
+}
+
+/**
+ * Публикация без взноса - только для льготного аккаунта из `QA_LIVES_IDS`.
+ * Обычному игроку заявка создаётся счётом на `sku = 'share'`: взнос и есть
+ * фильтр потока «накидал за минуту». Проверяющему нужен сам механизм - очередь,
+ * галерея, установки, - а не звёзды на тестовом кошельке, поэтому строка
+ * едет в `pending` сразу и без `payments`: чужую статистику покупок льготы
+ * портить не должны.
+ */
+export async function publishSkinShare(env: WorkerEnv, user: UserRow, skin: CustomSkin): Promise<void> {
+  if (await hasOpenShare(env, user.id)) fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
+  await env.DB.prepare(
+    `INSERT INTO skin_shares (user_id, charge_id, name, payload, status, created_at)
+     VALUES (?, NULL, ?, ?, 'pending', ?)`,
+  )
+    .bind(user.id, skin.name, JSON.stringify(skin), Date.now())
+    .run();
+}
+
 export async function getPayment(env: WorkerEnv, chargeId: string): Promise<PaymentRow | null> {
   return env.DB.prepare('SELECT * FROM payments WHERE charge_id = ?').bind(chargeId).first<PaymentRow>();
 }
@@ -76,13 +107,8 @@ export async function createInvoice(
   if (sku === 'share' && !share) fail(400, 'skin_missing', 'Нужна тема для публикации');
   // Одной теме - одна заявка: иначе можно поставить в очередь десять копий и
   // смотреть, какая пройдёт.
-  if (sku === 'share') {
-    const waiting = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM skin_shares WHERE user_id = ? AND status IN ('draft', 'pending', 'approved')`,
-    )
-      .bind(user.id)
-      .first<{ n: number }>();
-    if (Number(waiting?.n ?? 0) > 0) fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
+  if (sku === 'share' && (await hasOpenShare(env, user.id))) {
+    fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
   }
 
   const chargeId = crypto.randomUUID();

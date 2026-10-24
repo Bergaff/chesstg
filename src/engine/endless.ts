@@ -1,5 +1,5 @@
 import { Rng, mix32 } from './rng';
-import { anyEnemyAttacksPlayer, legalMoves } from './board';
+import { anyEnemyAttacksPlayer, enemyAttacksCell, legalMoves } from './board';
 import type { Enemy, GameState, PieceType } from './types';
 
 export const ENDLESS_WIDTH = 6;
@@ -54,6 +54,26 @@ function spawnInitialEnemies(state: GameState, rng: Rng, count: number): void {
   }
 }
 
+/**
+ * Есть ли живой ход: клетка, на которую пешка может встать и не быть снятой в
+ * этот же такт. Позиция без такого хода - не сложность, а лотерея: партия
+ * кончается раньше, чем игрок успевает что-то решить. Такое случалось и на
+ * старте (случайный рой закрывал все три направления), и на новой полосе поля,
+ * которая вырастала ровно над головой.
+ */
+export function hasLivingMove(state: GameState): boolean {
+  return legalMoves(state).some((move) => {
+    // Бьём не по прежней карте угроз, а по позиции после хода: своя же пешка
+    // иногда закрывает линию ладьи, и на новом месте она уже не прикрывает.
+    const after: GameState = {
+      ...state,
+      player: { x: move.x, y: move.y },
+      enemies: state.enemies.filter((e) => !(e.x === move.x && e.y === move.y)),
+    };
+    return !after.enemies.some((e) => enemyAttacksCell(after, e, move.x, move.y));
+  });
+}
+
 /** Стартовое поле бесконечного режима. */
 export function createEndlessRun(seed: number): GameState {
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -82,6 +102,9 @@ export function createEndlessRun(seed: number): GameState {
     if (state.enemies.length === 0) continue;
     if (legalMoves(state).length === 0) continue;
     if (anyEnemyAttacksPlayer(state)) continue;
+    // Один и тот же рой может стоять так, что живой клетки нет никуда: его
+    // пересобираем, а не выдаём игроку заведомо мёртвый забег.
+    if (!hasLivingMove(state)) continue;
     return state;
   }
 
@@ -146,7 +169,27 @@ export function ensureEndlessSpace(state: GameState): void {
     const rng = new Rng(state.rng);
     spawnSegment(state, rng, oldHeight, state.height, state.tier);
     state.rng = rng.save();
+    // Новая полоса не имеет права закрывать последний выход: снимаем фигуры с
+    // верхнего края свежего ряда до тех пор, пока живой ход не появится.
+    trimToLivingExit(state, oldHeight);
     state.score = Math.max(state.score, state.player.y);
+  }
+}
+
+/**
+ * Снимает свежие фигуры, пока у игрока не останется живой ход. Работаёт только по
+ * только что добавленной полосе (`fromY` и выше): старыми фигурами давить - это
+ * правило режима, а не ошибка генератора.
+ */
+function trimToLivingExit(state: GameState, fromY: number): void {
+  if (hasLivingMove(state)) return;
+  // Снимаем свежие фигуры по одной, ближайший ряд сначала: он перекрывает те
+  // клетки, куда пешка идёт прямо сейчас. Старые фигуры не трогаем - давить
+  // ими и загонять под ответ это правило режима, а не ошибка генератора.
+  const order = state.enemies.filter((e) => e.y >= fromY).sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const victim of order) {
+    state.enemies = state.enemies.filter((e) => e !== victim);
+    if (hasLivingMove(state)) return;
   }
 }
 

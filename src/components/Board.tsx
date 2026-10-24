@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
+  ENDLESS_VIEW_ROWS,
   PIECE_GLYPH,
   RACE_WIDTH,
   endlessViewport,
@@ -143,12 +144,17 @@ export function Board({
   // иначе каждая добавленная колонка пересчитывала бы клетки, и рост читался бы
   // как «доска съехала», а не как «поле стало шире».
   const sizeCols = rules.grow ? Math.max(cols, RACE_WIDTH) : cols;
+  // Поле бесконечного режима поначалу короче окна, и если считать клетку по
+  // текущим рядам, каждые пять клеток фигуры чуть подпрыгивают размером, а доска
+  // вздрагивает. Размер держим по полному окну: рост читается как «поле стало
+  // выше», а не как «всё увеличилось».
+  const sizeRows = state.mode === 'endless' ? Math.max(rows, ENDLESS_VIEW_ROWS) : rows;
   const fit =
     availableWidth > 0 && availableHeight > 0
       ? Math.floor(
           Math.min(
             (availableWidth - gap * (sizeCols - 1)) / sizeCols,
-            (availableHeight - gap * (rows - 1)) / rows,
+            (availableHeight - gap * (sizeRows - 1)) / sizeRows,
           ),
         )
       : 0;
