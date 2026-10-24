@@ -9,3 +9,6 @@ dist/
 coverage/
 .vscode/
 .idea/
+
+# служебный файл с текстом сообщения коммита (git commit -F)
+.msg.txt

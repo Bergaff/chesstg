@@ -176,7 +176,8 @@ export default function App(): ReactNode {
           } else if (error.code === 'db_not_ready' || error.code === 'db_unavailable') {
             setBootError({
               message: 'Сервер не видит базу игры',
-              hint: 'База не инициализирована. Владельцу: примените миграции командой npm run db:remote.',
+              hint:
+                'База не инициализирована. Владельцу: примените миграции - локально `npm run db:local`, на проде `npm run db:remote`.',
             });
           } else {
             setBootError({ message: error.message, hint: 'Попробуй обновить экран.' });
