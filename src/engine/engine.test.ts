@@ -278,16 +278,37 @@ describe('превращение вражеской пешки у края', () 
     const arrived = applyAction(stuck('campaign'), { type: 'skip' });
     expect(arrived.enemies[0]).toMatchObject({ type: 'pawn', x: 4, y: 0 });
     const promoted = applyAction(arrived, { type: 'skip' });
-    expect(promoted.enemies[0]).toMatchObject({ type: 'queen', x: 4, y: 0 });
+    // Кем именно стать - решает зерно уровня, поэтому здесь проверяется класс
+    // фигуры, а не конкретный род: пешкой или королём она остаться не вправе.
+    expect(['knight', 'bishop', 'rook', 'queen']).toContain(promoted.enemies[0].type);
+    expect(promoted.enemies[0].x).toBe(4);
+    expect(promoted.enemies[0].y).toBe(0);
     expect(promoted.lastEvent).toBe('promoted');
     expect(promoted.promoted).toBe(1);
     // Превращение стоило такта: фигура не сдвинулась.
     expect(arrived.player).toEqual({ x: 0, y: 1 });
     // Дальше новый ферзь играет по-своему и второй раз не превращается.
     const next = applyAction(promoted, { type: 'move', dx: 0 });
-    expect(next.enemies[0].type).toBe('queen');
+    expect(next.enemies[0].type).toBe(promoted.enemies[0].type);
     expect(next.promoted).toBe(1);
     expect([next.enemies[0].x, next.enemies[0].y]).not.toEqual([4, 0]);
+  });
+
+  it('зерно уровня фиксирует превращение: переигровка даёт ту же фигуру', () => {
+    const pick = (seed: number): string => {
+      const s = stuck('campaign');
+      s.seed = seed;
+      s.rng = seed;
+      const first = applyAction(s, { type: 'skip' });
+      return applyAction(first, { type: 'skip' }).enemies[0].type;
+    };
+    // Тот же seed - та же фигура: сервер воспроизводит партию шаг в шаг, и
+    // «нарисовать» себе коня вместо ферзя клиент не может.
+    expect(pick(7)).toBe(pick(7));
+    const seen = new Set([pick(7), pick(11), pick(13), pick(19), pick(23), pick(29), pick(31), pick(37)]);
+    // Разные зёрна дают разные фигуры: иначе «превращение» было бы ферзём всегда.
+    expect(seen.size).toBeGreaterThan(1);
+    for (const type of seen) expect(['knight', 'bishop', 'rook', 'queen']).toContain(type);
   });
 
   it('на той же доске без правила пешка замирает навсегда', () => {

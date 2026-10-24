@@ -4,9 +4,15 @@ import { RACE_SPAWN_ROWS, raceSpawnPool, raceTierForMoves, raceWidthForSpawned }
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
+/**
+ * Кем становится вражеская пешка у нижнего края. Пешкой - нельзя (ничего бы не
+ * изменилось), королём - нельзя (он не ходит по нашим правилам), ладьёй и слоном
+ * и конём - можно, поэтому в пуле четыре фигуры и ферзь не привилегия.
+ */
+const PROMOTION_POOL = ['knight', 'bishop', 'rook', 'queen'] as const;
 import { rulesFor } from './modes';
 import { ensureEndlessSpace } from './endless';
-import type { BuffKind, GameAction, GameState, MoveDx } from './types';
+import type { BuffKind, GameAction, GameState, MoveDx, PieceType } from './types';
 import { RuleError } from './types';
 
 function validateDx(dx: unknown): asserts dx is MoveDx {
@@ -170,7 +176,7 @@ function enemyPhase(state: GameState): void {
     // оставалась на поле навсегда. Превращание забирает её ход, зато игрок
     // видит пешку у края целый такт и может увести короля заранее.
     if (rules.promoteAtBottom && enemy.type === 'pawn' && enemy.y === 0) {
-      enemy.type = 'queen';
+      enemy.type = promotionType(state);
       state.promoted = (state.promoted ?? 0) + 1;
       state.lastEvent = 'promoted';
       continue;
@@ -194,6 +200,19 @@ function enemyPhase(state: GameState): void {
   }
 
   if (state.shield > 0) state.shield -= 1;
+}
+
+/**
+ * Фигура превращения тянется из `state.rng` - из того же зерна, которым уровень
+ * раздаёт приток. Это не лотерея по ходу партии: зерно фиксирует всю доску,
+ * поэтому «Переиграть» отдаёт ровно то же превращение, а сервер воспроизводит
+ * партию шаг в шаг и «нарисовать» себе коня вместо ферзя клиент не может.
+ */
+function promotionType(state: GameState): PieceType {
+  const rng = new Rng(state.rng || 1);
+  const type = PROMOTION_POOL[rng.int(PROMOTION_POOL.length)] as PieceType;
+  state.rng = rng.save();
+  return type;
 }
 
 /**

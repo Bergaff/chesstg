@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DIAGONAL_VARIANTS,
+  SUITE_VARIANTS,
   JAM_VARIANTS,
   RACE_VARIANTS,
   analyzeVariant,
@@ -36,10 +36,15 @@ describe('прогон сравнений', () => {
     expect(rulesFor('raceDodge')).toMatchObject({ goal: 'survive', motion: 'greedy', spawnPerTurn: 1 });
     // Поле без выпада отличается одним флагом: генератор, приток и полоса те же.
     expect(rulesFor('raceNoStrike')).toMatchObject({ strike: 0, kingRows: 2, exitAtBottom: true });
-    expect(rulesFor('campaignStrictDiag').freeDiagonal).toBe(false);
+    // право на пустую диагональ и темп ответа - два флага нового сравнения
+    expect(rulesFor('campaignForwardAll')).toMatchObject({ freeDiagonal: false, enemyTempo: 'all' });
+    expect(rulesFor('campaignForwardOne')).toMatchObject({ freeDiagonal: false, enemyTempo: 'one' });
+    // Боевая кампания отличается от пакета обоими флагами, поэтому и сравнивать
+    // их честно можно только на одних досках.
+    expect(rulesFor('campaign').freeDiagonal).toBe(true);
     expect(rulesFor('jamStrictDiag')).toMatchObject({ freeDiagonal: false, motion: 'static' });
     // Варианты живут в том же словаре, значит генератор и лаборатория видят их наравне.
-    for (const mode of [...JAM_VARIANTS, ...RACE_VARIANTS, ...DIAGONAL_VARIANTS]) {
+    for (const mode of [...JAM_VARIANTS, ...RACE_VARIANTS, ...SUITE_VARIANTS]) {
       expect(MODE_RULES[mode]).toBeDefined();
     }
   });
@@ -72,7 +77,7 @@ describe('прогон сравнений', () => {
     expect(campaign.uniqueLayouts).toBeLessThanOrEqual(campaign.samples);
     // Строгая диагональ на том же уровне попадает в полосу не всегда: часть досок
     // генератор сдаёт без отбора, и это должно быть видно в отчёте.
-    const strict = analyzeVariant({ mode: 'campaignStrictDiag', level: 10, samples: 64, seed: 20261022 });
+    const strict = analyzeVariant({ mode: 'campaignForwardAll', level: 10, samples: 64, seed: 20261022 });
     expect(strict.fallbacks).toBeGreaterThanOrEqual(5);
     expect(strict.solvableShare).toBeLessThan(1);
   });
@@ -244,10 +249,11 @@ describe('прогон сравнений', () => {
   }, 120_000);
 
   it('сравнение возвращает отчёты по порядку и без расхождений на равных правилах', () => {
-    const reports = compareVariants(['jam', 'campaignFreeDiag'], 6, 4, 909);
-    expect(reports.map((report) => report.mode)).toEqual(['jam', 'campaignFreeDiag']);
-    // Кампания и «диагональ свободна» это один и тот же конфиг: цифры обязаны совпасть.
-    const twin = compareVariants(['campaign', 'campaignFreeDiag'], 6, 4, 909);
+    const reports = compareVariants(['jam', 'campaignPromote'], 6, 4, 909);
+    expect(reports.map((report) => report.mode)).toEqual(['jam', 'campaignPromote']);
+    // Кампания и её же конфиг с явно включённым превращением - один и тот же
+    // набор правил: цифры обязаны совпасть, иначе сравнение врёт на ровном месте.
+    const twin = compareVariants(['campaign', 'campaignPromote'], 6, 4, 909);
     const { mode: _a, ms: _b, ...first } = twin[0];
     const { mode: _c, ms: _d, ...second } = twin[1];
     void _a;

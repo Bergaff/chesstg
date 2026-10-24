@@ -350,12 +350,13 @@ describe('админка', () => {
     // Прогоны это часть лаборатории, и окно у них одно: вкладки переключают
     // таблицу и подпись запуска, а не плодят карточки.
     expect(screen.getByText('Прогоны: кампания, парковка, гонки')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Диагональ' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Движение и темп' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Парковка' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Гонки' })).toBeTruthy();
-    expect(screen.getByText('Кампания: диагональ только бить или свободно')).toBeTruthy();
-    // Подпись запуска показывает длину лесенки: сравнение считает все уровни.
-    expect(screen.getByRole('button', { name: /^Сравнить диагональ \(7\)/ })).toBeTruthy();
+    expect(screen.getByText('Кампания: три направления против «только вперёд», темп «все» против «одна»')).toBeTruthy();
+    // Подпись запуска показывает число прогонов: четыре правила на каждый из
+    // семи уровней лесенки, а не семь.
+    expect(screen.getByRole('button', { name: /^Сравнить движение и темп \(28\)/ })).toBeTruthy();
     // Две другие таблицы скрыты, пока на них не перешли: окон больше одного нет.
     expect(screen.queryByText('Парковка: сложность и реиграбельность')).toBeNull();
     expect(screen.queryByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeNull();
@@ -363,7 +364,7 @@ describe('админка', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Парковка' }));
     expect(screen.getByText('Парковка: сложность и реиграбельность')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Замерить генератор (7)' })).toBeTruthy();
-    expect(screen.queryByText('Кампания: диагональ только бить или свободно')).toBeNull();
+    expect(screen.queryByText('Кампания: три направления против «только вперёд», темп «все» против «одна»')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Гонки' }));
     expect(screen.getByText('Гонки: сколько можно играть до нерешаемой позиции')).toBeTruthy();
@@ -380,7 +381,7 @@ describe('админка', () => {
     expect(screen.getByRole('button', { name: /^Сравнить правила \(28\)/ })).toBeTruthy();
     // Ставка награды за взятие живёт рядом с досками и зерном, а не в новом окне.
     expect(screen.getByLabelText('Монет за взятие')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Диагональ' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Движение и темп' }));
     expect(screen.queryByLabelText('Монет за взятие')).toBeNull();
   });
 
@@ -427,25 +428,26 @@ describe('админка', () => {
     );
   }, 180_000);
 
-  it('сравнивает диагональ и отдаёт текст одним блоком', async () => {
+  it('сравнивает движение и темп и отдаёт текст одним блоком', async () => {
     await mount();
     fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
     fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
-    // Два уровня и минимум досок: прогон обязан закончиться внутри теста.
+    // Два уровня и минимум досок: прогон обязан закончиться внутри теста. На
+    // каждом уровне считаются четыре правила, поэтому кнопок не семь, а восемь.
     fireEvent.change(screen.getByLabelText('Досок на вариант'), { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText('Лестница уровней'), { target: { value: '6,20' } });
-    fireEvent.click(await screen.findByRole('button', { name: /^Сравнить диагональ \(2\)/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Сравнить движение и темп \(8\)/ }));
 
     // Отчёт начинается с шапки, а строки таблиц ищутся внутри неё.
     const text = await screen.findByText(/^Отчёт лаборатории: Кампания/, undefined, { timeout: 60_000 });
-    expect(text.textContent).toContain('Кампания: диагональ свободно или только бить');
+    expect(text.textContent).toContain('Кампания: три направления или только вперёд');
     expect(text.textContent).toContain('уровни 6,20');
     expect(text.textContent).toContain('| Уровень | Режим | Поле | С решением |');
-    // Правило сравнивается на каждом уровне лесенки: две строки на уровень,
+    // Правило сравнивается на каждом уровне лесенки: четыре строки на уровень,
     // поле 6-го уровня - 4x6, поле 20-го - 5x8, а не одно 4x6 на весь прогон.
-    expect(text.textContent).toMatch(/\| 6 \| Кампания, диагональ свободна \| 4x6 \|/);
-    expect(text.textContent).toMatch(/\| 20 \| Кампания, диагональ только для взятия \| 5x8 \|/);
+    expect(text.textContent).toMatch(/\| 6 \| Кампания \| 4x6 \|/);
+    expect(text.textContent).toMatch(/\| 20 \| Кампания: только вперёд, темп одна \| 5x8 \|/);
     // Выводы панель показывает и под таблицей списком, и в отчёте - проверяем
     // именно список: он начинается с того, на скольких уровнях снято сравнение.
     const items = screen.getAllByRole('listitem');

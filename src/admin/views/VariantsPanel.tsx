@@ -22,7 +22,8 @@ import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
  * Данные каждого прогона живут отдельно, поэтому результат предыдущего не
  * теряется, пока считаешь следующий, и между ними можно ходить туда-сюда.
  *
- * 1. «Кампания»: что меняет право вставать на пустую диагональ. Те же доски,
+ * 1. «Движение и темп»: что меняют право вставать на пустую диагональ и число
+ *    отвечающих фигур. Те же доски,
  *    два варианта правил, и мы смотрим, где задача интереснее.
  * 2. «Парковка»: насколько генератор вообще даёт разные задачи и сколько в них
  *    выбора. Победа тут тривиальна (план есть почти всегда), поэтому меряется
@@ -36,7 +37,7 @@ import { runJamSuite, runRaceSuite, runVariantSuite } from '../variantsClient';
  * занимает секунды на доску, и на главном потоке вкладка бы встала.
  */
 
-type SuiteId = 'diagonal' | 'jam' | 'race' | 'tempo';
+type SuiteId = 'movement' | 'jam' | 'race' | 'tempo';
 
 const DEFAULT_SAMPLES = 16;
 const DEFAULT_SEED = 20261022;
@@ -50,8 +51,14 @@ const MAX_SAMPLES = 2000;
  * считает только по явной кнопке.
  */
 const BIG_SAMPLES = 1000;
-/** Кампания сравнивается двумя вариантами одних и тех же досок. */
-const DIAGONAL_PAIR: ModeId[] = ['campaignFreeDiag', 'campaignStrictDiag'];
+/**
+ * Кампания сравнивается четырьмя режимами на одних и тех же досках: база плюс
+ * каждый флаг поодиночке плюс пакет целиком. Compare one knob at a time, and the
+ * bundle has to be about the sum of its parts - иначе ручки связаны.
+ */
+const MOVEMENT_MODES: ModeId[] = ['campaign', 'campaignOpenOne', 'campaignForwardAll', 'campaignForwardOne'];
+/** Правило, относительно которого меряется всё остальное: первый элемент списка. */
+const MOVEMENT_BASE: ModeId = MOVEMENT_MODES[0];
 /** Лестница уровней для «Парковки» и «Гонок»: те же срезы, что и в `docs/modes.md`. */
 const LEVELS_LADDER = '1,3,8,12,20,30,40';
 /**
@@ -61,6 +68,18 @@ const LEVELS_LADDER = '1,3,8,12,20,30,40';
 const TEMPO_MODES: ModeId[] = ['race', 'raceTempoOne', 'raceTempoCycle', 'raceDiscovery'];
 /** Правило, относительно которого темп и меряется: первый элемент списка. */
 const TEMPO_BASE: ModeId = TEMPO_MODES[0];
+
+/**
+ * Сколько строк прогона даёт один уровень: вкладки сравнения правил гоняют по
+ * четыре режима на уровень, «Парковка» и «Гонки» считают по одной строке. Кнопка
+ * показывает именно это число, иначе «Сравнить (7)» обещает семь прогонов, а
+ * считает двадцать восемь.
+ */
+function suiteRowCount(suite: SuiteId): number {
+  if (suite === 'movement') return MOVEMENT_MODES.length;
+  if (suite === 'tempo') return TEMPO_MODES.length;
+  return 1;
+}
 /**
  * За сколько ходов прогон считает забег законченным. Медленный темп партии не
  * кончает вовсе, и потолок обязан быть виден в отчёте, а не спрятан в цифре.
@@ -77,7 +96,7 @@ const PIECE_NAME: Record<string, string> = {
   queen: 'ферзь',
 };
 
-const DIAGONAL_HEAD = [
+const MOVEMENT_HEAD = [
   'Уровень',
   'Режим',
   'Поле',
@@ -108,13 +127,13 @@ interface RunMeta {
 
 /** Как называть единицу прогона (с формами склонения) и на что она делится. */
 const BOARD_FORMS: Record<SuiteId, [string, string, string]> = {
-  diagonal: ['доска', 'доски', 'досок'],
+  movement: ['доска', 'доски', 'досок'],
   jam: ['поле', 'поля', 'полей'],
   race: ['забег', 'забега', 'забегов'],
   tempo: ['забег', 'забега', 'забегов'],
 };
 const PER_WORD: Record<SuiteId, string> = {
-  diagonal: 'на вариант',
+  movement: 'на режим',
   jam: 'на уровень',
   race: 'на уровень и на правило',
   tempo: 'на уровень и на правило',
@@ -136,14 +155,14 @@ interface SuiteMeta {
 }
 
 const SUITE: Record<SuiteId, SuiteMeta> = {
-  diagonal: {
-    tab: 'Диагональ',
-    title: 'Кампания: диагональ только бить или свободно',
-    note: 'Один генератор, две версии права на пустую диагональ, и считаются все уровни лесенки: поле растёт с 3x4 до 6x9, и правило надо проверять на всём росте, а не на одном 4x6. Если «только бить» не хуже по цифрам на каждом поле, правило можно оставлять как есть. Тяжёлые уровни (30-40) считают заметно дольше: если нужен быстрый ответ, оставь 1,8,20.',
-    run: 'Сравнить диагональ',
-    bigEta: '~45 с на уровень',
+  movement: {
+    tab: 'Движение и темп',
+    title: 'Кампания: три направления против «только вперёд», темп «все» против «одна»',
+    note: 'Один генератор, четыре режима на тех же досках: боевая кампания (пешка встает на пустую диагональ, за такт отвечают все фигуры), темп «одна атакующая», право только вперёд (диагональ остаётся взятием) и пакет «только вперёд + одна фигура». Смысл пакета в том, что игрок теряет свободу, но и давят на него медленнее - сравнение и показывает, чья ручка дороже. Считаются все уровни лесенки: поле растёт с 3x4 до 6x9, на одном 4x6 вывод не снимается. Тяжёлые уровни (30-40) считают заметно дольше: для быстрого ответа оставь 1,8,20.',
+    run: 'Сравнить движение и темп',
+    bigEta: '~50 с на уровень',
     footnote:
-      '«Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10% отсутствия безальтернативных ходов. «Выбор» - средняя развилка на пути решения.',
+      '«Реиграбельность» это 40% разнообразия генератора, 25% отличия соседних досок, 25% шагов с выбором и 10% отсутствия безальтернативных ходов. «Выбор» - средняя развилка на пути решения, «откаты» - доски, которые генератор сдал без отбора: без этой колонки падение «решаемости» читается как нерешаемость.',
   },
   jam: {
     tab: 'Парковка',
@@ -173,13 +192,13 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   },
 };
 
-const SUITE_ORDER: SuiteId[] = ['diagonal', 'jam', 'race', 'tempo'];
+const SUITE_ORDER: SuiteId[] = ['movement', 'jam', 'race', 'tempo'];
 
 export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [samples, setSamples] = useState(DEFAULT_SAMPLES);
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [levels, setLevels] = useState(LEVELS_LADDER);
-  const [active, setActive] = useState<SuiteId>('diagonal');
+  const [active, setActive] = useState<SuiteId>('movement');
 
   const [reports, setReports] = useState<VariantReport[]>([]);
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
@@ -240,18 +259,19 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   }
 
   /**
-   * Прогон сравнивает два правила, и каждая ветка получает ровно столько досок,
-   * сколько запрошено: делить пополам значит соврать в заголовке отчёта.
+   * Прогон сравнивает несколько правил, и каждый режим получает ровно столько
+   * досок, сколько запрошено: делить выборку между режимами значит соврать в
+   * заголовке отчёта.
    */
-  function suiteDiagonal(count: number): Promise<void> {
+  function suiteMovement(count: number): Promise<void> {
     setReports([]);
-    // Каждая строка лесенки даёт две пары: тот же уровень, два правила. Порядком
-    // идут уровни, внутри уровня - вариант, поэтому прогресс показывает и то, и
-    // другое: на 30-м уровне ждать заметно дольше, и без уровня в подписи это
-    // выглядит как зависший прогон.
-    const jobs = ladder.flatMap((jobLevel) => DIAGONAL_PAIR.map((mode) => ({ mode, level: jobLevel })));
+    // Каждая строка лесенки даёт четыре строки: тот же уровень, четыре правила.
+    // Порядком идут уровни, внутри уровня - вариант, поэтому прогресс показывает
+    // и то, и другое: на 30-м уровне ждать заметно дольше, и без уровня в подписи
+    // это выглядит как зависший прогон.
+    const jobs = ladder.flatMap((jobLevel) => MOVEMENT_MODES.map((mode) => ({ mode, level: jobLevel })));
     let finished = 0;
-    setProgress(`Пар 0 из ${jobs.length}`);
+    setProgress(`Строк 0 из ${jobs.length}`);
     const suite = runVariantSuite(
       { jobs, samples: count, seed },
       {
@@ -365,7 +385,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     start(async () => {
       const startedAt = Date.now();
       try {
-        if (active === 'diagonal') await suiteDiagonal(count);
+        if (active === 'movement') await suiteMovement(count);
         else if (active === 'jam') await suiteJam(count);
         else if (active === 'tempo') await suiteTempo(count);
         else await suiteRace(count);
@@ -386,7 +406,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   };
 
   const count =
-    active === 'diagonal'
+    active === 'movement'
       ? reports.length
       : active === 'jam'
         ? jamRows.length
@@ -398,8 +418,8 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const tableText = (): string => {
     const ran = runMeta?.samples ?? samples;
     const usedSeed = runMeta?.seed ?? seed;
-    return active === 'diagonal'
-      ? diagonalText(reports, { levels: ladder, samples: ran, seed: usedSeed })
+    return active === 'movement'
+      ? movementText(reports, { levels: ladder, samples: ran, seed: usedSeed })
       : active === 'jam'
         ? jamText(jamRows, { samples: ran, seed: usedSeed })
         : active === 'tempo'
@@ -408,8 +428,8 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   };
 
   const reportFindings = (): string[] =>
-    active === 'diagonal'
-      ? diagonalFindings(reports)
+    active === 'movement'
+      ? movementFindings(reports)
       : active === 'jam'
         ? jamFindings(jamRows)
         : active === 'tempo'
@@ -575,7 +595,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
           >
             {running && progress
               ? progress
-              : `${meta.run} (${active === 'tempo' ? ladder.length * TEMPO_MODES.length : ladder.length})`}
+              : `${meta.run} (${ladder.length * suiteRowCount(active)})`}
           </button>
           <button
             type="button"
@@ -596,7 +616,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
         {error && <StatusLine kind="error">{error}</StatusLine>}
         {note && <StatusLine kind="ok">{note}</StatusLine>}
 
-        {active === 'diagonal' && <DiagonalTable rows={reports} levels={ladder} running={running} />}
+        {active === 'movement' && <MovementTable rows={reports} levels={ladder} running={running} />}
         {active === 'jam' && <JamTable rows={jamRows} levels={ladder} running={running} />}
         {active === 'race' && (
           <RaceTable rows={raceRows} levels={ladder} running={running} coins={coins} compareLabel="Что даёт выпад" />
@@ -627,7 +647,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   );
 }
 
-function DiagonalTable({
+function MovementTable({
   rows,
   levels,
   running,
@@ -638,13 +658,13 @@ function DiagonalTable({
 }): ReactNode {
   const byJob = new Map(rows.map((row) => [`${row.level}:${row.mode}`, row]));
   return (
-    <Table head={DIAGONAL_HEAD} empty="Нажми «Сравнить диагональ»: отчёт появится строками по мере прогона пар «уровень + правило»">
+    <Table head={MOVEMENT_HEAD} empty="Нажми «Сравнить движение и темп»: отчёт появится строками по мере прогона четвёрок «уровень + правило»">
       {levels.flatMap((value) =>
-        DIAGONAL_PAIR.map((mode) => {
+        MOVEMENT_MODES.map((mode) => {
           const item = byJob.get(`${value}:${mode}`);
           const geo = boardForMode(mode, value);
           const key = `${value}:${mode}`;
-          const cells = item ? DIAGONAL_CELLS(item) : null;
+          const cells = item ? MOVEMENT_CELLS(item) : null;
           if (!item || !cells) {
             return (
               <tr key={key}>
@@ -653,7 +673,7 @@ function DiagonalTable({
                 <td className="is-mono">
                   {geo.width}×{geo.height}
                 </td>
-                <td colSpan={DIAGONAL_HEAD.length - 3} className="adm-muted">
+                <td colSpan={MOVEMENT_HEAD.length - 3} className="adm-muted">
                   {running ? 'считаем' : 'нет данных'}
                 </td>
               </tr>
@@ -676,7 +696,7 @@ function DiagonalTable({
 }
 
 /** Колонки сравнения после «уровень / режим / поле»: одни и те же для строки-заглушки и строки с данными. */
-function DIAGONAL_CELLS(item: VariantReport): ReactNode {
+function MOVEMENT_CELLS(item: VariantReport): ReactNode {
   return (
     <>
       <td>{formatPercent(item.solvableShare, 1)}</td>
@@ -1195,102 +1215,6 @@ function jamFindings(rows: JamMeasure[]): string[] {
   return out;
 }
 
-/** Выводы сравнения диагонали: по всей лесенке уровней, а не по одному полю. */
-function diagonalFindings(reports: VariantReport[]): string[] {
-  const levels = [...new Set(reports.map((report) => report.level))].sort((a, b) => a - b);
-  const rows = levels
-    .map((value) => ({
-      level: value,
-      free: reports.find((report) => report.level === value && report.mode === 'campaignFreeDiag'),
-      strict: reports.find((report) => report.level === value && report.mode === 'campaignStrictDiag'),
-    }))
-    .filter(
-      (row): row is { level: number; free: VariantReport; strict: VariantReport } => !!row.free && !!row.strict,
-    );
-  if (rows.length === 0) return [];
-
-  const avg = (pick: (row: (typeof rows)[number]) => number) =>
-    rows.reduce((sum, row) => sum + pick(row), 0) / rows.length;
-  const fields = [
-    ...new Set(
-      rows.map((row) => {
-        const geo = boardForMode(row.free.mode, row.level);
-        return `${geo.width}x${geo.height}`;
-      }),
-    ),
-  ];
-  const perVariant = Math.round(rows.reduce((sum, row) => sum + row.strict.samples, 0) / rows.length);
-  const out = [
-    `Сравнение снято на ${rows.length} ${declension(rows.length, ['уровне', 'уровнях', 'уровнях'])} - поля ${fields.join(
-      ', ',
-    )}, на вариант по ${perVariant} ${declension(perVariant, ['доска', 'доски', 'досок'])}. Правило смотрят по всему росту поля: на 3x4 и 6x9 оно работает по-разному, один уровень этого не покажет.`,
-  ];
-
-  const freeChoice = avg((row) => row.free.avgChoiceSteps);
-  const strictChoice = avg((row) => row.strict.avgChoiceSteps);
-  const ratio = strictChoice > 0 ? freeChoice / strictChoice : 0;
-  out.push(
-    `Выбор на пути решения: ${freeChoice.toFixed(2)} против ${strictChoice.toFixed(2)}` +
-      (ratio > 1
-        ? ` - со строгой диагональю развилок в ${ratio.toFixed(1)} раза меньше, задача превращается в одну нитку.`
-        : ' - за весь прогон строгой диагонали развилок не стало меньше.'),
-  );
-
-  const drop = avg((row) => (row.free.solvableShare - row.strict.solvableShare) * 100);
-  const fallbacks = rows.reduce((sum, row) => sum + row.strict.fallbacks, 0);
-  const boards = rows.reduce((sum, row) => sum + row.strict.samples, 0);
-  out.push(
-    fallbacks > 0 && drop > 1
-      ? `Решаемость падает в среднем на ${drop.toFixed(1)} п.п., но генератор отдал ${fallbacks} ${declension(
-          fallbacks,
-          ['доску', 'доски', 'досок'],
-        )} из ${boards} без отбора: почти всё падение объясняется воронкой генератора, а не правилом. Цифра «с решением» смешивает «доска нерешаемая» и «генератор сдался» - смотри на откаты рядом.`
-      : `Решаемость ${formatPercent(avg((row) => row.free.solvableShare), 1)} против ${formatPercent(
-          avg((row) => row.strict.solvableShare),
-          1,
-        )} при откатах ${fallbacks} из ${boards}: откатов почти нет, значит падение - настоящее, а не воронка генератора.`,
-  );
-
-  const freeIndex = Math.round(avg((row) => row.free.replayIndex));
-  const strictIndex = Math.round(avg((row) => row.strict.replayIndex));
-  const gaps = rows.map((row) => row.free.replayIndex - row.strict.replayIndex);
-  const unique = rows.reduce((sum, row) => sum + row.free.uniqueLayouts + row.strict.uniqueLayouts, 0);
-  const better = freeIndex >= strictIndex ? 'свободная' : 'строгая';
-  out.push(
-    `Реиграбельность ${freeIndex} против ${strictIndex}, по уровням разница от ${Math.round(Math.min(...gaps))} до ${Math.round(
-      Math.max(...gaps),
-    )}; различных досок ${unique} из ${boards * 2}. Выигрывает ${better} диагональ - её и оставляем.` +
-      (perVariant < 64
-        ? ` По ${perVariant} ${declension(
-            perVariant,
-            ['доска', 'доски', 'досок'],
-          )} на вариант разница в пару пунктов рождается сама: для вывода нужно 64+.`
-        : ` По ${perVariant} ${declension(
-            perVariant,
-            ['доски', 'досок', 'досок'],
-          )} на вариант это уже не шум.`),
-  );
-
-  const byGap = [...rows].sort(
-    (a, b) =>
-      Math.abs(a.free.replayIndex - a.strict.replayIndex) - Math.abs(b.free.replayIndex - b.strict.replayIndex),
-  );
-  const calmest = byGap[0];
-  const angriest = byGap[byGap.length - 1];
-  if (rows.length > 1) {
-    const calmGeo = boardForMode(calmest.free.mode, calmest.level);
-    const angryGeo = boardForMode(angriest.free.mode, angriest.level);
-    out.push(
-      `Меньше всего уровни расходятся на ${calmest.level}-м (поле ${calmGeo.width}x${calmGeo.height}, ${Math.round(
-        Math.abs(calmest.free.replayIndex - calmest.strict.replayIndex),
-      )} пункта), больше всего на ${angriest.level}-м (поле ${angryGeo.width}x${angryGeo.height}, ${Math.round(
-        Math.abs(angriest.free.replayIndex - angriest.strict.replayIndex),
-      )}). Если правило и возвращать, то только там, где оно на что-то влияет.`,
-    );
-  }
-  return out;
-}
-
 /** Русское склонение при числе: «81 доска», «75 досок», «2 уровня». */
 function declension(value: number, forms: [string, string, string]): string {
   const last = Math.abs(Math.round(value)) % 100;
@@ -1478,24 +1402,108 @@ function raceText(
   return lines.join('\n');
 }
 
-/** Текст сравнения диагонали в markdown. */
-function diagonalText(reports: VariantReport[], meta: { levels: number[]; samples: number; seed: number }): string {
-  const ran = reports[0]?.samples ?? meta.samples;
-  const fields = [...new Set(meta.levels.map((value) => boardForMode('campaign', value)))].map(
+/** Выводы сравнения движения и темпа: пакет целиком и каждый флаг поодиночке. */
+function movementFindings(reports: VariantReport[]): string[] {
+  const levels = [...new Set(reports.map((report) => report.level))].sort((a, b) => a - b);
+  const present = MOVEMENT_MODES.filter((mode) => reports.some((report) => report.mode === mode));
+  if (present.length < 2 || levels.length === 0) return [];
+  const mean = (mode: ModeId, pick: (report: VariantReport) => number): number => {
+    const rows = reports.filter((report) => report.mode === mode);
+    if (rows.length === 0) return 0;
+    return rows.reduce((sum, report) => sum + pick(report), 0) / rows.length;
+  };
+  const boards = reports
+    .filter((report) => report.mode === MOVEMENT_BASE)
+    .reduce((sum, report) => sum + report.samples, 0);
+  const fields = [...new Set(levels.map((value) => boardForMode(MOVEMENT_BASE, value)))].map(
+    (geo) => `${geo.width}x${geo.height}`,
+  );
+  const out = [
+    `Сравнение снято на ${levels.length} ${declension(levels.length, ['уровне', 'уровнях', 'уровнях'])} - поля ${fields.join(
+      ', ',
+    )}, по ${boards} ${declension(boards, ['доске', 'доскам', 'досок'])} на режим. База - боевая кампания: три направления хода и ответ всех фигур за такт.`,
+  ];
+
+  for (const mode of present) {
+    if (mode === MOVEMENT_BASE) continue;
+    const score = mean(mode, (report) => report.avgScore) - mean(MOVEMENT_BASE, (report) => report.avgScore);
+    const choice = mean(mode, (report) => report.avgChoiceSteps) - mean(MOVEMENT_BASE, (report) => report.avgChoiceSteps);
+    const steps = mean(mode, (report) => report.avgSteps) - mean(MOVEMENT_BASE, (report) => report.avgSteps);
+    const replay = mean(mode, (report) => report.replayIndex) - mean(MOVEMENT_BASE, (report) => report.replayIndex);
+    const solvable = mean(mode, (report) => report.solvableShare) - mean(MOVEMENT_BASE, (report) => report.solvableShare);
+    const fallbacks = reports
+      .filter((report) => report.mode === mode)
+      .reduce((sum, report) => sum + report.fallbacks, 0);
+    out.push(
+      `${modeDef(mode).name}: оценка ${score >= 0 ? '+' : ''}${score.toFixed(1)} к базе, план ${steps >= 0 ? '+' : ''}${steps.toFixed(
+        2,
+      )} хода, развилка ${choice >= 0 ? '+' : ''}${choice.toFixed(2)}, решаемость ${
+        solvable >= 0 ? '+' : ''
+      }${(solvable * 100).toFixed(1)} п.п., реиграбельность ${replay >= 0 ? '+' : ''}${replay.toFixed(0)}, откатов генератора ${fallbacks} из ${boards}.`,
+    );
+  }
+
+  // Что из двух ручек двигает сложность сильнее: право на пустую диагональ или
+  // темп ответа. Поодиночке флаги стоят разных денег, пакет обязан быть около
+  // их суммы - иначе ручки связаны, и менять их по отдельности нельзя.
+  const knobs = present
+    .filter((mode) => mode !== MOVEMENT_BASE && mode !== 'campaignForwardOne')
+    .map((mode) => ({
+      mode,
+      score: Math.abs(mean(mode, (report) => report.avgScore) - mean(MOVEMENT_BASE, (report) => report.avgScore)),
+      choice: mean(MOVEMENT_BASE, (report) => report.avgChoiceSteps) - mean(mode, (report) => report.avgChoiceSteps),
+    }))
+    .sort((a, b) => b.score - a.score);
+  if (knobs.length >= 2) {
+    out.push(
+      `Сильнее всего оценку двигает ${modeDef(knobs[0].mode).name.toLowerCase()} (${knobs[0].score.toFixed(
+        1,
+      )} пункта против ${knobs[1].score.toFixed(1)} у ${modeDef(knobs[1].mode).name.toLowerCase()}) - и это же ручка, которая режет развилку (${knobs[0].choice.toFixed(
+        2,
+      )} против ${knobs[1].choice.toFixed(2)}): там, где выбор падает, задача превращается в одну нитку.`,
+    );
+  }
+  const bundle = present.includes('campaignForwardOne') ? 'campaignForwardOne' : null;
+  if (bundle && knobs.length >= 2) {
+    const sum = knobs.reduce((acc, knob) => acc + knob.score, 0);
+    const together = Math.abs(
+      mean(bundle, (report) => report.avgScore) - mean(MOVEMENT_BASE, (report) => report.avgScore),
+    );
+    out.push(
+      `Пакет «только вперёд + одна фигура за такт» стоит ${together.toFixed(1)} пункта, его части поодиночке - ${sum.toFixed(
+        1,
+      )} на двоих. ${
+        together > sum * 1.2
+          ? 'Значит флаги усиливают друг друга, и сравнивать их по одному нечестно.'
+          : 'Флаги почти складываются: их можно крутить по одному, пакет не открывает нового.'
+      }`,
+    );
+  }
+  if (boards < 64) {
+    out.push(
+      `По ${boards} ${declension(boards, ['доске', 'доскам', 'досок'])} на режим разница в пару пунктов - шум: для вывода нужно 64+ и лесенка целиком.`,
+    );
+  }
+  return out;
+}
+
+/** Текст сравнения движения и темпа в markdown. */
+function movementText(reports: VariantReport[], meta: { levels: number[]; samples: number; seed: number }): string {
+  const ran = reports.find((report) => report.mode === MOVEMENT_BASE)?.samples ?? meta.samples;
+  const fields = [...new Set(meta.levels.map((value) => boardForMode(MOVEMENT_BASE, value)))].map(
     (geo) => `${geo.width}x${geo.height}`,
   );
   const lines = [
-    `Кампания: диагональ свободно или только бить, уровни ${meta.levels.join(',')} (поля ${fields.join(', ')}), по ${ran} ${declension(
-      ran,
-      ['доска', 'доски', 'досок'],
-    )} на вариант, зерно ${meta.seed}`,
+    `Кампания: три направления или только вперёд, темп «все» или «одна», уровни ${meta.levels.join(',')} (поля ${fields.join(
+      ', ',
+    )}), по ${ran} ${declension(ran, ['доска', 'доски', 'досок'])} на режим, зерно ${meta.seed}`,
     '',
-    `| ${DIAGONAL_HEAD.join(' | ')} |`,
-    `| ${DIAGONAL_HEAD.map(() => '---').join(' | ')} |`,
+    `| ${MOVEMENT_HEAD.join(' | ')} |`,
+    `| ${MOVEMENT_HEAD.map(() => '---').join(' | ')} |`,
   ];
   const byJob = new Map(reports.map((row) => [`${row.level}:${row.mode}`, row]));
   for (const value of meta.levels) {
-    for (const mode of DIAGONAL_PAIR) {
+    for (const mode of MOVEMENT_MODES) {
       const geo = boardForMode(mode, value);
       const item = byJob.get(`${value}:${mode}`);
       if (!item) {
@@ -1521,7 +1529,7 @@ function diagonalText(reports: VariantReport[], meta: { levels: number[]; sample
   }
   lines.push('');
   lines.push(
-    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» - средняя развилка на пути решения; «реиграбельность» - сводный индекс. Строки идут парами: на уровне сначала свободная диагональ, затем строгая - и те же доски, и то же зерно.',
+    '«С решением» - доля досок, где решатель доходит до финиша; «выбор» - средняя развилка на пути решения; «реиграбельность» - сводный индекс. Строки идут по четыре на уровень: боевая кампания, темп «одна», только вперёд, и пакет «только вперёд + одна» - те же доски и то же зерно.',
   );
   return lines.join('\n');
 }

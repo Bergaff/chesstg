@@ -14,10 +14,11 @@ export type LabMode =
   | 'raceTempoOne'
   | 'raceTempoCycle'
   | 'raceDiscovery'
-  | 'campaignFreeDiag'
-  | 'campaignStrictDiag'
   | 'campaignPromote'
   | 'campaignNoPromote'
+  | 'campaignOpenOne'
+  | 'campaignForwardAll'
+  | 'campaignForwardOne'
   | 'jamStrictDiag';
 
 export type AnyMode = GameMode | LabMode;

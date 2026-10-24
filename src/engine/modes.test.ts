@@ -3,6 +3,7 @@ import { RACE_KING_ROWS, RACE_SPAWN_ROWS } from './race';
 import {
   MODE_RULES,
   analyzeVariant,
+  rulesFor,
   anyEnemyAttacksPlayer,
   applyAction,
   auditState,
@@ -342,17 +343,18 @@ describe('полоса сложности по режимам', () => {
 });
 
 describe('переключатели вариантов', () => {
-  it('свободная диагональ включена в кампании и выключена в строгом варианте', () => {
+  it('пустая диагональ и темп ответа: флаги сравнения движения', () => {
+    // Право вставать на пустую диагональ (три направления хода) и темп ответа
+    // фигур - два флага, которыми кампания сравнивается в лаборатории.
     const state = (mode: GameState['mode']) =>
       base({ mode, width: 4, height: 6, player: { x: 1, y: 1 }, enemies: [{ id: 'e1', type: 'rook', x: 3, y: 4 }] });
     expect(legalMoves(state('campaign')).some((m) => m.dx === 1 && !m.takes)).toBe(true);
-    expect(legalMoves(state('campaignFreeDiag')).some((m) => m.dx === 1 && !m.takes)).toBe(true);
-    expect(legalMoves(state('campaignStrictDiag')).some((m) => m.dx === 1 && !m.takes)).toBe(false);
-    // Прямо вверх ходят оба варианта.
-    expect(legalMoves(state('campaignStrictDiag')).some((m) => m.dx === 0)).toBe(true);
+    expect(legalMoves(state('campaignForwardAll')).some((m) => m.dx === 1 && !m.takes)).toBe(false);
+    // Прямо вверх ходят оба варианта: «только вперёд» не отнимает главный ход.
+    expect(legalMoves(state('campaignForwardAll')).some((m) => m.dx === 0)).toBe(true);
     // Взятие по диагонали остаётся: занятая клетка это уже не «свободная диагональ».
     const capture = base({
-      mode: 'campaignStrictDiag',
+      mode: 'campaignForwardAll',
       width: 4,
       height: 6,
       player: { x: 1, y: 1 },
@@ -409,11 +411,14 @@ describe('переключатели вариантов', () => {
   });
 
   it('геометрия варианта совпадает с базовым режимом', () => {
-    expect(boardForMode('campaignStrictDiag', 12)).toEqual(boardForMode('campaign', 12));
+    expect(boardForMode('campaignForwardAll', 12)).toEqual(boardForMode('campaign', 12));
     expect(boardForMode('jamExit4', 12)).toEqual(boardForMode('jam', 12));
     expect(piecesFor('jamExit2', 12)).toBe(piecesFor('jam', 12));
     expect(modeDef('raceDodge').playable).toBe(false);
-    expect(modeFamily('campaignStrictDiag')).toBe('campaign');
+    expect(modeFamily('campaignForwardOne')).toBe('campaign');
+    // Темп «одна фигура» не меняет ни поле, ни приток: сравнение честное.
+    expect(piecesFor('campaignOpenOne', 12)).toBe(piecesFor('campaign', 12));
+    expect(rulesFor('campaignOpenOne')).toMatchObject({ enemyTempo: 'one', freeDiagonal: true });
   });
 
   it('анализ варианта детерминирован и различает режимы', () => {
