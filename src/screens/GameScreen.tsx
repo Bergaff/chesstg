@@ -26,6 +26,8 @@ import {
   survivalHint,
   RACE_WIDTH,
   raceSpawnEvery,
+  resolveSkin,
+  skinVars,
   type BonusId,
   type Cell,
   type GameAction,
@@ -89,6 +91,20 @@ interface GameScreenProps {
 
 export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: GameScreenProps): ReactNode {
   const { profile, config, setProfile, refresh, toast, showAd, goShop, goShopStars } = useApp();
+  const skin = useMemo(() => resolveSkin(profile.skin, profile.customSkin), [profile.skin, profile.customSkin]);
+
+  // Тема красит не только доску: задний фон - часть темы, и без него
+  // «черно-золотая» доска висит на чужом фоне. Переменные уходят на `:root` на
+  // время партии и снимаются при выходе: меню и магазин обязаны остаться в
+  // обычных цветах, иначе витрина выглядела бы сломанной у всех, у кого тема.
+  useEffect(() => {
+    const root = document.documentElement;
+    const vars = skinVars(skin);
+    for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+    return () => {
+      for (const name of Object.keys(vars)) root.style.removeProperty(name);
+    };
+  }, [skin]);
   const [phase, setPhase] = useState<Phase>('loading');
   const [run, setRun] = useState<PawnRun | null>(null);
   const [state, setState] = useState<GameState | null>(null);
@@ -895,7 +911,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           state={state}
           moves={canPlay ? moves : []}
           hint={hint}
-          skin={profile.skin}
+          skin={skin}
           interactive={canPlay}
           onMove={handleMove}
           turn={state.moves}
@@ -1130,6 +1146,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
                 ? `Высота ${result.bestScore ?? result.score} клеток.`
                 : `Остановились на высоте ${result.score} клеток.`}
             {result.coinsEarned > 0 ? ` Награда: ${result.coinsEarned} монет.` : ''}
+            {result.skinAward ? ` Открыта тема «${result.skinAward}» - её можно надеть в магазине.` : ''}
           </p>
           <div className="modal-actions">
             <button type="button" className="btn btn-primary" onClick={onExit}>В меню</button>

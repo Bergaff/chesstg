@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { PRODUCTS } from '../../engine';
 import { AdminError, fetchPayments } from '../api';
 import type { PaymentsResponse } from '../types';
 import { Metric, Panel, StatusLine, Table, formatDateTime, formatNumber } from '../ui';
 
 const RANGES = [7, 30, 90, 365];
 
-const SKU_TITLE: Record<string, string> = {
-  lives: 'Пять жизней',
-  noads: 'Без рекламы',
-  skins: 'Набор скинов',
-};
+// Название товара берётся из витрины: платёж и карточка магазина обязаны
+// называться одинаково, иначе сводка по товарам расходится с тем, что игрок
+// видел на экране.
+const SKU_TITLE: Record<string, string> = Object.fromEntries(
+  Object.values(PRODUCTS).map((product) => [product.sku, product.title]),
+);
 
 const STATUS_TITLE: Record<string, string> = {
   pending: 'ожидает',

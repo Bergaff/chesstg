@@ -16,6 +16,22 @@ import type { AppConfig, FinishResult, Profile, SessionResponse } from '../src/l
 
 const SEED = 20261019;
 
+/** Тема из галереи: моку нужно что-то валидное, чтобы студия и примерка сработали. */
+const gallerySkin = {
+  name: 'Медь',
+  glyph: '❖',
+  tokens: {
+    piece: '#ffd9a0',
+    plate: '#2b1a12',
+    edge: '#c9762f',
+    cellLight: '#2b2018',
+    cellDark: '#221911',
+    frame: '#191009',
+    backdrop: '#140c07',
+    wash: '#3b2416',
+  },
+};
+
 const profile: Profile = {
   id: 'guest-1',
   name: 'Гость',
@@ -35,6 +51,7 @@ const profile: Profile = {
   endlessUnlocked: false,
   adFree: false,
   skins: ['classic'],
+  customSkin: null,
   skin: 'classic',
   inventory: { hint: 0, freeze: 0, undo: 0 },
   modes: {
@@ -195,6 +212,34 @@ beforeEach(() => {
       if (url === '/api/shop/bonus') {
         return jsonResponse({ profile: { ...profile, coins: 10, inventory: { ...profile.inventory, hint: 1 } } });
       }
+      if (url === '/api/profile/skin') {
+        return jsonResponse({ ok: true, profile: { ...profile, skin: (body as { skin?: string })?.skin } });
+      }
+      if (url === '/api/profile/skin-custom') {
+        return jsonResponse({
+          ok: true,
+          readability: { glyph: 9, board: 9, ok: true, why: '' },
+          profile: { ...profile, skin: 'custom', customSkin: (body as { skin?: unknown })?.skin ?? null },
+        });
+      }
+      if (url === '/api/skins/gallery') {
+        return jsonResponse({
+          items: [
+            {
+              id: 7,
+              name: 'Медь',
+              author: 'Тест',
+              installs: 3,
+              createdAt: 0,
+              skin: gallerySkin,
+              readability: { glyph: 8, board: 8, ok: true, why: '' },
+            },
+          ],
+        });
+      }
+      if (url === '/api/skins/install') {
+        return jsonResponse({ ok: true, profile: { ...profile, skin: 'custom', customSkin: gallerySkin } });
+      }
       return jsonResponse({ ok: true });
     }),
   );
@@ -232,6 +277,51 @@ describe('UI smoke', () => {
     expect(lab?.getAttribute('href')).toBe('/admin');
   });
 
+  it('тема поля доезжает до доски, а не только до плашки в магазине', async () => {
+    // Именно здесь тема раньше и умирала: класс `skin-gold` на фигуре висел без
+    // единого правила в стилях, и купленная тема не меняла на доске ничего.
+    profile.skin = 'gold';
+    await boot();
+    fireEvent.click(screen.getByRole('button', { name: /Играть|Продолжить/ }));
+    await screen.findByText(/Ход 1/);
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue('--skin-piece')).toBe('#e8c274');
+    expect(root.style.getPropertyValue('--skin-plate')).toBe('#121109');
+    expect(root.style.getPropertyValue('--skin-backdrop')).toBe('#100d07');
+    expect(document.querySelector('.board-frame')).not.toBeNull();
+
+    // Уход с экрана снимает переменные: меню и магазин в чужих цветах выглядят
+    // сломанными, а не нарядными.
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
+    await waitFor(() => expect(root.style.getPropertyValue('--skin-piece')).toBe(''));
+  });
+
+  it('своя фигура из студии рисуется контуром вместо глифа', async () => {
+    profile.skin = 'custom';
+    profile.customSkin = {
+      name: 'Клякса',
+      glyph: '❖',
+      path: 'M 4 28 L 16 4 L 28 28 Z',
+      tokens: {
+        piece: '#ffd9a0',
+        plate: '#2b1a12',
+        edge: '#c9762f',
+        cellLight: '#2b2018',
+        cellDark: '#221911',
+        frame: '#191009',
+        backdrop: '#140c07',
+        wash: '#3b2416',
+      },
+    };
+    await boot();
+    fireEvent.click(screen.getByRole('button', { name: /Играть|Продолжить/ }));
+    await screen.findByText(/Ход 1/);
+    const shape = document.querySelector('.player-shape path');
+    expect(shape?.getAttribute('d')).toBe('M 4 28 L 16 4 L 28 28 Z');
+    expect(document.querySelector('.player-glyph')).toBeNull();
+    expect(document.documentElement.style.getPropertyValue('--skin-piece')).toBe('#ffd9a0');
+  });
+
   it('открывает правила и закрывает их', async () => {
     await boot();
     fireEvent.click(screen.getAllByRole('button', { name: 'Правила игры' })[0]);
@@ -247,8 +337,48 @@ describe('UI smoke', () => {
     fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
     expect(await screen.findByText('Бонусы на партию')).toBeTruthy();
     expect(screen.getByText('Подсказка')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: 'Скины' }));
-    expect(await screen.findByText('Другой образ пешки')).toBeTruthy();
+    // Вкладка тем: витрина сезона, цена каждой темы поштучно и путь в студию.
+    fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
+    const feature = await screen.findByText(/этот сезон бесплатно/);
+    expect(feature.textContent).toContain('бесплатно');
+    // Платные темы продаются по одной: у каждой своя кнопка с ценой. Тема с
+    // витрины в этом квартале открыта всем, поэтому кнопок три минус одна.
+    expect(screen.getAllByText('20 звёзд')).toHaveLength(2);
+    expect(screen.getByText('витрина')).toBeTruthy();
+    expect(screen.getByText(/Набор из 3 тем стоит 50 звёзд/)).toBeTruthy();
+    expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/За 100 пережитых ходов в «Гонках»/)).toBeTruthy();
+    expect(screen.getByText('награда')).toBeTruthy();
+    // Своя тема: ряд есть, темы нет - кнопка ведёт в студию, а не в покупку.
+    expect(screen.getByText('Своя тема')).toBeTruthy();
+    // Превью есть у каждой строки списка (шесть тем, своя строка и одна из
+    // галереи) плюс большой образец в шапке - без превью магазин продаёт цвета,
+    // которые никто не видел на доске.
+    expect(document.querySelectorAll('.skin-row')).toHaveLength(8);
+    expect(document.querySelectorAll('.skin-preview')).toHaveLength(9);
+
+    fireEvent.click(screen.getByRole('button', { name: /Собрать свою тему/ }));
+    expect(await screen.findByText('Студия')).toBeTruthy();
+    expect(screen.getByText(/Показать всем: 100/)).toBeTruthy();
+    // Своя тема сохраняётся одним POST-ом со всеми восемью цветами: сервер
+    // проверяет читаемость сам, и «надеть бесплатно» не имеет права просить счёт.
+    fireEvent.click(screen.getByRole('button', { name: 'Надеть бесплатно' }));
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/profile/skin-custom')).toBe(true));
+    const saved = calls.find((call) => call.url === '/api/profile/skin-custom')!.body as {
+      skin: { name: string; tokens: Record<string, string>; glyph: string };
+    };
+    expect(Object.keys(saved.skin.tokens)).toHaveLength(8);
+    expect(saved.skin.glyph).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
+    expect(await screen.findByText(/автор Тест · поставили 3/)).toBeTruthy();
+
+    // Галерея: чужую тему ставят себе бесплатно, и она надевается.
+    fireEvent.click(screen.getByRole('button', { name: /Медь/ }));
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/skins/install')).toBe(true));
+    // Тема из галереи наделась: её имя видно и в строке галереи, и в строке
+    // «своя тема», а кнопка обещает правку, а не сборку с нуля.
+    await waitFor(() => expect(screen.getAllByText('Медь').length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByRole('button', { name: /Поправить свою тему/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
 
     fireEvent.click(await screen.findByText(/Мировая таблица и друзья/));
@@ -559,4 +689,5 @@ describe('UI smoke', () => {
     expect(screen.getByText('10')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/shop/bonus')).toBe(true);
   });
+
 });

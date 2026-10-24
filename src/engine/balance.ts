@@ -1,3 +1,8 @@
+import { PAID_SKINS, SKINS, type PaidSkinId, type SkinId, SKIN_SET_STARS } from './skins';
+
+/** Взнос за то, чтобы свою тему увидели чужие: одна плата на одну тему. */
+export const SHARE_FEE_STARS = 100;
+
 export const MAX_LIVES = 5;
 export const LIFE_REGEN_MS = 30 * 60 * 1000;
 export const ENDLESS_UNLOCK_LEVEL = 10;
@@ -35,7 +40,7 @@ export const BONUSES: Record<BonusId, BonusDef> = {
 
 export const BONUS_ORDER: BonusId[] = ['hint', 'freeze', 'undo'];
 
-export type ProductSku = 'lives' | 'noads' | 'skins';
+export type ProductSku = 'lives' | 'noads' | 'skins' | 'share' | `skin:${PaidSkinId}`;
 
 export interface ProductDef {
   sku: ProductSku;
@@ -43,14 +48,23 @@ export interface ProductDef {
   stars: number;
   description: string;
   badge?: string;
+  /** Что именно выдаёт платёж: тема, набор, отключение рекламы. */
+  kind: 'lives' | 'ads' | 'skin' | 'fee';
 }
 
+/**
+ * Темы продаются и по одной, и набором. Штучная цена нужна затем, чтобы игрок
+ * купил хоть что-то: «всё или ничего» за 50 звёзд отталкивает того, кому
+ * нравится одна тема, а 20 звёзд он отдаёт легко. Набор при этом остаётся
+ * выгоднее - за него и цепляет того, кто выбирает между «одной» и «тремя».
+ */
 export const PRODUCTS: Record<ProductSku, ProductDef> = {
   lives: {
     sku: 'lives',
     title: '+5 жизней',
     stars: 25,
     description: 'Мгновенно восстановит все жизни',
+    kind: 'lives',
   },
   noads: {
     sku: 'noads',
@@ -58,41 +72,62 @@ export const PRODUCTS: Record<ProductSku, ProductDef> = {
     stars: 150,
     description: 'Навсегда отключает рекламные показы',
     badge: 'Навсегда',
+    kind: 'ads',
   },
   skins: {
     sku: 'skins',
-    title: 'Набор скинов',
-    stars: 50,
-    description: 'Три образа пешки: золото, полночь и лилия',
-    badge: '3 скина',
+    title: 'Все темы поля',
+    stars: SKIN_SET_STARS,
+    description: PAID_SKINS.map((id) => SKINS[id].name).join(', ') + ' - навсегда',
+    badge: `${PAID_SKINS.length} темы`,
+    kind: 'skin',
   },
+  // Взнос за публикацию: для себя тема бесплатна всегда, платит тот, кто хочет
+  // поставить её в общую галерею. Цена отсекает поток «накидал за минуту» и
+  // оплачивает проверку каждой заявки.
+  share: {
+    sku: 'share',
+    title: 'Показать тему всем',
+    stars: SHARE_FEE_STARS,
+    description: 'Тема попадёт в галерею после проверки, навсегда и без royalties',
+    badge: 'Один раз',
+    kind: 'fee',
+  },
+  ...Object.fromEntries(
+    PAID_SKINS.map((id) => [
+      `skin:${id}`,
+      {
+        sku: `skin:${id}`,
+        title: `Тема «${SKINS[id].name}»`,
+        stars: SKINS[id].stars,
+        description: SKINS[id].description,
+        kind: 'skin',
+      },
+    ]),
+  ) as Record<`skin:${PaidSkinId}`, ProductDef>,
 };
 
-export const PRODUCT_ORDER: ProductSku[] = ['lives', 'skins', 'noads'];
+export const PRODUCT_ORDER: ProductSku[] = [
+  'lives',
+  'skins',
+  ...PAID_SKINS.map((id): ProductSku => `skin:${id}`),
+  'noads',
+];
 
-export type SkinId = 'classic' | 'gold' | 'neon' | 'royal';
-
-export interface SkinDef {
-  id: SkinId;
-  name: string;
-  description: string;
-  pawn: string;
-  free?: boolean;
+export function productSkuForSkin(id: PaidSkinId): ProductSku {
+  return `skin:${id}`;
 }
 
-export const SKINS: Record<SkinId, SkinDef> = {
-  classic: { id: 'classic', name: 'Классика', description: 'Костяная пешка', pawn: '♟', free: true },
-  gold: { id: 'gold', name: 'Золото', description: 'Пешка из чистого золота', pawn: '♟' },
-  neon: { id: 'neon', name: 'Полночь', description: 'Сдержанный холодный оттенок', pawn: '♟' },
-  royal: { id: 'royal', name: 'Корона', description: 'Литейная форма с лилией', pawn: '⚜' },
-};
-
-export const SKIN_ORDER: SkinId[] = ['classic', 'gold', 'neon', 'royal'];
-export const PAID_SKINS: SkinId[] = ['gold', 'neon', 'royal'];
-
-export function isSkinId(value: unknown): value is SkinId {
-  return typeof value === 'string' && value in SKINS;
+export function isProductSku(value: unknown): value is ProductSku {
+  return typeof value === 'string' && value in PRODUCTS;
 }
+
+/** Тема открыта навсегда, если за неё заплатили; витрина сезона - отдельная ветка. */
+export function skinProductOwned(sku: ProductSku, owned: readonly SkinId[]): boolean {
+  if (sku === 'skins') return PAID_SKINS.every((id) => owned.includes(id));
+  return typeof sku === 'string' && sku.startsWith('skin:') && owned.includes(sku.slice(5) as SkinId);
+}
+
 
 export function isBonusId(value: unknown): value is BonusId {
   return typeof value === 'string' && value in BONUSES;

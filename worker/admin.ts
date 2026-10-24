@@ -10,6 +10,7 @@ import {
   type AuditResult,
   type PieceType,
 } from '../src/engine';
+import { checkSkin } from '../src/engine';
 import { parseModeLevels, profileModes, resumableRun } from './db';
 import { SCHEMA_VERSION } from './schema';
 import { fail, readJson } from './http';
@@ -821,6 +822,131 @@ adminApp.get('/payments', async (c) => {
   );
 
   return c.json({ days, stars, summary: summary.results ?? [], rows: rows.results ?? [] });
+});
+
+/**
+ * Очередь публикаций тем.
+ *
+ * Тема попадает сюда оплаченным счётом, поэтому черновик (`draft`) - это
+ * «деньги ещё не пришли», а не «игрок передумал». В галерею без ручной проверки
+ * ничего не уходит: цвета и контур игрок рисует сам, и оценить «это видно на
+ * доске» можно только глядя на превью.
+ */
+adminApp.get('/skins', async (c) => {
+  const wanted = String(c.req.query('status') ?? 'pending');
+  const status = ['draft', 'pending', 'approved', 'rejected'].includes(wanted) ? wanted : 'pending';
+  const rows = await c.env.DB.prepare(
+    `SELECT s.id, s.name, s.payload, s.status, s.note, s.installs, s.charge_id AS chargeId,
+            s.created_at AS createdAt, s.reviewed_at AS reviewedAt,
+            u.first_name AS author, u.username, u.id AS userId
+     FROM skin_shares s LEFT JOIN users u ON u.id = s.user_id
+     WHERE s.status = ?
+     ORDER BY s.created_at DESC
+     LIMIT 50`,
+  )
+    .bind(status)
+    .all<Record<string, unknown>>();
+
+  const counts = await c.env.DB.prepare(
+    `SELECT status, COUNT(*) AS n, COALESCE(SUM(installs), 0) AS installs FROM skin_shares GROUP BY status`,
+  ).all<{ status: string; n: number; installs: number }>();
+
+  const items = (rows.results ?? []).map((row) => {
+    let skin: unknown = null;
+    let broken = false;
+    try {
+      skin = JSON.parse(String(row.payload));
+    } catch {
+      broken = true;
+    }
+    const check = broken ? null : checkSkin(skin);
+    return {
+      id: Number(row.id),
+      name: String(row.name ?? ''),
+      author: row.username ? `@${row.username}` : String(row.author ?? row.userId ?? ''),
+      userId: String(row.userId ?? ''),
+      chargeId: row.chargeId ? String(row.chargeId) : null,
+      installs: Number(row.installs ?? 0),
+      createdAt: Number(row.createdAt ?? 0),
+      reviewedAt: row.reviewedAt === null || row.reviewedAt === undefined ? null : Number(row.reviewedAt),
+      note: String(row.note ?? ''),
+      broken,
+      skin: check?.ok ? check.skin : null,
+      readability: check ? { glyph: check.readability.glyph, board: check.readability.board, ok: check.readability.ok } : null,
+    };
+  });
+
+  return c.json({ status, items, counts: counts.results ?? [] });
+});
+
+adminApp.post('/skins/review', async (c) => {
+  const body = await readJson(c);
+  const id = Number(body.id);
+  const decision = body.decision;
+  if (!Number.isInteger(id) || (decision !== 'approve' && decision !== 'reject')) fail(400, 'bad_request');
+  const note = typeof body.note === 'string' ? body.note.slice(0, 160) : '';
+  // Одобрение выдаётся только из очереди, а отклонить можно и опубликованное:
+  // жалоба на тему приходит позже, чем заявка.
+  const from = decision === 'approve' ? "status = 'pending'" : "status IN ('draft', 'pending', 'approved')";
+  const next = decision === 'approve' ? 'approved' : 'rejected';
+  const result = await c.env.DB.prepare(
+    `UPDATE skin_shares SET status = ?, note = ?, reviewed_at = ? WHERE id = ? AND ${from}`,
+  )
+    .bind(next, note, Date.now(), id)
+    .run();
+  const changes = Number(result.meta?.changes ?? 0);
+  if (changes === 0) fail(409, 'review_stale', 'Заявка уже разобрана или снята');
+  return c.json({ ok: true, status: next, id });
+});
+
+/**
+ * Цифры для модели магазина: измеряемое против допущений.
+ *
+ * Долю покупателей считают от открытий витрины, а не от игроков: тот, кто
+ * магазин не открывал, не мог и купить. Без этой разницы прогноз всегда
+ * оптимистичнее реальности ровно во столько раз, во сколько игроков больше,
+ * чем открытий.
+ */
+adminApp.get('/shop/econ', async (c) => {
+  const days = intParam(c.req.query('days'), 30, 1, 365);
+  const start = Date.now() - days * DAY;
+
+  // Batch отдаёт один тип строк на весь запрос: колонки читаются через
+  // Record, а приводятся к числам на месте - иначе D1-типизация требует
+  // дженерика на каждую строку, и любое изменение SELECT ломает вывод.
+  const [opens, players, paid, bySku, queue] = await c.env.DB.batch<Record<string, number | string | null>>([
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM events WHERE kind = 'shop_open' AND created_at >= ?`).bind(start),
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM users WHERE created_at >= ?`).bind(start),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(stars), 0) AS stars, COUNT(DISTINCT user_id) AS payers
+       FROM payments WHERE status = 'paid' AND paid_at >= ?`,
+    ).bind(start),
+    c.env.DB.prepare(
+      `SELECT sku, COUNT(*) AS n, COALESCE(SUM(stars), 0) AS stars
+       FROM payments WHERE status = 'paid' AND paid_at >= ? GROUP BY sku ORDER BY stars DESC`,
+    ).bind(start),
+    c.env.DB.prepare(
+      `SELECT status, COUNT(*) AS n, COALESCE(SUM(installs), 0) AS installs FROM skin_shares GROUP BY status`,
+    ),
+  ]);
+
+  const refunded = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM payments WHERE status = 'refunded' AND created_at >= ?`,
+  )
+    .bind(start)
+    .first<{ n: number }>();
+
+  return c.json({
+    days,
+    shopOpens: Number(opens.results?.[0]?.n ?? 0),
+    newPlayers: Number(players.results?.[0]?.n ?? 0),
+    paidCount: Number(paid.results?.[0]?.n ?? 0),
+    paidStars: Number(paid.results?.[0]?.stars ?? 0),
+    payers: Number(paid.results?.[0]?.payers ?? 0),
+    refundedCount: Number(refunded?.n ?? 0),
+    bySku: (bySku.results ?? []) as { sku: string; n: number; stars: number }[],
+    queue: (queue.results ?? []) as { status: string; n: number; installs: number }[],
+  });
 });
 
 adminApp.get('/levels', async (c) => {

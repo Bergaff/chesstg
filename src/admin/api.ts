@@ -8,6 +8,8 @@ import type {
   LevelCheckReport,
   OverviewResponse,
   PaymentsResponse,
+  ShopEconResponse,
+  SkinsResponse,
   UserDetailResponse,
   UsersResponse,
 } from './types';
@@ -188,6 +190,23 @@ export function setupBot(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+/** Очередь публикаций тем: черновики, заявка, галерея, отклонённые. */
+export function fetchSkins(status: string): Promise<SkinsResponse> {
+  return request<SkinsResponse>(`/skins?status=${encodeURIComponent(status)}`);
+}
+
+export function reviewSkin(id: number, decision: 'approve' | 'reject', note: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/skins/review', {
+    method: 'POST',
+    body: JSON.stringify({ id, decision, note }),
+  });
+}
+
+/** Что модель магазина может взять из базы, а не из головы. */
+export function fetchShopEcon(days: number): Promise<ShopEconResponse> {
+  return request<ShopEconResponse>(`/shop/econ?days=${days}`);
 }
 
 export function fetchDiag(): Promise<DiagResponse> {

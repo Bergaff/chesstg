@@ -1,3 +1,5 @@
+import type { CustomSkin } from '../engine';
+
 export interface AdminStatus {
   configured: boolean;
   authenticated: boolean;
@@ -367,4 +369,40 @@ export interface HealthResponse {
   schemaVersion?: number;
   origin?: string;
   service?: string;
+}
+
+/** Строка очереди публикаций тем: сама тема, автор и verdict проверки читаемости. */
+export interface SkinShareItem {
+  id: number;
+  name: string;
+  author: string;
+  userId: string;
+  chargeId: string | null;
+  installs: number;
+  createdAt: number;
+  reviewedAt: number | null;
+  note: string;
+  /** Запись не разбирается: её нельзя одобрить, и админка обязана это показать. */
+  broken: boolean;
+  skin: CustomSkin | null;
+  readability: { glyph: number; board: number; ok: boolean } | null;
+}
+
+export interface SkinsResponse {
+  status: string;
+  items: SkinShareItem[];
+  counts: Array<{ status: string; n: number; installs: number }>;
+}
+
+/** Измеряемое для модели магазина: открытия витрины, платежи, очередь публикаций. */
+export interface ShopEconResponse {
+  days: number;
+  shopOpens: number;
+  newPlayers: number;
+  paidCount: number;
+  paidStars: number;
+  payers: number;
+  refundedCount: number;
+  bySku: Array<{ sku: string; n: number; stars: number }>;
+  queue: Array<{ status: string; n: number; installs: number }>;
 }

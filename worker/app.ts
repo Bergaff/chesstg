@@ -3,7 +3,9 @@ import { cors } from 'hono/cors';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import {
   AD_COINS_REWARD,
+  ASH_RECORD_MOVES,
   addLife,
+  checkSkin,
   type AnyRunState,
   applyActions,
   BONUSES,
@@ -24,6 +26,8 @@ import {
   isSkinId,
   jamHint,
   type JamState,
+  SKIN_SET_STARS,
+  SKIN_STARS,
   loseLife,
   materializeLives,
   MAX_LIVES,
@@ -38,6 +42,10 @@ import {
   RuleError,
   rulesFor,
   type RunAction,
+  PRODUCTS,
+  showcaseEndsAt,
+  showcaseSkin,
+  SKINS,
   snapshotOf,
 } from '../src/engine';
 import { authMiddleware, syncTelegramName } from './auth';
@@ -60,6 +68,7 @@ import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import { build as BUILD } from '../version.json';
 import {
   activeRuns,
+  customSkinOf,
   eternalLives,
   getOrCreateUser,
   getRun,
@@ -74,6 +83,7 @@ import {
   refreshLives,
   requireOwnRun,
   serializeModeLevels,
+  skinAvailable,
   resumableRun,
   serializeRun,
   toProfile,
@@ -302,6 +312,7 @@ app.get('/api/health', async (c) => {
   if (schema.missingAdmin.length > 0) warnings.push('admin_tables_missing');
   // Игра работает и без неё, но привязать прогресс на сайте не получится.
   if (schema.missingAuth.length > 0) warnings.push('auth_tables_missing');
+  if (schema.missingSkins.length > 0) warnings.push('skin_tables_missing');
 
   return c.json({
     ...base,
@@ -770,6 +781,9 @@ app.post('/api/run/:id/finish', async (c) => {
   let endlessRecord = false;
   let modeLevelsAfter = user.mode_levels;
   let modeLevelsChanged = false;
+  // «Пепел» не продаётся: его выигрывают. Решение принимается здесь, а не на
+  // клиенте, - награду нельзя нарисовать себе ответом на `/finish`.
+  let ashAward = false;
 
   // Режимы с уровнем (кампания, «Парковка», «Гонки») продвигаются одинаково:
   // победа на своём уровне даёт награду и следующий уровень, поражение стоит
@@ -814,6 +828,7 @@ app.post('/api/run/:id/finish', async (c) => {
     // `replay` возвращает состояние любого режима, а взятия есть только у гонок с
     // кампанией - «Парковка» проходит по этой же ветке, если её когда-нибудь
     // допишут до журнала ходов.
+    if (survived >= ASH_RECORD_MOVES && !ownedSkins(user).includes('ash')) ashAward = true;
     const taken = 'pieces' in state ? 0 : (state.captures ?? 0);
     reward = outcome === 'lost' ? raceCoinReward(survived, taken) : 0;
     if (newBest || raceLevelForMoves(survived) > progress.level) {
@@ -878,6 +893,7 @@ app.post('/api/run/:id/finish', async (c) => {
           ? Math.max(modeProgress(user, 'race').best ?? 0, snapshot.score)
           : null,
     endlessUnlockedNow,
+    ...(ashAward ? { skinAward: SKINS.ash.name } : {}),
   };
 
   const runUpdate = c.env.DB.prepare(
@@ -921,6 +937,9 @@ app.post('/api/run/:id/finish', async (c) => {
   if (endlessRecord) {
     set.push('endless_best = ?', 'endless_best_tier = ?', 'endless_best_moves = ?');
     binds.push(bestAfter, bestTierAfter, bestMovesAfter);
+  }
+  if (ashAward) {
+    set.push(`skins = CASE WHEN skins LIKE '%ash%' THEN skins ELSE skins || ',ash' END`);
   }
   binds.push(user.id, run.id, finishId);
 
@@ -1080,12 +1099,154 @@ app.post('/api/profile/skin', async (c) => {
   const body = await readJson(c);
   const skin = body.skin;
   if (!isSkinId(skin)) fail(400, 'bad_skin', 'Неизвестный скин');
-  const owned = ownedSkins(authCtx.user);
-  if (!owned.includes(skin)) fail(403, 'skin_locked', 'Скин не куплен');
+  // Владелец темы решает сам, а «не открыто» отвечает только за то, за что
+  // заплатили: бесплатные темы, своя тема и тема с витрины сезона открываются
+  // без счёта - проверка одна на все три случая, `skinAvailable`.
+  if (!skinAvailable(authCtx.user, skin)) fail(403, 'skin_locked', 'Тема не открыта');
 
   await c.env.DB.prepare('UPDATE users SET skin = ?, updated_at = ? WHERE id = ?')
     .bind(skin, nowMs(), authCtx.user.id)
     .run();
+  const fresh = await getUserById(c.env, authCtx.user.id);
+  if (!fresh) fail(500, 'user_missing');
+  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
+});
+
+/**
+ * Открытие витрины. Единственная метрика, без которой прогноз магазина врёт:
+ * доля покупателей считается от тех, кто магазин видел, а не от всех игроков.
+ */
+app.post('/api/shop/open', (c) => {
+  const authCtx = auth(c);
+  logEventInBackground(c.env, c.executionCtx, authCtx.user.id, 'shop_open', 1);
+  return c.json({ ok: true });
+});
+
+/** Что витрина показывает в этом сезоне: подпись в магазине рисуется по этим числам. */
+app.get('/api/skins/showcase', (c) => {
+  const now = nowMs();
+  const id = showcaseSkin(now);
+  return c.json({
+    skin: id,
+    name: SKINS[id].name,
+    stars: SKINS[id].stars,
+    endsAt: showcaseEndsAt(now),
+    shareFee: PRODUCTS.share.stars,
+    singleFee: SKIN_STARS,
+    setFee: SKIN_SET_STARS,
+    ashRecordMoves: ASH_RECORD_MOVES,
+  });
+});
+
+/**
+ * Своя тема: бесплатно и навсегда, но только для того, кто её собрал. Приватный
+ * цвет не видит никто, поэтому проверять нечего и брать не за что. Платит тот,
+ * кто хочет, чтобы тему увидели чужие, - отдельный счёт на `sku = 'share'`.
+ */
+app.post('/api/profile/skin-custom', async (c) => {
+  const authCtx = auth(c);
+  const body = await readJson(c);
+  const now = nowMs();
+
+  if (body.skin === null) {
+    await c.env.DB.prepare(`UPDATE users SET skin_custom = '', skin = 'classic', updated_at = ? WHERE id = ?`)
+      .bind(now, authCtx.user.id)
+      .run();
+    const cleared = await getUserById(c.env, authCtx.user.id);
+    if (!cleared) fail(500, 'user_missing');
+    return c.json({ ok: true, profile: toProfile(cleared, nowMs(), eternalLives(c.env, cleared)) });
+  }
+
+  const check = checkSkin(body.skin);
+  if (!check.ok) {
+    fail(422, 'skin_unreadable', check.error ?? 'Тему не видно на доске', { readability: check.readability });
+  }
+
+  await c.env.DB.prepare(`UPDATE users SET skin_custom = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(check.skin), now, authCtx.user.id)
+    .run();
+  const fresh = await getUserById(c.env, authCtx.user.id);
+  if (!fresh) fail(500, 'user_missing');
+  return c.json({
+    ok: true,
+    readability: check.readability,
+    profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)),
+  });
+});
+
+interface ShareRow {
+  id: number;
+  name: string;
+  payload: string;
+  created_at: number;
+  installs: number;
+  author: string | null;
+}
+
+/** Записи галереи проверяются на чтении: кривая строка не должна рендериться. */
+function shareItem(row: ShareRow) {
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(row.payload);
+  } catch {
+    return null;
+  }
+  const check = checkSkin(parsed);
+  if (!check.ok) return null;
+  return {
+    id: Number(row.id),
+    name: check.skin.name,
+    author: row.author ?? 'Игрок',
+    installs: Number(row.installs ?? 0),
+    createdAt: Number(row.created_at),
+    skin: check.skin,
+    readability: check.readability,
+  };
+}
+
+/** Галерея одобренных тем. Поставить любую можно бесплатно. */
+app.get('/api/skins/gallery', async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT s.id, s.name, s.payload, s.created_at, s.installs, u.first_name AS author
+     FROM skin_shares s LEFT JOIN users u ON u.id = s.user_id
+     WHERE s.status = 'approved'
+     ORDER BY s.installs DESC, s.created_at DESC
+     LIMIT 40`,
+  ).all<ShareRow>();
+  const items = (results ?? [])
+    .map(shareItem)
+    .filter((item): item is NonNullable<ReturnType<typeof shareItem>> => item !== null);
+  return c.json({ items });
+});
+
+/**
+ * Чужая тема ставится копией, а не ссылкой: её можно поправить под себя, и
+ * оригинал от этого не меняется. Автора подписывают - вся награда автора это
+ * подпись и счётчик установок, денег здесь нет намеренно.
+ */
+app.post('/api/skins/install', async (c) => {
+  const authCtx = auth(c);
+  const body = await readJson(c);
+  const id = Number(body.id);
+  if (!Number.isInteger(id) || id <= 0) fail(400, 'bad_request');
+  const row = await c.env.DB.prepare(
+    `SELECT s.id, s.name, s.payload, s.created_at, s.installs, u.first_name AS author
+     FROM skin_shares s LEFT JOIN users u ON u.id = s.user_id
+     WHERE s.id = ? AND s.status = 'approved'`,
+  )
+    .bind(id)
+    .first<ShareRow>();
+  if (!row) fail(404, 'share_not_found', 'Этой темы в галерее нет');
+  const item = shareItem(row);
+  if (!item) fail(422, 'skin_broken', 'Запись темы повреждена');
+
+  const skin = { ...item.skin, sharedBy: item.author };
+  const now = nowMs();
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE users SET skin_custom = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
+      .bind(JSON.stringify(skin), now, authCtx.user.id),
+    c.env.DB.prepare('UPDATE skin_shares SET installs = installs + 1 WHERE id = ?').bind(row.id),
+  ]);
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
   return c.json({ ok: true, profile: toProfile(fresh, nowMs(), eternalLives(c.env, fresh)) });
@@ -1207,7 +1368,11 @@ app.post('/api/shop/invoice', async (c) => {
   const sku = body.sku;
   if (!isProductSku(sku)) fail(400, 'bad_sku', 'Неизвестный товар');
   const user = await refreshLives(c.env, authCtx.user);
-  const invoice = await createInvoice(c.env, user, sku);
+  // За публикацию своей темы платят звёздами, и тема прикладывается к счёту:
+  // черновик заявки создаётся до оплаты, чтобы платёж и очередь не разошлись.
+  const share = sku === 'share' ? checkSkin(body.skin) : null;
+  if (share && !share.ok) fail(422, 'skin_unreadable', share.error ?? 'Тему не видно на доске');
+  const invoice = await createInvoice(c.env, user, sku, share ? { skin: share.skin } : undefined);
   return c.json(invoice);
 });
 

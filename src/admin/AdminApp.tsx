@@ -9,9 +9,10 @@ import { LabView } from './views/LabView';
 import { BotView } from './views/BotView';
 import { UsersView } from './views/UsersView';
 import { PaymentsView } from './views/PaymentsView';
+import { SkinsView } from './views/SkinsView';
 import { StatusLine, formatDateTime } from './ui';
 
-type Tab = 'overview' | 'levels' | 'levelstats' | 'lab' | 'users' | 'payments' | 'bot';
+type Tab = 'overview' | 'levels' | 'levelstats' | 'lab' | 'users' | 'payments' | 'skins' | 'bot';
 
 const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'overview', title: 'Обзор' },
@@ -20,6 +21,7 @@ const TABS: Array<{ id: Tab; title: string }> = [
   { id: 'lab', title: 'Лаборатория' },
   { id: 'users', title: 'Игроки' },
   { id: 'payments', title: 'Платежи' },
+  { id: 'skins', title: 'Темы' },
   { id: 'bot', title: 'Бот' },
 ];
 
@@ -173,6 +175,7 @@ npx wrangler secret put ADMIN_SECRET</pre>
         {tab === 'lab' && <LabView onUnauthorized={onUnauthorized} />}
         {tab === 'users' && <UsersView onUnauthorized={onUnauthorized} />}
         {tab === 'payments' && <PaymentsView onUnauthorized={onUnauthorized} />}
+        {tab === 'skins' && <SkinsView onUnauthorized={onUnauthorized} />}
         {tab === 'bot' && <BotView onUnauthorized={onUnauthorized} />}
       </main>
 

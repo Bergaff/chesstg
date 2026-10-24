@@ -2,8 +2,13 @@ import {
   MAX_LIVES,
   PAID_SKINS,
   PRODUCTS,
+  isProductSku as isKnownSku,
   materializeLives,
+  skinProductOwned,
+  type CustomSkin,
   type ProductSku,
+  SKINS,
+  type SkinId,
 } from '../src/engine';
 import { ownedSkins } from './db';
 import { logEvent } from './events';
@@ -22,8 +27,24 @@ export interface PaymentRow {
   paid_at: number | null;
 }
 
+/**
+ * Товары описаны в движке одним словарём: цена, выдача и проверка «уже куплено»
+ * берутся оттуда же, поэтому тема не может оказаться в витрине без платежа и
+ * наоборот. Отдельный список sku здесь однажды разошёлся бы с PRODUCTS.
+ */
 export function isProductSku(value: unknown): value is ProductSku {
-  return value === 'lives' || value === 'noads' || value === 'skins';
+  return isKnownSku(value);
+}
+
+/** Тема поштучно: `skin:gold` и так далее. */
+export function skuSkin(sku: ProductSku): SkinId | null {
+  if (!sku.startsWith('skin:')) return null;
+  const id = sku.slice(5) as SkinId;
+  return id in SKINS ? id : null;
+}
+
+export interface ShareDraft {
+  skin: CustomSkin;
 }
 
 export async function getPayment(env: WorkerEnv, chargeId: string): Promise<PaymentRow | null> {
@@ -34,6 +55,8 @@ export async function createInvoice(
   env: WorkerEnv,
   user: UserRow,
   sku: ProductSku,
+  /** Тема, которую публикуют: для `sku = 'share'` без неё выставлять счёт не за что. */
+  share?: ShareDraft,
 ): Promise<{ url: string; chargeId: string }> {
   if (!env.BOT_TOKEN?.trim()) {
     fail(503, 'payments_not_configured', 'Платежи доступны после настройки бота');
@@ -43,14 +66,35 @@ export async function createInvoice(
   const product = PRODUCTS[sku];
   const now = Date.now();
   const lives = materializeLives(user.lives, user.lives_at, now);
+  const owned = ownedSkins(user);
 
   if (sku === 'noads' && user.ad_free) fail(409, 'already_owned', 'Реклама уже отключена');
   if (sku === 'lives' && lives.lives >= MAX_LIVES) fail(409, 'lives_full', 'Жизни уже полны');
-  if (sku === 'skins' && PAID_SKINS.every((s) => ownedSkins(user).includes(s))) {
-    fail(409, 'already_owned', 'Все скины уже куплены');
+  if (skinProductOwned(sku, owned)) {
+    fail(409, 'already_owned', sku === 'skins' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
+  }
+  if (sku === 'share' && !share) fail(400, 'skin_missing', 'Нужна тема для публикации');
+  // Одной теме - одна заявка: иначе можно поставить в очередь десять копий и
+  // смотреть, какая пройдёт.
+  if (sku === 'share') {
+    const waiting = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM skin_shares WHERE user_id = ? AND status IN ('draft', 'pending', 'approved')`,
+    )
+      .bind(user.id)
+      .first<{ n: number }>();
+    if (Number(waiting?.n ?? 0) > 0) fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
   }
 
   const chargeId = crypto.randomUUID();
+
+  if (sku === 'share' && share) {
+    await env.DB.prepare(
+      `INSERT INTO skin_shares (user_id, charge_id, name, payload, status, created_at)
+       VALUES (?, ?, ?, ?, 'draft', ?)`,
+    )
+      .bind(user.id, chargeId, share.skin.name, JSON.stringify(share.skin), now)
+      .run();
+  }
   await env.DB.prepare(
     `INSERT INTO payments (charge_id, user_id, sku, stars, status, created_at)
      VALUES (?, ?, ?, ?, 'pending', ?)`,
@@ -105,6 +149,29 @@ function entitlementStatements(env: WorkerEnv, payment: PaymentRow, user: UserRo
         user.id,
         payment.charge_id,
         now,
+      ),
+    ];
+  }
+  const single = skuSkin(payment.sku);
+  if (single) {
+    const all = [...new Set<SkinId>(['classic', ...ownedSkins(user), single])].join(',');
+    return [
+      env.DB.prepare(`UPDATE users SET skins = ?, skin = ?, updated_at = ? WHERE id = ? AND ${guard}`).bind(
+        all,
+        single,
+        now,
+        user.id,
+        payment.charge_id,
+        now,
+      ),
+    ];
+  }
+  if (payment.sku === 'share') {
+    // Оплаченный черновик становится заявкой в очереди. Сама выдача - не товар,
+    // а право встать в очередь: тему ещё должен одобрить тот, кто её проверяет.
+    return [
+      env.DB.prepare(`UPDATE skin_shares SET status = 'pending' WHERE charge_id = ? AND status = 'draft'`).bind(
+        payment.charge_id,
       ),
     ];
   }
@@ -165,6 +232,32 @@ export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<b
         now,
         user.id,
       ),
+    );
+  }
+  const single = skuSkin(payment.sku);
+  if (single) {
+    // Возврат снимает ровно одну тему. «Пепел» и бесплатные темы при этом не
+    // трогаются: их не покупали, и отбирать их за чужой возврат не за что.
+    const kept = ownedSkins(user)
+      .filter((id) => id !== single && id !== 'classic')
+      .join(',');
+    statements.push(
+      env.DB.prepare(`UPDATE users SET skins = ?, skin = ?, updated_at = ? WHERE id = ?`).bind(
+        kept ? `classic,${kept}` : 'classic',
+        user.skin === single ? 'classic' : user.skin,
+        now,
+        user.id,
+      ),
+    );
+  }
+  if (payment.sku === 'share') {
+    // Вернули взнос - забираем и место в галерее: платная витрина не может
+    // остаться бесплатной.
+    statements.push(
+      env.DB.prepare(
+        `UPDATE skin_shares SET status = 'rejected', note = 'refund', reviewed_at = ?
+         WHERE charge_id = ? AND status IN ('draft', 'pending', 'approved')`,
+      ).bind(now, payment.charge_id),
     );
   }
   await env.DB.batch(statements);

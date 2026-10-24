@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import {
   AD_COINS_REWARD,
   LIFE_REGEN_MS,
-  SKINS,
+  resolveSkin,
   type GameMode,
 } from '../engine';
 import { useApp } from '../context/AppContext';
@@ -220,8 +220,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           </dd>
         </div>
         <div className="stat-row">
-          <dt>Скин</dt>
-          <dd className="serif">{SKINS[profile.skin]?.name ?? 'Классика'}</dd>
+          <dt>Тема поля</dt>
+          <dd className="serif">{resolveSkin(profile.skin, profile.customSkin).name}</dd>
         </div>
       </dl>
 

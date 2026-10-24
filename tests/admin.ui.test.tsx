@@ -192,6 +192,88 @@ const userDetail = {
   events: [{ kind: 'run_finish', value: '{}', createdAt: Date.now() }],
 };
 
+/** Тема, которую автоматическая проверка пропускает: контраст и плашка в норме. */
+const readableTokens = {
+  piece: '#ffd9a0',
+  plate: '#2b1a12',
+  edge: '#c9762f',
+  cellLight: '#2b2018',
+  cellDark: '#221911',
+  frame: '#191009',
+  backdrop: '#140c07',
+  wash: '#3b2416',
+};
+
+const skinQueue = {
+  status: 'pending',
+  items: [
+    {
+      id: 1,
+      name: 'Закат',
+      author: '@sunset',
+      userId: 'u1',
+      chargeId: 'charge-1',
+      installs: 2,
+      createdAt: 1_760_000_000_000,
+      reviewedAt: null,
+      note: '',
+      broken: false,
+      skin: { name: 'Закат', glyph: '♟', tokens: readableTokens },
+      readability: { glyph: 9.4, board: 7.1, ok: true },
+    },
+    {
+      id: 2,
+      name: 'Клякса',
+      author: '@ink',
+      userId: 'u2',
+      chargeId: 'charge-2',
+      installs: 0,
+      createdAt: 1_760_000_100_000,
+      reviewedAt: null,
+      note: '',
+      broken: false,
+      skin: null,
+      readability: { glyph: 1.2, board: 1.4, ok: false },
+    },
+    {
+      id: 3,
+      name: 'Сломанная',
+      author: '@broken',
+      userId: 'u3',
+      chargeId: null,
+      installs: 0,
+      createdAt: 1_760_000_200_000,
+      reviewedAt: null,
+      note: '',
+      broken: true,
+      skin: null,
+      readability: null,
+    },
+  ],
+  counts: [
+    { status: 'pending', n: 3, installs: 2 },
+    { status: 'approved', n: 4, installs: 11 },
+  ],
+};
+
+const shopEcon = {
+  days: 30,
+  shopOpens: 600,
+  newPlayers: 120,
+  paidCount: 18,
+  paidStars: 420,
+  payers: 14,
+  refundedCount: 1,
+  bySku: [
+    { sku: 'skins', n: 6, stars: 300 },
+    { sku: 'lives', n: 12, stars: 120 },
+  ],
+  queue: [
+    { status: 'pending', n: 3, installs: 2 },
+    { status: 'approved', n: 4, installs: 11 },
+  ],
+};
+
 let statusResponse: unknown = { configured: true, authenticated: false, expiresAt: null };
 let healthResponse: unknown = { ok: true, schemaVersion: 2, warnings: [], tables: { users: true } };
 let loginResponse: () => Response = () => jsonResponse({ token: 'token-1', expiresAt: Date.now() + 3_600_000 });
@@ -214,6 +296,9 @@ beforeEach(() => {
       if (url.includes('/api/admin/users/')) return jsonResponse(userDetail);
       if (url.includes('/api/admin/users')) return jsonResponse(usersList);
       if (url.includes('/api/admin/bot')) return jsonResponse(botStatus);
+      if (url.includes('/api/admin/skins/review')) return jsonResponse({ ok: true, updated: 1 });
+      if (url.includes('/api/admin/skins')) return jsonResponse(skinQueue);
+      if (url.includes('/api/admin/shop/econ')) return jsonResponse(shopEcon);
       return jsonResponse({ ok: true });
     }),
   );
@@ -541,4 +626,83 @@ describe('админка', () => {
     expect(text.textContent).toMatch(/\d+ из 8/);
     await waitFor(() => expect(screen.getAllByText(/из 8/).length).toBeGreaterThan(0));
   }, 90_000);
+
+  it('разбирает очередь тем: пропускает читаемую и не даёт одобрить битую', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Темы' }));
+    expect(await screen.findByText('Публикации тем')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('Закат')).toBeTruthy());
+
+    // Метрики очереди: три заявки ждут проверки, четыре уже опубликованы.
+    expect(screen.getByText('Ждут проверки · 3')).toBeTruthy();
+    expect(screen.getByText('В галерее · 4')).toBeTruthy();
+
+    const approves = screen.getAllByRole('button', { name: 'Одобрить' });
+    const rejects = screen.getAllByRole('button', { name: 'Отклонить' });
+    expect(approves).toHaveLength(3);
+    expect(rejects).toHaveLength(3);
+    expect((approves[0] as HTMLButtonElement).disabled).toBe(false);
+    // «Клякса» не проходит проверку контраста, «Сломанная» - payload не читается.
+    expect((approves[1] as HTMLButtonElement).disabled).toBe(true);
+    expect((approves[2] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('автоматическая проверка не прошла')).toBeTruthy();
+    expect(screen.getByText('запись повреждена - одобрить нельзя')).toBeTruthy();
+    // Битые строки показывают заглушку доски, а не пустую клетку.
+    expect(document.querySelectorAll('.skin-preview.is-broken')).toHaveLength(2);
+    // Превью живое: в каждой строке 2x2 клетки и чужая фигура рядом.
+    expect(document.querySelectorAll('.skin-preview .sp-cell')).toHaveLength(12);
+    expect(document.querySelectorAll('.skin-preview .sp-enemy')).toHaveLength(3);
+
+    const reviewCalls = () =>
+      (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/admin/skins/review') && (init as RequestInit)?.method === 'POST',
+      );
+    const sentBody = (call: unknown) => JSON.parse(String((call as [string, RequestInit])[1].body));
+
+    fireEvent.click(approves[0]);
+    await waitFor(() => expect(reviewCalls().length).toBe(1));
+    expect(sentBody(reviewCalls()[0])).toMatchObject({ id: 1, decision: 'approve', note: '' });
+
+    // Отказ без причины - тоже отказ, но причину игрок увидит, поэтому она в поле.
+    fireEvent.change(screen.getAllByPlaceholderText('причина отказа')[2], { target: { value: 'нечего читать' } });
+    fireEvent.click(rejects[2]);
+    await waitFor(() => expect(reviewCalls().length).toBe(2));
+    expect(sentBody(reviewCalls()[1])).toMatchObject({
+      id: 3,
+      decision: 'reject',
+      note: 'нечего читать',
+    });
+  });
+
+  it('подставляет измерения базы в модель экономики магазина', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+    expect(await screen.findByText('Что подставляет база')).toBeTruthy();
+    // Сама панель в базу не ходит: иначе каждая перерисовка лаборатории = запрос.
+    expect(screen.getByText('Цифр за период нет - модель считает на допущениях.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Взять из базы' }));
+    const notice = await screen.findByText(/Подставлено из базы за 30 дней/);
+    expect(notice.textContent).toContain('открытий 600');
+    expect(notice.textContent).toContain('платящих 14');
+    expect(notice.textContent).toMatch(/средний чек \d+(\.\d)? звёзд/);
+    expect(notice.textContent).toMatch(/доля покупателей .*%/);
+
+    expect(screen.getByText('Открытий витрины')).toBeTruthy();
+    // Товары из платежей подписаны так же, как в магазине, а не техническим sku.
+    expect(screen.getAllByText('skins').length).toBeGreaterThan(0);
+
+    // Строка лучшей цены подсвечена - иначе таблицу читают глазами по цифрам.
+    await waitFor(() => expect(document.querySelector('.adm-table tr.is-best')).not.toBeNull());
+    const markdown = document.querySelector('.adm-econ-md pre');
+    expect(markdown?.textContent).toContain('Прогноз магазина от');
+    expect(markdown?.textContent).toContain('калибровано по базе');
+    expect(markdown?.textContent).toContain('Публикации: заявок');
+  });
 });

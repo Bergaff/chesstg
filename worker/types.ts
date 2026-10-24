@@ -56,6 +56,8 @@ export interface UserRow {
   ad_free: number;
   skins: string;
   skin: string;
+  /** JSON самодельной темы: цвета, глиф и контур. Пустая строка - темы нет. */
+  skin_custom: string;
   inv_hint: number;
   inv_freeze: number;
   inv_undo: number;

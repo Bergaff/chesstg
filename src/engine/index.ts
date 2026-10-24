@@ -11,5 +11,8 @@ export * from './audit';
 export * from './endless';
 export * from './solver';
 export * from './balance';
+export * from './skins';
+export * from './skinpath';
+export * from './shop';
 export * from './specials';
 export * from './replay';

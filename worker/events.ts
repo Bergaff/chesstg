@@ -12,7 +12,9 @@ export type EventKind =
   | 'ad_reward'
   | 'purchase'
   | 'refund'
-  | 'bonus_used';
+  | 'bonus_used'
+  /** Витрину открыли: без этого числа доля покупателей считается неоткуда. */
+  | 'shop_open';
 
 export interface EventMeta {
   [key: string]: string | number | boolean | null;

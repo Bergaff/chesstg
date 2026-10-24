@@ -40,7 +40,8 @@ const bookkeeping = [
   '',
   ...files.flatMap((name) => [`INSERT OR IGNORE INTO d1_migrations (name) VALUES ('${name}');`]),
   '',
-  '-- Проверка: должно вернуть 9 имён.',
+  '-- Проверка: вернутся все таблицы базы, включая d1_migrations.',
+  '-- Число таблиц руками не держим - оно меняется с каждой миграцией.',
   "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;",
   '',
 ].join('\n');

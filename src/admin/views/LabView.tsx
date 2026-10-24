@@ -25,6 +25,7 @@ import { AdminError, deleteReport, fetchLevels, saveReport } from '../api';
 import type { AuditReportRow, LevelsResponse } from '../types';
 import { runPlacementAudit } from '../auditClient';
 import { VariantsPanel } from './VariantsPanel';
+import { ShopModelPanel } from './ShopModelPanel';
 import { Metric, Panel, StatusLine, Table, formatDateTime, formatNumber, formatPercent } from '../ui';
 import { cn } from '../../lib/format';
 
@@ -55,6 +56,8 @@ export function LabView({ onUnauthorized }: { onUnauthorized: (message: string) 
       {error && <StatusLine kind="error">{error}</StatusLine>}
 
       <PlacementLab onUnauthorized={onUnauthorized} onSaved={() => void load()} />
+
+      <ShopModelPanel onUnauthorized={onUnauthorized} />
 
       <Panel title="Сохранённые отчёты" note="Результаты запусков лаборатории">
         {data && data.reports.length > 0 ? (

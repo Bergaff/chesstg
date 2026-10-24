@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import {
   PIECE_GLYPH,
   RACE_WIDTH,
-  SKINS,
   endlessViewport,
   enemyAttacksCell,
   rulesFor,
@@ -12,7 +11,7 @@ import {
   type MoveDy,
   type MoveOption,
   type PieceType,
-  type SkinId,
+  type ResolvedSkin,
 } from '../engine';
 import { cn } from '../lib/format';
 
@@ -58,7 +57,8 @@ interface BoardProps {
   state: GameState;
   moves: MoveOption[];
   hint: Cell[];
-  skin: SkinId;
+  /** Тема поля: цвета уже разложены на CSS-переменные экраном, здесь глиф и контур. */
+  skin: ResolvedSkin;
   interactive: boolean;
   onMove: (dx: MoveDx, dy?: MoveDy) => void;
   turn: number;
@@ -162,7 +162,10 @@ export function Board({
   // обводили рамкой - игрок читал её как случайные линии поля, и ничего больше.
   const ghosts = cell > 0;
 
-  const playerGlyph = king ? '♚' : (SKINS[skin]?.pawn ?? '♟');
+  // Короля своей фигурой не заменяем: и в «Гонках», и в бесконечном режиме он
+  // читается по силуэту, и чужой контур вместо него ломает правило «я король».
+  const playerGlyph = king ? '♚' : skin.glyph || '♟';
+  const playerPath = king ? undefined : skin.path;
   const playerSlide =
     playerBefore !== null && (playerBefore.x !== state.player.x || playerBefore.y !== state.player.y)
       ? playerBefore
@@ -299,8 +302,14 @@ export function Board({
                           : undefined
                       }
                     >
-                      <span className="player-mark">
-                        <span className="player-glyph">{playerGlyph}</span>
+                      <span className={cn('player-mark', playerPath && 'player-mark-shape')}>
+                        {playerPath ? (
+                          <svg className="player-shape" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                            <path d={playerPath} />
+                          </svg>
+                        ) : (
+                          <span className="player-glyph">{playerGlyph}</span>
+                        )}
                       </span>
                       {state.shield > 0 && (
                         <span className="player-badge" aria-hidden="true">

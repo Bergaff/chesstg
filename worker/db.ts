@@ -1,5 +1,7 @@
 import {
+  ASH_RECORD_MOVES,
   BONUSES,
+  checkSkin,
   isLevelMode,
   isSkinId,
   materializeLives,
@@ -9,12 +11,14 @@ import {
   msUntilNextLife,
   PAID_SKINS,
   PLAYABLE_MODES,
+  showcaseSkin,
   RACE_KING_ROW,
   RACE_KING_ROWS,
   RACE_ROWS,
   randomSeed,
   shortCode,
   SKINS,
+  type CustomSkin,
   type GameMode,
   type SkinId,
 } from '../src/engine';
@@ -56,9 +60,42 @@ export function ownedSkins(user: UserRow): SkinId[] {
   return [...new Set<SkinId>(['classic', ...owned])];
 }
 
-export function selectedSkin(user: UserRow): SkinId {
-  const owned = ownedSkins(user);
-  return isSkinId(user.skin) && owned.includes(user.skin) ? user.skin : 'classic';
+/**
+ * Своя тема игрока: собранная в студии или установленная из галереи. Разбор
+ * намеренно молчаливый - кривой JSON из старой записи не должен ломать профиль,
+ * он просто означает «своей темы нет», и доска надевает «Кость».
+ */
+export function customSkinOf(user: UserRow): CustomSkin | null {
+  const raw = (user.skin_custom ?? '').trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const check = checkSkin(parsed);
+    return check.ok ? check.skin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Какая тема надета. Три отказа вместо одного: тема неизвестна, тема не открыта
+ * и тема-«custom» без самой темы. Возврат денег и перенос аккаунта пишут в
+ * `skin` что попало, и игра обязана реагировать доской, а не падением.
+ */
+export function selectedSkin(user: UserRow, now = Date.now()): SkinId {
+  const wanted = user.skin;
+  if (wanted === 'custom') return customSkinOf(user) ? 'custom' : 'classic';
+  if (!isSkinId(wanted)) return 'classic';
+  return skinAvailable(user, wanted, now) ? wanted : 'classic';
+}
+
+/** Открыта ли тема: куплена, бесплатна или стоит на витрине этого сезона. */
+export function skinAvailable(user: UserRow, id: SkinId, now = Date.now()): boolean {
+  if (id === 'classic' || id === 'graphite') return true;
+  if (id === 'custom') return customSkinOf(user) !== null;
+  if (SKINS[id].reward) return ownedSkins(user).includes(id);
+  if (ownedSkins(user).includes(id)) return true;
+  return showcaseSkin(now) === id;
 }
 
 export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
@@ -86,7 +123,10 @@ export function toProfile(user: UserRow, now = Date.now(), eternal = false) {
     endlessUnlocked: user.max_level > 10,
     adFree: Boolean(user.ad_free),
     skins: ownedSkins(user),
-    skin: selectedSkin(user),
+    skin: selectedSkin(user, now),
+    customSkin: customSkinOf(user),
+    showcaseSkin: showcaseSkin(now),
+    ashRecordMoves: ASH_RECORD_MOVES,
     inventory: {
       hint: user.inv_hint,
       freeze: user.inv_freeze,

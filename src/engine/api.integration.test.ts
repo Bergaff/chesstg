@@ -9,6 +9,18 @@ const apiReachable = await fetch(`${API}/api/health`, { signal: AbortSignal.time
   .then((response) => response.ok)
   .catch(() => false);
 
+/** Тема, которую сервер обязан принять: контраст и плашка в норме. */
+const readableTokens = {
+  piece: '#ffe6b3',
+  plate: '#2b1a12',
+  edge: '#c9762f',
+  cellLight: '#2b2018',
+  cellDark: '#221911',
+  frame: '#191009',
+  backdrop: '#140c07',
+  wash: '#3b2416',
+};
+
 function makeClient() {
   const gid = crypto.randomUUID().replace(/-/g, '');
   const headers = { 'X-Guest-Id': gid, 'Content-Type': 'application/json' };
@@ -170,5 +182,70 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.data.rows)).toBe(true);
     expect(typeof res.data.myRank).toBe('number');
+  });
+
+  it('своя тема: для себя бесплатно, мусор не проходит', async () => {
+    const api = makeClient();
+    const session = await api('/api/session', { method: 'POST', body: '{}' });
+    expect(session.status).toBe(200);
+    expect(session.data.profile.skin).toBe('classic');
+    expect(session.data.profile.customSkin).toBeNull();
+
+    // Кривой цвет и цвет, сливающийся с полем, сервер отбивает: магазин не
+    // должен уметь выдать тему, которой не видно на доске.
+    const brokenColor = await api('/api/profile/skin-custom', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'мусор', glyph: '♟', tokens: { ...readableTokens, piece: 'red' } } }),
+    });
+    expect(brokenColor.status).toBe(422);
+    expect(brokenColor.data.error).toBe('skin_unreadable');
+
+    const invisible = await api('/api/profile/skin-custom', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'невидимка', glyph: '♟', tokens: { ...readableTokens, piece: '#1a1a1a', plate: '' } } }),
+    });
+    expect(invisible.status).toBe(422);
+    expect(String(invisible.data.message)).toContain('не видно');
+
+    const saved = await api('/api/profile/skin-custom', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'Проверка', glyph: '❖', tokens: readableTokens } }),
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.data.profile.skin).toBe('custom');
+    expect(saved.data.profile.customSkin.name).toBe('Проверка');
+    expect(saved.data.readability.ok).toBe(true);
+
+    // Свою тему можно снять - и она снимается без счёта.
+    const back = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'classic' }) });
+    expect(back.status).toBe(200);
+    expect(back.data.profile.skin).toBe('classic');
+
+    // Чужая тема из галереи ставится бесплатно, но только одобренная.
+    const gallery = await api('/api/skins/gallery');
+    expect(gallery.status).toBe(200);
+    expect(Array.isArray(gallery.data.items)).toBe(true);
+    const install = await api('/api/skins/install', { method: 'POST', body: JSON.stringify({ id: 999999 }) });
+    expect(install.status).toBe(404);
+
+    // Тема, за которую не платили, не надевается - кроме витрины сезона и наград.
+    const locked = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'royal' }) });
+    expect([200, 403]).toContain(locked.status);
+    if (locked.status === 403) expect(locked.data.error).toBe('skin_locked');
+
+    const unknown = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: '<script>' }) });
+    expect(unknown.status).toBe(400);
+  });
+
+  it('витрина магазина отвечает цифрами, которыми платит клиент', async () => {
+    const api = makeClient();
+    const res = await api('/api/skins/showcase');
+    expect(res.status).toBe(200);
+    expect(['gold', 'neon', 'royal']).toContain(res.data.skin);
+    expect(res.data.shareFee).toBeGreaterThan(0);
+    expect(res.data.setFee).toBeGreaterThan(res.data.singleFee);
+    expect(res.data.endsAt).toBeGreaterThan(Date.now());
+    const opened = await api('/api/shop/open', { method: 'POST', body: '{}' });
+    expect(opened.status).toBe(200);
   });
 });

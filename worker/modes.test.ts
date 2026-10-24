@@ -34,6 +34,7 @@ function user(patch: Partial<UserRow> = {}): UserRow {
     ad_free: 0,
     skins: '[]',
     skin: 'classic',
+    skin_custom: '',
     inv_hint: 0,
     inv_freeze: 0,
     inv_undo: 0,

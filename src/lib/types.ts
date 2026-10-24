@@ -6,6 +6,7 @@ import type {
   JamState,
   PieceType,
   RunAction,
+  CustomSkin,
   SkinId,
 } from '../engine';
 
@@ -46,7 +47,14 @@ export interface Profile {
   endlessUnlocked: boolean;
   adFree: boolean;
   skins: SkinId[];
+  /** Надетая тема. `'custom'` - своя, её цвета лежат в `customSkin`. */
   skin: SkinId;
+  /** Собранная игроком тема (или установленная из галереи): бесплатно и для себя. */
+  customSkin: CustomSkin | null;
+  /** Тема текущего сезона на витрине: она открыта всем до конца квартала. */
+  showcaseSkin?: SkinId;
+  /** Сколько ходов в «Гонках» открывают «Пепел». */
+  ashRecordMoves?: number;
   inventory: Record<'hint' | 'freeze' | 'undo', number>;
   /**
    * Прогресс по всем режимам сразу: меню рисует карточки и замки из этого,
@@ -139,6 +147,8 @@ export interface FinishResult {
   newBest: boolean;
   bestScore: number | null;
   endlessUnlockedNow: boolean;
+  /** Название темы, открытой этой партией («Пепел» за 100 ходов в «Гонках»). */
+  skinAward?: string;
   alreadyFinished?: boolean;
 }
 

@@ -17,14 +17,18 @@ export const ADMIN_TABLES = ['admin_attempts', 'events', 'level_checks', 'audit_
 /** Привязка сайта к Telegram (миграция 0003). Без неё игра работает, входа на сайте нет. */
 export const AUTH_TABLES = ['auth_links'] as const;
 
-export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES] as const;
+/** Свои темы поля (миграция 0005). Без них игра играет, но галереи и студии нет. */
+export const SKIN_TABLES = ['skin_shares'] as const;
+
+export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES, ...SKIN_TABLES] as const;
 
 /**
- * Номер последней миграции, на которую рассчитан код. Колонка `users.mode_levels`
+ * Номер последней миграции, на которую рассчитан код: 0005 добавила
+ * `users.skin_custom` и очередь публикаций. Колонка `users.mode_levels`
  * из 0004 проверяется в диагностике админки (`GET /api/admin/diag` раздел «Схема базы»):
  * без неё игра работает, но прогресс «Парковки» и «Гонок» не сохраняется.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export interface SchemaState {
   tables: Record<string, boolean>;
@@ -34,6 +38,8 @@ export interface SchemaState {
   missingAdmin: string[];
   /** Нет таблицы привязки сайта: вход на сайте не работает, игра работает. */
   missingAuth: string[];
+  /** Нет очереди публикаций: своя тема работает, галерея - нет. */
+  missingSkins: string[];
   /** Всего таблиц в базе, включая служебные. */
   total: number;
 }
@@ -56,6 +62,7 @@ export async function readSchema(env: WorkerEnv): Promise<SchemaState> {
     missingGame: GAME_TABLES.filter((table) => !names.has(table)),
     missingAdmin: ADMIN_TABLES.filter((table) => !names.has(table)),
     missingAuth: AUTH_TABLES.filter((table) => !names.has(table)),
+    missingSkins: SKIN_TABLES.filter((table) => !names.has(table)),
     total: names.size,
   };
 }
