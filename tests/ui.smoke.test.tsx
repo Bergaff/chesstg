@@ -283,6 +283,11 @@ describe('UI smoke', () => {
     // «Край доски» - одна строка: заголовок на двух читается как два заголовка.
     const title = screen.getByRole('heading', { level: 1 });
     expect(title.textContent).toBe('Край доски');
+    // Подпись рассказывает про режимы, а не пересказывает правила ходов.
+    expect(screen.getByText('Четыре режима - одна доска', { exact: false })).toBeTruthy();
+    // Заводская тема = обычные цвета экрана: палитра выводится из темы, и на
+    // «Латуни» она обязана остаться той же, что в стилях.
+    await waitFor(() => expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#17160f'));
   });
 
   it('тема поля доезжает до доски, а не только до плашки в магазине', async () => {
@@ -298,10 +303,25 @@ describe('UI smoke', () => {
     expect(root.style.getPropertyValue('--skin-backdrop')).toBe('#100d07');
     expect(document.querySelector('.board-frame')).not.toBeNull();
 
-    // Уход с экрана снимает переменные: меню и магазин в чужих цветах выглядят
-    // сломанными, а не нарядными.
+    // Выход с экрана переменные НЕ снимает: тема выбрана для аккаунта, и меню с
+    // магазином обязаны быть в тех же цветах, что доска, - иначе тема выглядит
+    // включённой только на время хода.
     fireEvent.click(screen.getByRole('button', { name: 'Назад' }));
-    await waitFor(() => expect(root.style.getPropertyValue('--skin-piece')).toBe(''));
+    await waitFor(() => expect(screen.getByText(/Бонусы за монеты/)).toBeTruthy());
+    expect(root.style.getPropertyValue('--skin-piece')).toBe('#e8c274');
+    expect(root.style.getPropertyValue('--bg')).toBe('#100d07');
+  });
+
+  it('светлая тема красит меню, а не только доску', async () => {
+    profile.skin = 'royal';
+    await boot();
+    const root = document.documentElement;
+    await waitFor(() => expect(root.style.getPropertyValue('--bg')).toBe('#e4d9bd'));
+    // Костяной текст на пергаменте стал бы невидим, поэтому чернила разворачиваются.
+    expect(root.style.getPropertyValue('--ink')).toBe('#17160f');
+    expect(root.style.colorScheme).toBe('light');
+    expect(screen.getByText('Парковка')).toBeTruthy();
+    expect(document.querySelector('.menu-screen')).not.toBeNull();
   });
 
   it('своя фигура из студии рисуется контуром вместо глифа', async () => {
@@ -407,7 +427,10 @@ describe('UI smoke', () => {
     expect(screen.getByText('Гонки')).toBeTruthy();
     expect(screen.getByText(/Откроется на 3 уровне кампании/)).toBeTruthy();
     expect(screen.getByText(/Откроется на 5 уровне кампании/)).toBeTruthy();
-    expect(screen.getByText(/Уровень в «Парковке»/)).toBeTruthy();
+    // Цифр под кнопками больше нет: уровень и рекорд режима живут на карточке.
+    expect(document.querySelector('.menu-stats')).toBeNull();
+    expect(screen.queryByText(/Достигнутый уровень/)).toBeNull();
+    expect(screen.queryByText(/Уровень в «Парковке»/)).toBeNull();
     // Режимы входят той же кнопкой, что кампания: заголовок-действие на карточке,
     // а не тонкая строка в «Разделах», где её легко не заметить. Обе карточки
     // закрыты - значит на них «Закрыт», а не пустое место.
@@ -473,8 +496,26 @@ describe('UI smoke', () => {
     expect(race.textContent).toContain('Гонки');
     expect(race.textContent).toContain('Продолжить');
     expect(race.textContent).toContain('Незаконченная партия');
+    // Цифры режима не исчезают ради незаконченной партии: блок цифр под меню
+    // убран, и карточка осталась единственным местом, где их видно.
+    expect(race.textContent).toContain('Уровень 3');
+    expect(race.textContent).toContain('рекорд 41 ходов');
     // Подпись «Незаконченная партия» больше не съедает название режима.
     expect(screen.queryByText('Незаконченная партия', { selector: '.label' })).toBeNull();
+  });
+
+  it('карточка «Парковки» держит уровень и пройденное, а не только статус', async () => {
+    profile.maxLevel = 12;
+    profile.level = 12;
+    profile.modes.jam = { level: 11, maxLevel: 12, unlocked: true, unlockAtLevel: 3 };
+    // В незаконченной партии цифры режима остаются на кнопке: под меню их больше
+    // не показать, а увидеть прогресс режима надо где-то.
+    activeRuns = { jam: run };
+    await boot();
+    const card = screen.getByText('Парковка').closest('button')!;
+    expect(card.textContent).toContain('Незаконченная партия');
+    expect(card.textContent).toContain('Уровень 11');
+    expect(card.textContent).toContain('пройдено 11');
   });
 
   it('льготный аккаунт видит лабораторию, темы без цен и публикацию без взноса', async () => {
@@ -782,6 +823,7 @@ describe('UI smoke', () => {
     expect(screen.getByText('10')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/shop/bonus')).toBe(true);
   });
+
 
 
 });

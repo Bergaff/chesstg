@@ -26,8 +26,10 @@
       body {
         margin: 0;
         padding: 0;
-        background: #17160f;
-        color: #e9e2d1;
+        /* Заводской цвет до загрузки стилей; дальше оба следует за темой
+           поля, иначе на светлой теме за краем экрана торчит тёмная подложка. */
+        background: var(--bg, #17160f);
+        color: var(--ink, #e9e2d1);
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
       #root {

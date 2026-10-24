@@ -1,10 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import {
-  AD_COINS_REWARD,
-  LIFE_REGEN_MS,
-  resolveSkin,
-  type GameMode,
-} from '../engine';
+import { AD_COINS_REWARD, LIFE_REGEN_MS, type GameMode } from '../engine';
 import { useApp } from '../context/AppContext';
 import { api, ApiError, clearSessionToken, isLinked } from '../lib/api';
 import { getTg } from '../lib/telegram';
@@ -34,11 +29,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
 
   const campaignRun = active.campaign;
   const modes = profile.modes;
-
-  // Рекорд «Гонок» - пережитые ходы. На карточке режима он есть всегда, а здесь
-  // строкой ниже уровня: в «Гонках» нет финиша, и без цифры непонятно, до чего
-  // ты дожил на самом деле.
-  const raceBest = modes?.race?.bestMoves ?? modes?.race?.best ?? 0;
 
   async function claimCoins() {
     if (adLoading || cooldownLeft > 0 || profile.adFree) return;
@@ -74,9 +64,9 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
    * за что. Замок карточку не убирает: на ней видно, на каком уровне кампании
    * режим откроется.
    *
-   * Название режима живёт на карточке всегда: когда «Продолжить» replaces подпись
-   * входа, игрок не понимает, куда именно его возвращают, - о незаконченной
-   * партии говорит своя строка.
+   * Название режима живёт на карточке всегда: если «Продолжить» подменяет
+   * подпись входа, игрок не понимает, куда именно его возвращают, - о
+   * незаконченной партии говорит своя строка ниже.
    */
   function modeCard(mode: 'jam' | 'race' | 'endless', title: string, description: string) {
     const progress = modes?.[mode];
@@ -84,16 +74,28 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
     const unlocked = mode === 'endless' ? profile.endlessUnlocked : (progress?.unlocked ?? true);
     const cleared = Math.max(0, (progress?.maxLevel ?? 1) - 1);
     const best = progress?.bestMoves ?? progress?.best;
-    const record =
-      mode === 'race'
-        ? best
-          ? `, рекорд ${best} ходов`
-          : ', считается длина забега'
-        : mode === 'endless'
-          ? profile.endlessBest > 0
-            ? `, рекорд ${profile.endlessBest} клеток`
-            : ', рекорда ещё нет'
-          : `, пройдено ${cleared}`;
+    // Уровень и рекорд режима живут на самой кнопке и не исчезают ради строки
+    // «незаконченная партия»: отдельного блока цифр под меню больше нет, и без
+    // этой строки прогресс режима посмотреть было бы негде.
+    const numbers =
+      mode === 'endless'
+        ? profile.endlessBest > 0
+          ? `Рекорд ${formatNumber(profile.endlessBest)} клеток`
+          : 'Рекорда ещё нет'
+        : `Уровень ${progress?.level ?? 1}, ${
+            mode === 'race'
+              ? best
+                ? `рекорд ${formatNumber(best)} ходов`
+                : 'считается длина забега'
+              : `пройдено ${formatNumber(cleared)}`
+          }`;
+    const status = !unlocked
+      ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
+      : run
+        ? mode === 'endless'
+          ? `Незаконченный забег: высота ${run.score}, ход ${run.moves + 1}`
+          : `Незаконченная партия: уровень ${run.level}, ход ${run.moves + 1}`
+        : description;
     return (
       <button
         type="button"
@@ -104,17 +106,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         <span className="cta-body">
           <span className="label">{title}</span>
           <span className="cta-title serif">{unlocked ? (run ? 'Продолжить' : 'Играть') : 'Закрыт'}</span>
-          <span className="cta-meta">
-            {!unlocked
-              ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
-              : run
-                ? mode === 'endless'
-                  ? `Незаконченный забег: высота ${run.score}, ход ${run.moves + 1}`
-                  : `Незаконченная партия: уровень ${run.level}, ход ${run.moves + 1}`
-                : mode === 'endless'
-                  ? `${description} ${profile.endlessBest > 0 ? `Рекорд ${profile.endlessBest} клеток` : 'Рекорда ещё нет'}`
-                  : `${description} Уровень ${progress?.level ?? 1}${record}`}
-          </span>
+          <span className="cta-meta">{unlocked ? `${status} ${numbers}` : status}</span>
         </span>
         <span className="cta-arrow" aria-hidden="true">→</span>
       </button>
@@ -143,7 +135,9 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span>Край</span> <em>доски</em>
         </h1>
         <p className="masthead-sub">
-          Пешка идёт к последней линии, пробка фигур - к своему краю, король держится в полосе. Один неверный шаг заканчивает партию.
+          Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю,
+          «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои,
+          жизни - общие.
         </p>
       </section>
 
@@ -153,9 +147,11 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
           <span className="cta-meta">
             {campaignRun
-              ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
+              ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}${
+                  profile.levelsCleared > 0 ? ` · пройдено ${formatNumber(profile.levelsCleared)}` : ''
+                }`
               : profile.levelsCleared > 0
-                ? `Уровень ${profile.level}, пройдено ${profile.levelsCleared}`
+                ? `Уровень ${profile.level}, пройдено ${formatNumber(profile.levelsCleared)}`
                 : 'Уровень 1, путь начинается'}
           </span>
         </span>
@@ -210,28 +206,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         )}
       </div>
 
-
-      <dl className="menu-stats">
-        <div className="stat-row">
-          <dt>Достигнутый уровень</dt>
-          <dd className="serif">{profile.maxLevel}</dd>
-        </div>
-        <div className="stat-row">
-          <dt>Уровень в «Парковке»</dt>
-          <dd className="serif">{modes?.jam?.level ?? 1}</dd>
-        </div>
-        <div className="stat-row">
-          <dt>Уровень в «Гонках»</dt>
-          <dd className="serif">
-            {modes?.race?.level ?? 1}
-            {raceBest ? <span className="race-best"> · {formatNumber(raceBest)} ходов</span> : null}
-          </dd>
-        </div>
-        <div className="stat-row">
-          <dt>Тема поля</dt>
-          <dd className="serif">{resolveSkin(profile.skin, profile.customSkin).name}</dd>
-        </div>
-      </dl>
 
       <div className="section-head">
         <span className="label">Разделы</span>

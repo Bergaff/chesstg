@@ -12,11 +12,14 @@ import {
   SKIN_STARS,
   checkSkin,
   contrastRatio,
+  parseHex,
   decodeSkinCode,
   encodeSkinCode,
   resolveSkin,
   showcaseEndsAt,
   showcaseSkin,
+  skinAppVars,
+  skinIsLight,
   skinTokens,
   skinReadability,
   skinUnlocked,
@@ -128,6 +131,77 @@ describe('темы поля', () => {
     expect(resolved.name).toBe('Ночь');
     expect(resolved.piece).toBe(SKINS.neon.piece);
     expect(resolveSkin('нет-такой-темы', null).id).toBe('classic');
+  });
+
+  /**
+   * Тема обязана доходить до меню и магазина: игрок надевает её для аккаунта, а
+   * не для одной партии. Проверки ниже держат две вещи - что «Латунь» остаётся
+   * заводским экраном (иначе дефолт уехал бы у всех) и что ни на одной теме
+   * текст не перестаёт читаться.
+   */
+  it('палитра экрана на «Латуни» остаётся заводской', () => {
+    const vars = skinAppVars(skinTokens(SKINS.classic));
+    expect(vars['--bg']).toBe('#17160f');
+    expect(vars['--bg-deep']).toBe('#12110b');
+    expect(vars['--accent']).toBe('#c6a45e');
+    expect(vars['--on-accent']).toBe('#1a1508');
+    expect(vars['--accent-wash']).toBe('#2a2517');
+    expect(vars['--ink']).toBe('#e9e2d1');
+
+    // Остальное - смеси, и они обязаны уложиться в пару-тройку каналов: линии и
+    // приглушённый текст глаз замечает, а уползание на десятки уже выглядит так,
+    // будто тему включили против воли.
+    const roots: Record<string, string> = {
+      '--panel': '#1c1a13',
+      '--panel-2': '#222017',
+      '--line': '#353126',
+      '--line-strong': '#4b4537',
+      '--muted': '#a69e8c',
+      '--dim': '#7e7664',
+      '--accent-dim': '#8e7541',
+    };
+    for (const [name, want] of Object.entries(roots)) {
+      const got = parseHex(vars[name]);
+      const expected = parseHex(want);
+      expect(got, name).not.toBeNull();
+      expect(expected, want).not.toBeNull();
+      for (let i = 0; i < 3; i++) {
+        expect(Math.abs((got![i] ?? 0) - (expected![i] ?? 0)), `${name} канал ${i}`).toBeLessThanOrEqual(16);
+      }
+    }
+  });
+
+  it('на любой теме текст экрана читается', () => {
+    for (const id of SKIN_ORDER) {
+      const vars = skinAppVars(skinTokens(SKINS[id]));
+      const ratio = (a: string, b: string): number => contrastRatio(a, b) ?? 0;
+      expect(ratio(vars['--ink']!, vars['--bg']!), `${id}: основной текст`).toBeGreaterThanOrEqual(7);
+      expect(ratio(vars['--muted']!, vars['--bg']!), `${id}: приглушённый текст`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(vars['--dim']!, vars['--bg']!), `${id}: подпись`).toBeGreaterThanOrEqual(3);
+      expect(ratio(vars['--accent']!, vars['--bg']!), `${id}: акцент`).toBeGreaterThanOrEqual(4.5);
+      expect(ratio(vars['--on-accent']!, vars['--accent-solid']!), `${id}: надпись на кнопке`).toBeGreaterThanOrEqual(4.5);
+      // Подложка - фон карточек и вкладок: акцент на ней это стрелка и засветка,
+      // поэтому планка графики, а не текста.
+      expect(ratio(vars['--accent']!, vars['--accent-wash']!), `${id}: акцент на подложке`).toBeGreaterThanOrEqual(3);
+      expect(ratio(vars['--danger']!, vars['--bg']!), `${id}: ошибка`).toBeGreaterThanOrEqual(3);
+      expect(ratio(vars['--ok']!, vars['--bg']!), `${id}: успех`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('светлая тема получает тёмные чернила, тёмная - костяные', () => {
+    expect(skinIsLight(skinTokens(SKINS.royal))).toBe(true);
+    expect(skinAppVars(skinTokens(SKINS.royal))['--ink']).toBe('#17160f');
+    expect(skinIsLight(skinTokens(SKINS.classic))).toBe(false);
+    expect(skinAppVars(skinTokens(SKINS.classic))['--ink']).toBe('#e9e2d1');
+  });
+
+  it('мусорный цвет темы не оставляет экран без красок', () => {
+    const vars = skinAppVars({ ...skinTokens(SKINS.classic), backdrop: 'картон', edge: '#zzz' });
+    expect(vars['--bg']).toBe('#17160f');
+    expect(vars['--accent']).toBe('#c6a45e');
+    for (const [name, value] of Object.entries(vars)) {
+      expect(value, name).toMatch(/^#[0-9a-f]{6}$/);
+    }
   });
 
   it('контраст считает по WCAG и не врет на мусоре', () => {

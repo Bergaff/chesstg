@@ -27,7 +27,6 @@ import {
   RACE_WIDTH,
   raceSpawnEvery,
   resolveSkin,
-  skinVars,
   type BonusId,
   type Cell,
   type GameAction,
@@ -93,18 +92,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   const { profile, config, setProfile, refresh, toast, showAd, goShop, goShopStars } = useApp();
   const skin = useMemo(() => resolveSkin(profile.skin, profile.customSkin), [profile.skin, profile.customSkin]);
 
-  // Тема красит не только доску: задний фон - часть темы, и без него
-  // «черно-золотая» доска висит на чужом фоне. Переменные уходят на `:root` на
-  // время партии и снимаются при выходе: меню и магазин обязаны остаться в
-  // обычных цветах, иначе витрина выглядела бы сломанной у всех, у кого тема.
-  useEffect(() => {
-    const root = document.documentElement;
-    const vars = skinVars(skin);
-    for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
-    return () => {
-      for (const name of Object.keys(vars)) root.style.removeProperty(name);
-    };
-  }, [skin]);
+  // Переменные темы вешает на `:root` оболочка (см. useSkinTheme): партия, меню
+  // и витрина красятся одним и тем же набором, иначе тема выглядела бы
+  // включённой только на время хода.
   const [phase, setPhase] = useState<Phase>('loading');
   const [run, setRun] = useState<PawnRun | null>(null);
   const [state, setState] = useState<GameState | null>(null);
@@ -1261,7 +1251,7 @@ function WinModal({
         <button type="button" className="btn btn-outline" onClick={onShare}>
           Бросить вызов
         </button>
-        <button type="button" className="btn btn-quiet" onClick={onMenu}>
+        <button type="button" className="btn btn-outline" onClick={onMenu}>
           В меню
         </button>
       </div>
@@ -1392,10 +1382,10 @@ function LoseModal({
             Магазин: пять жизней за 25 звёзд
           </button>
         )}
-        <button type="button" className="btn btn-quiet" onClick={onShare}>
+        <button type="button" className="btn btn-outline" onClick={onShare}>
           Бросить вызов
         </button>
-        <button type="button" className="btn btn-quiet" onClick={onMenu}>
+        <button type="button" className="btn btn-outline" onClick={onMenu}>
           В меню
         </button>
       </div>

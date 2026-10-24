@@ -282,6 +282,126 @@ export function skinVars(skin: SkinTokens): Record<string, string> {
   };
 }
 
+// ─────────────────────── Тема интерфейса ───────────────────────
+
+/**
+ * Тема красит не только доску: игроку непонятно, что «Черно-золотой» работает,
+ * только пока идёт партия, - меню, магазин и рекорды выглядят сломанными или
+ * чужими. Отдельные цвета интерфейса из темы не берутся: их слишком много, и
+ * никто не гарантирует, что «лазурная» подложка примет латунную подпись.
+ * Палитра экрана выводится из восьми токенов темы теми же смешениями, какими
+ * «Латунь» собрана руками: на дефолтной теме цифры расходятся с исходными на
+ * единицы, поэтому привычный экран не «уезжает», а светлая «Корона» получает
+ * чернила наоборот - иначе костяной текст на пергаменте стал бы невидим.
+ */
+const APP_LIGHT_INK = '#e9e2d1';
+const APP_DARK_INK = '#17160f';
+/** Подпись на цветной кнопке: тот же графит, что держит `:root`. */
+const APP_DARK_TEXT = '#1a1508';
+
+function toHex(rgb: [number, number, number]): string {
+  return '#' + rgb.map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, '0')).join('');
+}
+
+/** Смесь цветов: t=0 отдаёт a, t=1 - b. Мусорный цвет не смешиваем, он и так ни на что не годится. */
+function mix(a: string, b: string, t: number): string {
+  const from = parseHex(a);
+  const to = parseHex(b);
+  if (!from || !to) return a;
+  return toHex([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t]);
+}
+
+/**
+ * Цвет, подправленный до контрапта `min` против фона: подмешиваем чернила, пока
+ * не хватит. Нужно для «опасного» и «успешного» - они в теме не задаются, а на
+ * светлом пергаменте обычный кирпич читается в 1.9:1.
+ */
+function ensureContrast(color: string, bg: string, ink: string, min: number): string {
+  const base = contrastRatio(color, bg);
+  if (base === null || base >= min) return color;
+  for (let step = 1; step <= 12; step++) {
+    const candidate = mix(color, ink, step / 12);
+    if ((contrastRatio(candidate, bg) ?? 0) >= min) return candidate;
+  }
+  return ink;
+}
+
+/** Светлая ли тема: чернила на её фоне читаются лучше, чем костяной текст. */
+export function skinIsLight(skin: Pick<SkinTokens, 'backdrop'>): boolean {
+  const onLight = contrastRatio(APP_LIGHT_INK, skin.backdrop) ?? 0;
+  const onDark = contrastRatio(APP_DARK_INK, skin.backdrop) ?? 0;
+  return onDark > onLight;
+}
+
+/**
+ * Переменные экрана из темы. Их вешают на `:root` вместе с `skinVars`: доска
+ * читает свои, всё остальное - эти. Контраст подписи на подложке проверяется
+ * один раз: не выдержит - подложка становится приглушённым тоном фона, а не
+ * цветным пятном, на котором текст пропадает.
+ */
+/** Экрану нужны восемь цветов темы; глиф и фигура - дело доски. */
+export type AppPaletteInput = Pick<
+  SkinTokens,
+  'piece' | 'plate' | 'edge' | 'cellLight' | 'cellDark' | 'frame' | 'backdrop' | 'wash'
+>;
+
+export function skinAppVars(skin: AppPaletteInput): Record<string, string> {
+  // Тема может прийти из старого сохранённого состояния, где цвета не прошли ни
+  // одну проверку: для экрана это не повод красить интерфейс в «картон».
+  const safe = (value: string, fallback: string): string => (parseHex(value) ? value : fallback);
+  const base = SKINS.classic;
+  const bg = safe(skin.backdrop, base.backdrop);
+  const frame = safe(skin.frame, base.frame);
+  const cell = safe(skin.cellDark, base.cellDark);
+  const edge = safe(skin.edge, base.edge);
+  const tone = safe(skin.wash, base.wash);
+  const skinSafe = { backdrop: bg };
+  const ink = skinIsLight(skinSafe) ? APP_DARK_INK : APP_LIGHT_INK;
+  // Акцент - это и подпись над заголовком, и ссылка, и стрелка на кнопке, поэтому
+  // планка у него текстовая: 4.5, а не «три для графики». Цвет темы подтягивается
+  // к чернилам ровно настолько, чтобы читаться, и остаётся фирменным тоном.
+  const accent = ensureContrast(edge, bg, ink, 4.5);
+  const danger = ensureContrast('#b46a5c', bg, ink, 3);
+  const ok = ensureContrast('#93a07d', bg, ink, 3);
+  // Подложка под карточки и вкладки: берём цвет темы, если акцент на ней
+  // различим (3:1 - планка графики, текста на ней нет), иначе - приглушённый тон
+  // фона: лиловая подложка «Короны» под лиловой стрелкой превращалась в кашу.
+  const wash = (contrastRatio(accent, tone) ?? 0) >= 3 ? tone : mix(bg, accent, 0.14);
+  // Кнопка «на акценте» - единственное место, где цвет темы становится фоном под
+  // текстом. Подпись берём ту, что читается, а сам фон дотягиваем до контраста,
+  // иначе лиловый акцент «Короны» съедает тёмную надпись почти в 1.3:1.
+  const onAccent =
+    (contrastRatio(APP_DARK_TEXT, accent) ?? 0) >= (contrastRatio(APP_LIGHT_INK, accent) ?? 0) ? APP_DARK_TEXT : APP_LIGHT_INK;
+  const awayFromText = onAccent === APP_DARK_TEXT ? APP_LIGHT_INK : APP_DARK_INK;
+  let accentSolid = accent;
+  for (let step = 1; step <= 10 && (contrastRatio(onAccent, accentSolid) ?? 0) < 4.5; step++) {
+    accentSolid = mix(accent, awayFromText, (step / 10) * 0.45);
+  }
+  if ((contrastRatio(onAccent, accentSolid) ?? 0) < 4.5) accentSolid = mix(accent, awayFromText, 0.45);
+  return {
+    '--accent-solid': accentSolid,
+    '--on-accent': onAccent,
+    '--bg': bg,
+    '--bg-deep': frame,
+    '--panel': mix(bg, cell, 0.6),
+    '--panel-2': cell,
+    '--line': mix(bg, accent, 0.2),
+    '--line-strong': mix(bg, accent, 0.34),
+    '--ink': ink,
+    // Приглушённый текст и подписи - те же чернила, что и основной, но в
+    // половинном весе. На светлой теме «половинка» рискует уехать в 2.8:1,
+    // поэтому каждую планку дотягиваем отдельно.
+    '--muted': ensureContrast(mix(bg, ink, 0.68), bg, ink, 4.5),
+    '--dim': ensureContrast(mix(bg, ink, 0.5), bg, ink, 3),
+    '--accent': accent,
+    '--accent-dim': mix(bg, accent, 0.62),
+    '--accent-wash': wash,
+    '--danger': danger,
+    '--danger-wash': mix(bg, danger, 0.16),
+    '--ok': ok,
+  };
+}
+
 // ─────────────────────────── Контраст ───────────────────────────
 
 function channel(value: number): number {

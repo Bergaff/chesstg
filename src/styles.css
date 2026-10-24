@@ -15,6 +15,8 @@
   --muted: #a69e8c;
   --dim: #7e7664;
   --accent: #c6a45e;
+  --accent-solid: #c6a45e;
+  --on-accent: #1a1508;
   --accent-dim: #8e7541;
   --accent-wash: #2a2517;
   --danger: #b46a5c;
@@ -174,9 +176,11 @@ a {
 }
 
 .btn-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #1a1508;
+  // --accent-solid может быть чуть светлее или темнее акцента темы: подпись на
+  // кнопке обязана читаться, а не красоваться фирменным цветом.
+  border-color: var(--accent-solid, var(--accent));
+  background: var(--accent-solid, var(--accent));
+  color: var(--on-accent, #1a1508);
 }
 
 .btn-outline {
@@ -326,11 +330,12 @@ a {
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
-  // Подписка набрана по ширине: рваный правый край на трёх строках выглядит
-  // черновиком, а узкая колонка держит переносы короткими.
-  text-align: justify;
-  text-justify: inter-word;
-  hyphens: auto;
+  // Выключенный перенос слов: в узкой колонке движок рвёт строку где попало, и
+  // «ферзь» доезжал до отдельной строчки как «ерзь». По ширине текст здесь тоже
+  // не расставляется - колонка короткая, дыры в межсловных пробелах заметнее,
+  // чем рваный край.
+  hyphens: none;
+  overflow-wrap: break-word;
 }
 
 .cta-block {
@@ -406,11 +411,6 @@ a {
   color: var(--muted);
 }
 
-.menu-stats {
-  margin-top: 18px;
-  border-top: 1px solid var(--line);
-}
-
 .account {
   display: flex;
   flex-direction: column;
@@ -454,35 +454,6 @@ a {
 
 .note-error {
   color: var(--danger);
-}
-
-.stat-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 38px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.stat-row dt {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.stat-row dd {
-  margin: 0;
-  font-family: var(--serif);
-  font-size: 17px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-row dd small {
-  margin-left: 4px;
-  font-family: var(--sans);
-  font-size: 10px;
-  color: var(--dim);
 }
 
 .section-head {
@@ -2249,6 +2220,7 @@ a {
   gap: 5px;
   font-size: 11px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .pre-piece em {
@@ -2377,6 +2349,8 @@ a {
 .rules-piece b {
   font-size: 11.5px;
   font-weight: 600;
+  // Название фигуры не переносим: «ферзь» на две строки читается как обрывок.
+  white-space: nowrap;
 }
 
 .rules-piece p {
@@ -2731,11 +2705,6 @@ a {
     font-size: 16px;
   }
 
-  .stat-row {
-    min-height: 32px;
-    padding: 7px 0;
-  }
-
   .buff-btn {
     min-height: 40px;
   }
@@ -2946,10 +2915,6 @@ a {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.race-best {
-  color: var(--accent);
 }
 
 /* Индикатор такта притока: столько клеток, через сколько ходов придёт волна. */

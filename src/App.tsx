@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { modeDef, type GameMode } from './engine';
+import { modeDef, resolveSkin, type GameMode } from './engine';
 import { AppContext, type AppContextValue, type ShopTab } from './context/AppContext';
 import { api, apiWithRetry, ApiError, isLinked, SESSION_KEY, takeLinkFromUrl } from './lib/api';
 import { initTelegram, getStartParam, hapticNotify } from './lib/telegram';
@@ -7,6 +7,7 @@ import { showAdsgram } from './lib/ads';
 import type { SessionResponse } from './lib/types';
 import { ToastStack, type ToastItem, type ToastKind } from './components/Toast';
 import { DemoAd } from './components/DemoAd';
+import { useSkinTheme } from './lib/useSkinTheme';
 import { NoLivesModal } from './components/NoLivesModal';
 import { RulesModal } from './components/RulesModal';
 import { MenuScreen } from './screens/MenuScreen';
@@ -209,6 +210,13 @@ export default function App(): ReactNode {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [screen, reloadKey]);
+
+  // Тема поля - часть аккаунта, а не части игры: она живёт на `:root` и на меню,
+  // и в магазине. Пока профиль не пришёл, держим заводскую палитру.
+  const skinId = session?.profile.skin;
+  const customSkin = session?.profile.customSkin;
+  const skin = useMemo(() => (skinId === undefined ? null : resolveSkin(skinId, customSkin ?? null)), [skinId, customSkin]);
+  useSkinTheme(skin);
 
   const goMenu = useCallback(() => {
     setNoLivesOpen(false);

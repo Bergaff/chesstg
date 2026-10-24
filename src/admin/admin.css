@@ -454,7 +454,13 @@ body {
   font-size: 22px;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
+  // break-word, а не anywhere: anywhere разрешает рвать слово в любом месте и
+  // учитывает это при подсчёте минимальной ширины колонки, поэтому «ферзь» в
+  // узкой метрике доезжал до отдельной строки как «ерзь». Слово рвём только
+  // тогда, когда оно не влезает целиком.
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
 }
 
 .adm-metric-value.is-small {
