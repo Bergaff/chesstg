@@ -118,19 +118,32 @@ export function jamDensity(level: number, bias = 0): number {
   return Math.min(cap, 0.4 + level * 0.012 + bias);
 }
 
-/** Сколько фигур нужно увести с поля на данном уровне. */
+/**
+ * Сколько фигур нужно увести с поля на данном уровне. Плотность задаёт натяжение
+ * пробки, а этот потолок - длину забега. С 20-го уровня фигур больше не становится:
+ * поле выросло до 7x8 и 7x9, и по-прежнему на нём ехало бы 42 фигуры - это план в
+ * 90 ходов, который на телефоне не доигрывают. Рост поля теперь покупает свободу
+ * манёвра (объезжать стали короче), а не число перестановок.
+ */
+export const JAM_PIECES_CAP = 20;
+
 export function jamPieces(level: number, bias = 0): number {
   const { width, height } = jamBoard(level);
-  return Math.max(4, Math.round(width * height * jamDensity(level, bias)));
+  const byDensity = Math.round(width * height * jamDensity(level, bias));
+  // Смещение подаёт лаборатория, когда мерит, сколько фигур терпит доска: там
+  // потолок мешает, и он снимается.
+  return Math.max(4, bias > 0 ? byDensity : Math.min(byDensity, JAM_PIECES_CAP));
 }
 
 /**
  * Целевая длина решения в ходах: генератор ищет расстановку, которая решается
- * примерно за столько. Числа сняты с замера решателя (40 полей на уровень),
- * линейка - 1.6 хода на фигуру плюс один ход на уровень как натяжение пробки.
+ * примерно за столько. Линейка - 1.4 хода на фигуру плюс натяжение пробки, но
+ * не больше четырнадцати ходов: раньше рост уровня сам по себе добавлял по полхода
+ * на каждый номер, и к 40-му уровню это были 24 хода чисто «за номер», поверх
+ * перекладывания фигур.
  */
 export function jamTargetCost(level: number, bias = 0): number {
-  return Math.round(jamPieces(level, bias) * 1.6 + level * 0.6);
+  return Math.round(jamPieces(level, bias) * 1.4 + Math.min(14, level * 0.28));
 }
 
 /**
@@ -469,8 +482,11 @@ function jamEdgeDistance(height: number, side: JamSide, y: number): number {
  * фигурах это 4 штуки, на 32 - семь, и план от них не раздувается.
  */
 export function jamShortShare(level: number): { share: number; reach: number } {
-  const reach = level <= 6 ? 2 : 3;
-  const share = level <= 6 ? 0.34 : level <= 16 ? 0.28 : 0.22;
+  // После того как число фигур уперли в потолок, длина задачи растёт не числом,
+  // а дорогой: пешке и королю отдают всё больше рядов от своего края, и на 40-м
+  // уровне мелочь идёт к выходу четыре хода вместо трёх.
+  const reach = level <= 6 ? 2 : level <= 22 ? 3 : 4;
+  const share = level <= 6 ? 0.34 : level <= 16 ? 0.28 : level <= 28 ? 0.24 : 0.32;
   return { share, reach };
 }
 

@@ -406,6 +406,13 @@ describe('UI smoke', () => {
     expect(cell.disabled).toBe(false);
     fireEvent.click(cell);
     await waitFor(() => expect(screen.getByText('Ходы 1')).toBeTruthy());
+    // Тот же контроль, что и в кампании: после ответа фигур ввод обязан отпустить
+    // (в «Гонках» такт тоже показан двумя кадрами, только пауза короче).
+    await waitFor(() => {
+      const buff = [...document.querySelectorAll('.buff-row button')] as HTMLButtonElement[];
+      expect(buff.length).toBeGreaterThan(0);
+      expect(buff.every((one) => !one.disabled)).toBe(true);
+    }, { timeout: 4000 });
     // Журнал уходит на сервер пачкой с задержкой: ждём именно вызов сохранения.
     await waitFor(() => expect(calls.some((call) => call.url.endsWith('/save'))).toBe(true));
     const sent = calls.filter((call) => call.url.endsWith('/save')).at(-1);
@@ -416,6 +423,18 @@ describe('UI smoke', () => {
   });
 
   it('запускает забег, рисует поле и делает ход', async () => {
+    // Своя расстановка: на генераторе 1-го уровня ладья стоит вплотную и после
+    // первого хода снимает пешку - тест проверяет не это, а то, что поле
+    // разблокируется после ответа фигур.
+    initial = {
+      ...initial,
+      width: 3,
+      height: 4,
+      player: { x: 1, y: 0 },
+      enemies: [{ id: 'r1', type: 'rook', x: 0, y: 3 }],
+      moves: 0,
+      status: 'playing',
+    };
     await boot();
     expect(legalMoves(initial).length).toBeGreaterThan(0);
 
@@ -429,15 +448,23 @@ describe('UI smoke', () => {
     expect(grid.querySelectorAll('[role="gridcell"]').length).toBe(12);
     expect(screen.getByText('Ход 1')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
-    // На время хода фигур кнопки остаются на месте и только блокируются,
-    // иначе доска то сжимается, то растягивается под каждым нажатием.
-    const row = document.querySelector('.move-row');
-    const buttons = [...(row?.querySelectorAll('button') ?? [])] as HTMLButtonElement[];
-    expect(buttons.length).toBe(3);
-    expect(buttons.every((button) => button.disabled)).toBe(true);
+    // Кнопки направления хода убраны: ход - тап по подсвеченной клетке поля.
+    expect(document.querySelector('.move-row')).toBeNull();
+    const cells = [...grid.querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
+    const forward = cells[(initial.height - 1 - (initial.player.y + 1)) * initial.width + initial.player.x];
+    expect(forward.disabled).toBe(false);
+    fireEvent.click(forward);
     await waitFor(() => expect(screen.getByText('Ход 2')).toBeTruthy());
-    expect([...(document.querySelectorAll('.move-row button') ?? [])].length).toBe(3);
+    // Разблокировка обязана состояться: такт показывается двумя кадрами, и пока
+    // не пришёл ответ фигур, ввод держат. Второй кадр менял `state` на том же
+    // номере хода - снимал таймер и не ставил новый, поле замирало навсегда.
+    // Смотрим на кнопки бонусов: они зависят от `canPlay` и не зависят от того,
+    // остались ли у пешки ходы в этой позиции.
+    await waitFor(() => {
+      const buff = [...document.querySelectorAll('.buff-row button')] as HTMLButtonElement[];
+      expect(buff.length).toBe(3);
+      expect(buff.every((one) => !one.disabled)).toBe(true);
+    }, { timeout: 4000 });
     expect(calls.some((call) => call.url === '/api/run/start')).toBe(true);
   });
 
@@ -454,8 +481,10 @@ describe('UI smoke', () => {
     await boot();
     fireEvent.click(screen.getByText(/^(Продолжить|Играть)$/).closest('button')!);
     fireEvent.click(await screen.findByText('Начать'));
-    await screen.findByRole('grid', { name: 'Игровое поле' });
-    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }));
+    const grid = await screen.findByRole('grid', { name: 'Игровое поле' });
+    // Верхний ряд это победа: тап по клетке над пешкой.
+    const cells = [...grid.querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
+    fireEvent.click(cells[(initial.height - 1 - (initial.player.y + 1)) * initial.width + initial.player.x]);
 
     expect(await screen.findByText('Пешка дошла', undefined, { timeout: 3000 })).toBeTruthy();
     expect(screen.getAllByText('Следующий уровень').length).toBeGreaterThan(0);
@@ -488,7 +517,9 @@ describe('UI smoke', () => {
     fireEvent.click(screen.getByText(/^(Продолжить|Играть)$/).closest('button')!);
     fireEvent.click(await screen.findByText('Начать'));
     await screen.findByRole('grid', { name: 'Игровое поле' });
-    fireEvent.click(screen.getByRole('button', { name: 'Вправо' }));
+    // Тап по клетке вправо-вперёд: ладья с той же линии снимает пешку.
+    const lossCells = [...(await screen.findByRole('grid', { name: 'Игровое поле' })).querySelectorAll('[role=\"gridcell\"]')] as HTMLButtonElement[];
+    fireEvent.click(lossCells[(4 - 1 - 1) * 4 + 2]);
 
     expect(await screen.findByText('Пешка поймана', undefined, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText(/Минус одна жизнь/)).toBeTruthy();

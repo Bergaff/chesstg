@@ -1245,11 +1245,18 @@ a {
 
 .game-status {
   display: flex;
-  flex-wrap: wrap;
+  /* Одна строка фиксированной высоты и горизонтальный скролл вместо переноса:
+     как только чипам не хватает места, строка разъезжалась на две - и поле
+     теряло 16px на каждом ходе, где появлялся щит или «рекорд» вырастал до двух
+     знаков. Лишнее теперь доезжает скроллом, высота не двигается никогда. */
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 10px;
   flex: 0 0 auto;
-  min-height: 16px;
+  height: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   font-size: 10px;
   /* Цифры одинаковой ширины: счётчик хода и рекорд не должны растягивать
      строку на полбуквы - из-за этого она переезжала на вторую и поле вздыхало. */
@@ -1257,6 +1264,10 @@ a {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+.game-status::-webkit-scrollbar {
+  display: none;
 }
 
 .status-item {
@@ -1509,14 +1520,10 @@ a {
 }
 
 /* Ряды кнопок держат высоту всегда: иначе при блокировке ввода доска
-   растягивается на освободившееся место и поле «прыгает» на каждый ход. */
-.move-row,
+   растягивается на освободившееся место и поле «прыгает» на каждый ход.
+   Ряд направления хода (`move-row`) из кампании убран - полем управляет тап. */
 .side-row {
   min-height: 46px;
-}
-
-.move-row {
-  align-items: stretch;
 }
 
 .game-controls {
@@ -1654,53 +1661,6 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
-.move-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.move-btn {
-  height: 62px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  border: 1px solid var(--line-strong);
-}
-
-.move-btn.primary {
-  border-color: var(--accent);
-}
-
-.move-glyph-lg {
-  font-family: var(--sans);
-  font-size: 22px;
-  line-height: 1;
-  color: var(--ink);
-}
-
-.move-btn.primary .move-glyph-lg {
-  color: var(--accent);
-}
-
-.move-label {
-  font-size: 8px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--dim);
-}
-
-.move-btn.off {
-  border-color: var(--line);
-}
-
-.move-btn.off .move-glyph-lg,
-.move-btn.off .move-label {
-  color: #5a5446;
-}
-
 .skip-btn {
   width: 100%;
   height: 52px;
@@ -1714,6 +1674,11 @@ a {
   line-height: 1.4;
   text-align: center;
   color: var(--dim);
+  /* Ровно два ряда: подпись меняется на каждый ход («фигуры идут на короля»
+     короче правила в три раза), и без зафиксированной высоты поле гуляло вместе
+     с числом строк. Что не влезло - обрезается, поэтому тексты держим короткими. */
+  height: calc(2 * 1.4 * 1em);
+  overflow: hidden;
 }
 
 .game-loading {
@@ -2468,10 +2433,6 @@ a {
     padding: 7px 0;
   }
 
-  .move-btn {
-    height: 54px;
-  }
-
   .buff-btn {
     min-height: 40px;
   }
@@ -2500,14 +2461,6 @@ a {
 
   .goal-line {
     display: none;
-  }
-
-  .move-btn {
-    height: 48px;
-  }
-
-  .move-glyph-lg {
-    font-size: 18px;
   }
 
   .buff-btn {

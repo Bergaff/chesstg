@@ -356,7 +356,6 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
 
   const moves = useMemo(() => (state ? legalMoves(state) : []), [state]);
   const skipsLeftNow = state ? skipsLeft(state) : 0;
-  const doubleStep = moves.find((move) => move.dy === 2);
 
   // Куда переставились фигуры после последнего хода: без этого ход врага
   // выглядит телепортом, и игрок не понимает, что его поймали.
@@ -398,6 +397,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   // возврат из админки) блокировать ввод нечего, фигуры никуда не ехали.
   const [settling, setSettling] = useState(false);
   const movesShown = useRef<number | null>(null);
+  // Таймер разблокировки живёт в рефе и снимается только при размонтировании.
+  // Раньше он чистился в cleanup эффекта ниже, и второй кадр такта (приходит
+  // пауза, потом ответ фигур - `state` меняется дважды на один ход) успевал его
+  // убить: на втором кадре номер хода тот же, эффект выходит раньше, чем ставит
+  // новый таймер, - и `settling` оставался включённым до конца партии. На экране
+  // это выглядело как подвисание после первого хода: поле рисовалось, ввод не
+  // отвечал, помогала только перезагрузка.
+  const settleTimerRef = useRef<number | null>(null);
   useEffect(() => {
     if (!state) {
       movesShown.current = null;
@@ -412,9 +419,19 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     // смены позиции (отмена, подсказка, возврат в партию) бит остаётся обычным.
     const beat = beatRef.current;
     beatRef.current = ENEMY_BEAT_MS;
-    const timer = window.setTimeout(() => setSettling(false), beat);
-    return () => window.clearTimeout(timer);
+    if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = window.setTimeout(() => {
+      settleTimerRef.current = null;
+      setSettling(false);
+    }, beat);
   }, [state]);
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== null) window.clearTimeout(settleTimerRef.current);
+      if (replyTimerRef.current !== null) window.clearTimeout(replyTimerRef.current);
+    },
+    [],
+  );
 
   const lastMoveIndex = useMemo(() => {
     for (let index = actions.length - 1; index >= 0; index--) {
@@ -933,40 +950,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           </button>
         </div>
 
-        {!king ? (
-          <div className="move-row">
-            {([-1, 0, 1] as MoveDx[]).map((dx) => {
-              const option = moves.find((move) => move.dx === dx && (move.dy ?? 1) === 1);
-              const available = canPlay && option !== undefined;
-              const label = dx === -1 ? 'влево' : dx === 0 ? 'вперёд' : 'вправо';
-              return (
-                <button
-                  key={dx}
-                  type="button"
-                  className={cn('move-btn', dx === 0 && 'primary', !available && 'off', option?.takes && 'move-take')}
-                  disabled={!available}
-                  onClick={() => handleMove(dx, 1)}
-                  aria-label={
-                    option?.takes
-                      ? `${label}: взять ${PIECE_NAME[option.takes].toLowerCase()}`
-                      : `${label[0].toUpperCase()}${label.slice(1)}`
-                  }
-                >
-                  <span className="move-glyph-lg" aria-hidden="true">
-                    {dx === -1 ? '↖' : dx === 0 ? '↑' : '↗'}
-                  </span>
-                  <span className="move-label">{option?.takes ? 'взять' : label}</span>
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
+        {/* Ряд кнопок хода (влево / вперёд / вправо и «на две клетки») убран: режим
+            управляется тапом по подсвеченной клетке, а кнопки только спорили с полем
+            за высоту - из-за них поле дышало на каждый ход. */}
         <div className="side-row">
-          {doubleStep && canPlay ? (
-            <button type="button" className="skip-btn" onClick={() => handleMove(0, 2)}>
-              Вперёд на две клетки
-            </button>
-          ) : null}
           {canPlay && (moves.length === 0 || skipsLeftNow > 0) ? (
             <button type="button" className="skip-btn" onClick={handleSkip}>
               {moves.length === 0 ? 'Ходов нет. Пропустить' : `Пропустить ход, в запасе ${skipsLeftNow}`}
@@ -982,9 +969,9 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
               ? 'Фигуры идут на короля.'
               : king
                 ? isRace
-                  ? 'Король: шаг в любую из восьми сторон, но только по двум нижним рядам - их отделяет красная пунктирная линия. Фигура впритык к линии сверху бьётся на месте: выпад её снимает, а король возвращается на свою клетку.'
+                  ? 'Тап по клетке: шаг или взятие в любую сторону, только в двух нижних рядах. Фигуру впритык к красной линии бейте на месте.'
                   : 'Король: шаг и взятие в любую из восьми сторон, назад включительно. Клетка с фигурой доступна, если её можно взять.'
-                : 'Пешка ходит вперёд, бьёт по диагонали, первым ходом может пройти две клетки.'}
+                : 'Ходите по полю: тап по подсвеченной клетке. Пешка идёт вперёд, бьёт по диагонали, первым ходом - на две клетки.'}
         </p>
       </div>
 
@@ -1004,7 +991,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             {isEndless
               ? 'Поле прибавляет пять клеток за каждые пять клеток подъёма. Сложность растёт вместе с высотой.'
               : isRace
-                ? 'Вы король: один шаг и одно взятие в любую сторону, но только по двум нижним рядам - их отделяет красная пунктирная линия. Фигуры выходят из двух верхних рядов и спускаются к вам своими ходами: за такт фигура делает ровно один ход, конь буквой Г, ладья на две клетки по прямой. Умереть можно только от фигуры, которая встала на вашу клетку; своя фигура у линии бьётся выпадом, и после него король остаётся на месте. Считаются пережитые ходы: каждые восемь волна быстрее, каждые двенадцать растёт уровень режима.'
+                ? 'Вы король в двух нижних рядах: шаг и взятие в любую сторону. Выше красной линии хода нет, но фигуру, вставшую впритык к ней, можно снять на месте - это выпад, и он стоит хода. Фигуры приходят сверху и за такт делают ровно один свой ход; дошли до нижнего ряда - ушли с поля. Поймать вас может только та, что встала на вашу клетку. Счёт - пережитые ходы: каждые 8 волна быстрее, каждые 12 уровень режима.'
                 : 'Дойти до верхнего ряда. Фигуры ходят после игрока и стараются подобраться ближе.'}
           </p>
 
