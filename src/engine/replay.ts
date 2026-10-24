@@ -715,11 +715,20 @@ export interface JamMeasure {
   avgChoice: number;
   /**
    * Прощение первого шага: доля ходов вне плана (первые шесть вариантов), после
-   * которых решатель всё ещё доводит поле до пустой доски. Ноль означает «один
-   * неверный ход - и задача мертва»: такая головоломка не переигрывается, её
-   * заучивают.
+   * которых задача остаётся решаемой **в пределах бюджета**. Прежняя версия
+   * считала просто «решатель довёл до пустой доски» и давала 95-100% на любом
+   * уровне: при бюджете в две длины плана это ничего не различало. Теперь ход,
+   * после которого план в бюджет не влезает, прощением не считается - метрика
+   * начинает спорить с «Запасом», а не кивать ему.
    */
   forgiveness: number;
+  /**
+   * Пена хода вне плана: во сколько раз вырастает план после такого хода.
+   * 1.00 - «свободно гуляй», 1.40 - одна ошибка стоит сорока процентов плана.
+   */
+  penaltyAvg: number;
+  /** Доля ходов вне плана, после которых поле вообще не решается. */
+  doomShare: number;
   /** Бюджет ходов и запас над планом: сколько можно ходить вхолостую. */
   budgetAvg: number;
   slackAvg: number;
@@ -759,12 +768,17 @@ function jamLayoutCells(state: JamState): Set<string> {
 function jamPlanBranching(
   state: JamState,
   plan: readonly JamAction[],
-): { choices: number[]; forgiven: number; tried: number } {
+): { choices: number[]; forgiven: number; tried: number; penalty: number[]; doomed: number } {
   const choices: number[] = [];
+  const penalty: number[] = [];
   let forgiven = 0;
+  let doomed = 0;
   let tried = 0;
   let current = state;
   let step = 0;
+  // Ход уже потрачен, поэтому бюджету осталось столько же минус один шаг.
+  const budgetLeft = Math.max(0, state.budget - 1);
+  const baseCost = Math.max(1, plan.length);
   for (const action of plan) {
     const options = jamLegalActions(current);
     choices.push(options.length);
@@ -776,7 +790,15 @@ function jamPlanBranching(
         try {
           const after = applyJamAction(current, option, RuleError);
           tried += 1;
-          if (solveJamExits(after).ok) forgiven += 1;
+          const solved = solveJamExits(after);
+          if (!solved.ok) {
+            doomed += 1;
+            continue;
+          }
+          penalty.push(solved.moves.length / baseCost);
+          // Прощением считается только то, что ещё влезает в бюджет: «решается за
+          // 90 ходов из данных 60» игрок не сыграет, и называть это свободой нельзя.
+          if (solved.moves.length <= budgetLeft) forgiven += 1;
         } catch {
           /* ход вне плана мог быть запрещён правилами: его не считаем */
         }
@@ -789,10 +811,20 @@ function jamPlanBranching(
     }
     step += 1;
   }
-  return { choices, forgiven, tried };
+  return { choices, forgiven, tried, penalty, doomed };
 }
 
-export function measureJamLevels(levels: number[], samples = 20, seed = 20261022): JamMeasure[] {
+/**
+ * Замер генератора «Парковки». `densityBias` - лабораторная ручка: на сколько
+ * долей занятности добавлять фигур к боевой кривой, чтобы увидеть, где пробка
+ * перестаёт расходиться. В боевой игре смещение всегда ноль.
+ */
+export function measureJamLevels(
+  levels: number[],
+  samples = 20,
+  seed = 20261022,
+  densityBias = 0,
+): JamMeasure[] {
   return levels.map((level) => {
     const costs: number[] = [];
     const choices: number[] = [];
@@ -801,6 +833,8 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
     let pieces = 0;
     let forgiven = 0;
     let tried = 0;
+    let doomed = 0;
+    const penalties: number[] = [];
     let budget = 0;
     let slack = 0;
     let width = 0;
@@ -808,7 +842,7 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
     const keys = new Set<string>();
     const layouts: Array<Set<string>> = [];
     for (let index = 0; index < samples; index++) {
-      const state = createJamPuzzle(level, seed + index * 7919);
+      const state = createJamPuzzle(level, seed + index * 7919, 24, densityBias);
       width = state.width;
       height = state.height;
       pieces += state.total;
@@ -822,6 +856,8 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
       choices.push(...branching.choices);
       forgiven += branching.forgiven;
       tried += branching.tried;
+      doomed += branching.doomed;
+      penalties.push(...branching.penalty);
       budget += state.budget;
       slack += Math.max(0, state.budget - plan.length);
     }
@@ -850,6 +886,8 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
       overBudget: over,
       avgChoice: +(choices.length ? average(choices) : 0).toFixed(2),
       forgiveness: +(tried > 0 ? forgiven / tried : 1).toFixed(3),
+      penaltyAvg: +(penalties.length ? average(penalties) : 1).toFixed(2),
+      doomShare: +(tried > 0 ? doomed / tried : 0).toFixed(3),
       budgetAvg: +(budget / samples).toFixed(1),
       slackAvg: +(slack / samples).toFixed(1),
       uniqueLayouts: keys.size,
@@ -863,10 +901,12 @@ export function measureJamLevels(levels: number[], samples = 20, seed = 20261022
         0.25 * Math.min(1, (choices.length ? average(choices) : 0) / 6)
       ).toFixed(3),
       // Сложность - про игрока: длинный план, отсутствие прощения и тонкий
-      // запас бюджета. 60 ходов - потолок лестницы (уровень 40), 12 ходов запаса
-      // - порог, выше которого можно ходить наугад.
+      // запас бюджета. 90 ходов - потолок лестницы после того, как поле стало
+      // расти и за 20-м уровнем (на 40-м план 84-95): на прежних 60 индекс
+      // упирался в единицу уже к 25-му уровню и переставал различать задачи.
+      // 12 ходов запаса - порог, выше которого можно ходить наугад.
       difficulty: +(
-        0.45 * Math.min(1, average(costs) / 60) +
+        0.45 * Math.min(1, average(costs) / 90) +
         0.3 * (1 - Math.min(1, tried > 0 ? forgiven / tried : 1)) +
         0.25 * Math.max(0, 1 - Math.min(1, slack / samples / 12))
       ).toFixed(3),

@@ -38,6 +38,20 @@ import {
 /** Темп хода фигур: столько игрок видит, куда встала каждая фигура. */
 const ENEMY_BEAT_MS = 700;
 
+/**
+ * Пауза между моим ходом и ответом фигур, в миллисекундах. Движок считает такт
+ * целиком и синхронно, поэтому показ разбит на два кадра: сначала пешка стала,
+ * через паузу поехали фигуры. Кампания держит паузу самой длинной: там один ход
+ * решает партию, и надо успеть увидеть, что осталось после тебя. В «Гонках» темп
+ * свой - там фигуры ездят каждый ход, длинная пауза превратила бы игру в слайды.
+ */
+function replyPauseMs(mode: GameState['mode']): number {
+  if (mode === 'campaign') return 520;
+  if (mode === 'endless') return 380;
+  if (mode === 'race') return 200;
+  return 0;
+}
+
 import { useApp } from '../context/AppContext';
 import { api, ApiError, saveOnExit } from '../lib/api';
 import { appBaseUrl, cn, formatDuration, formatNumber } from '../lib/format';
@@ -107,6 +121,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
   const pendingSaveRef = useRef<GameAction[] | null>(null);
   const finishTimerRef = useRef<number | null>(null);
   const lastActionAt = useRef(0);
+  /** Таймер раскрытия ответа фигур (см. `replyPauseMs`). */
+  const replyTimerRef = useRef<number | null>(null);
+  /** Сколько длится блокировка ввода на этом ходу: пауза + бит ответа. */
+  const beatRef = useRef(ENEMY_BEAT_MS);
 
   const changePhase = useCallback((next: Phase) => {
     phaseRef.current = next;
@@ -300,6 +318,7 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
       if (finishTimerRef.current) window.clearTimeout(finishTimerRef.current);
+      if (replyTimerRef.current) window.clearTimeout(replyTimerRef.current);
     };
     // Стартуем один раз при открытии экрана.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -388,7 +407,12 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     movesShown.current = state.moves;
     if (previous === null || state.moves === previous) return;
     setSettling(true);
-    const timer = window.setTimeout(() => setSettling(false), ENEMY_BEAT_MS);
+    // На ходу с паузой блокировка держится дольше: и пока фигуры не поехали, и
+    // пока они едут. `beatRef` выставляет сам `performAction`, для остальных
+    // смены позиции (отмена, подсказка, возврат в партию) бит остаётся обычным.
+    const beat = beatRef.current;
+    beatRef.current = ENEMY_BEAT_MS;
+    const timer = window.setTimeout(() => setSettling(false), beat);
     return () => window.clearTimeout(timer);
   }, [state]);
 
@@ -409,8 +433,16 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     lastActionAt.current = now;
 
     let next: GameState;
+    let interim: GameState | null = null;
+    const pause = replyPauseMs(current.mode);
     try {
       next = applyAction(current, action);
+      // Первый кадр - позиция сразу после моего хода, до притока и ответа фигур.
+      // Партию она не заканчивает и не выигрывает: это только показ, настоящая
+      // позиция уже лежит в `stateRef`, по ней работают отмена и подсказка.
+      if (pause > 0 && next.status === 'playing') {
+        interim = applyAction(current, action, { playerOnly: true });
+      }
     } catch {
       return;
     }
@@ -420,22 +452,34 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
     actionsRef.current = nextActions;
     stateRef.current = next;
     setActions(nextActions);
-    setState(next);
     setHistoryDepth(historyRef.current.length);
     setHint([]);
     hapticImpact('light');
+    if (next.status === 'playing') scheduleSave(nextActions);
 
-    if (next.status === 'playing') {
-      scheduleSave(nextActions);
+    const commit = () => {
+      setState(next);
+      if (next.status === 'playing') return;
+      finalActionsRef.current = nextActions;
+      changePhase('resolving');
+      if (finishTimerRef.current) window.clearTimeout(finishTimerRef.current);
+      finishTimerRef.current = window.setTimeout(() => {
+        if (runRef.current) void finishRun(runRef.current, nextActions);
+      }, next.status === 'lost' ? 700 : 450);
+    };
+
+    if (interim) {
+      beatRef.current = ENEMY_BEAT_MS + pause;
+      if (replyTimerRef.current) window.clearTimeout(replyTimerRef.current);
+      setState(interim);
+      replyTimerRef.current = window.setTimeout(() => {
+        replyTimerRef.current = null;
+        commit();
+      }, pause);
       return;
     }
 
-    finalActionsRef.current = nextActions;
-    changePhase('resolving');
-    if (finishTimerRef.current) window.clearTimeout(finishTimerRef.current);
-    finishTimerRef.current = window.setTimeout(() => {
-      if (runRef.current) void finishRun(runRef.current, nextActions);
-    }, next.status === 'lost' ? 700 : 450);
+    commit();
   }
 
   function handleMove(dx: MoveDx, dy: MoveDy = 1) {

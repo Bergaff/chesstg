@@ -28,7 +28,7 @@ interface WorkerScope {
 type WorkerRequest =
   | { type: 'run'; index: number; mode: ModeId; level: number; samples: number; seed: number }
   /** Замер генератора «Парковки»: уровни по списку, прогресс по уровням. */
-  | { type: 'jam'; levels: number[]; samples: number; seed: number }
+  | { type: 'jam'; levels: number[]; samples: number; seed: number; densityBias?: number }
   /** Прогон «Гонок» на правиле полосы: длина игры до нерешаемой позиции. */
   | {
       type: 'race';
@@ -58,7 +58,12 @@ scope.addEventListener('message', (event) => {
     try {
       for (let position = 0; position < request.levels.length; position++) {
         if (cancelled) throw new Error('cancelled');
-        const [row] = measureJamLevels([request.levels[position]], request.samples, request.seed);
+        const [row] = measureJamLevels(
+          [request.levels[position]],
+          request.samples,
+          request.seed,
+          request.densityBias ?? 0,
+        );
         scope.postMessage({ type: 'jamrow', row: row as JamMeasure, done: position + 1, total: request.levels.length });
       }
       scope.postMessage({ type: 'jamdone' });

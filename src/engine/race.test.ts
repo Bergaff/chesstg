@@ -13,6 +13,7 @@ import {
   applyAction,
   createRaceLevel,
   legalMoves,
+  raceCoinBase,
   raceCoinReward,
   raceLevelForMoves,
   raceSpawnEvery,
@@ -629,9 +630,16 @@ describe('Гонки: король против фигур сверху', () => 
     expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL - 1)).toBe(1);
     expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL)).toBe(2);
     expect(raceLevelForMoves(RACE_MOVES_PER_LEVEL * 4)).toBe(5);
-    expect(raceCoinReward(0)).toBeLessThanOrEqual(50);
+    // Награда за активную игру: база от длины растёт медленно, живёт во взятиях.
+    expect(raceCoinReward(0)).toBe(2);
     expect(raceCoinReward(8)).toBeLessThan(raceCoinReward(32));
-    expect(raceCoinReward(1000)).toBe(50);
+    expect(raceCoinReward(29)).toBeLessThan(raceCoinReward(29, 13));
+    expect(raceCoinReward(29, 13)).toBe(raceCoinBase(29) + 2 * 13);
+    // Ставку панели можно переложить на другую цифру, база при этом та же.
+    expect(raceCoinReward(29, 13, 3)).toBe(raceCoinBase(29) + 3 * 13);
+    // Потолок держит и длинный забег, и гирлянда взятий: «Гонки» не печатают монеты.
+    expect(raceCoinReward(1000, 400)).toBe(50);
+    expect(raceCoinReward(1000)).toBeLessThanOrEqual(50);
   });
 
   it('счёт это пережитые ходы, а не высота короля', () => {

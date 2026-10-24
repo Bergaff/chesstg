@@ -809,8 +809,13 @@ app.post('/api/run/:id/finish', async (c) => {
     const bestBefore = progress.best ?? 0;
     newBest = survived > bestBefore;
     // Монеты платим только когда фигуры реально поймали короля: выйти из забега
-    // на двадцатом ходу и получить награду было бы слишком просто.
-    reward = outcome === 'lost' ? raceCoinReward(survived) : 0;
+    // на двадцатом ходу и получить награду было бы слишком просто. Платим за
+    // снятые фигуры, а не за ожидание: база от длины нарочно маленькая.
+    // `replay` возвращает состояние любого режима, а взятия есть только у гонок с
+    // кампанией - «Парковка» проходит по этой же ветке, если её когда-нибудь
+    // допишут до журнала ходов.
+    const taken = 'pieces' in state ? 0 : (state.captures ?? 0);
+    reward = outcome === 'lost' ? raceCoinReward(survived, taken) : 0;
     if (newBest || raceLevelForMoves(survived) > progress.level) {
       const levels = parseModeLevels(user.mode_levels);
       const nextLevel = Math.max(progress.level, raceLevelForMoves(survived));

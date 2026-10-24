@@ -191,7 +191,17 @@ function enemyPhase(state: GameState): void {
  * Применить действие игрока. Возвращает новое состояние, исходное не мутирует.
  * Все правила продублированы на сервере: клиент не может «нарисовать» победу.
  */
-export function applyAction(previous: GameState, action: GameAction): GameState {
+/** Опции применения хода. Нужны клиенту, который показывает такт двумя кадрами. */
+export interface ApplyOptions {
+  /**
+   * Остановиться после хода игрока, не запуская приток и ответ фигур. Движок
+   * считает такт целиком и сразу, поэтому без этой опции игрок видит свой ход и
+   * ответ одним кадром и не успевает понять, что он оставил после себя.
+   */
+  playerOnly?: boolean;
+}
+
+export function applyAction(previous: GameState, action: GameAction, options: ApplyOptions = {}): GameState {
   if (previous.status !== 'playing') throw new RuleError('Партия уже завершена');
 
   if (action.type === 'buff') {
@@ -311,6 +321,12 @@ export function applyAction(previous: GameState, action: GameAction): GameState 
   if (state.mode === 'endless') {
     state.tier = 1 + Math.floor(state.moves / 5);
     ensureEndlessSpace(state);
+  }
+
+  if (options.playerOnly) {
+    // Кадр «только мой ход». Проверки тупика и осмысленности ожидания ниже к
+    // нему не применяются: позиция ещё без ответа фигур, судить о ней нельзя.
+    return state;
   }
 
   // Позиция до ответа фигур: нужна, чтобы понять, было ли ожидание полезным.

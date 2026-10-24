@@ -142,8 +142,19 @@ export function raceSpawnPool(tier: number): PieceType[] {
   return ['rook', 'rook', 'bishop', 'knight', 'knight', 'queen', 'queen'];
 }
 
-/** Награда за забег: платим за дистанцию, потому что победы в режиме нет. */
-export function raceCoinReward(moves: number): number {
-  const level = raceLevelForMoves(moves);
-  return Math.min(50, 5 + level + Math.floor(moves / 4));
+/** Монет за снятую фигуру. Выпад движок считает взятием, отдельной ставки нет. */
+export const RACE_COIN_PER_CAPTURE = 2;
+
+/**
+ * Награда за забег. Победы в режиме нет, поэтому платим за активную игру, а не
+ * за выжидание: база от длины растёт медленно, главная часть идёт за снятую
+ * фигуру. Потолок 50 - как в кампании, чтобы «Гонки» не стали способом печатать
+ * монеты ожиданием.
+ */
+export function raceCoinBase(moves: number): number {
+  return 2 + Math.floor(raceLevelForMoves(moves) / 2);
+}
+
+export function raceCoinReward(moves: number, captures = 0, coinsPerCapture = RACE_COIN_PER_CAPTURE): number {
+  return Math.min(50, raceCoinBase(moves) + coinsPerCapture * Math.max(0, captures));
 }

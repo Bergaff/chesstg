@@ -4,6 +4,7 @@ import {
   modeDef,
   RACE_MIN_WIDTH,
   RACE_ROWS,
+  RACE_COIN_PER_CAPTURE,
   raceCoinReward,
   RACE_WIDTH,
   type JamMeasure,
@@ -147,11 +148,11 @@ const SUITE: Record<SuiteId, SuiteMeta> = {
   jam: {
     tab: 'Парковка',
     title: 'Парковка: сложность и реиграбельность',
-    note: 'Головоломка без финиша по времени: важна длина плана, число развилок и различие досок. «Прощение» - доля первых ходов вне плана, после которых задача всё ещё решаема: низкое значит «один неверный ход, и всё».',
+    note: 'Головоломка без финиша по времени: важна длина плана, число развилок и различие досок. «Прощение» - доля первых ходов вне плана, после которых задача решается **в пределах данного бюджета**; низкое значит «один неверный ход, и всё». «Пена» - во сколько раз вырастает план после такого хода, и какой их доли хватает, чтобы поле вообще перестало решаться. Полем «Плотность, +п.п.» измеряем, сколько фигур ещё терпит пробка.',
     run: `Замерить генератор`,
     bigEta: '~3 мин',
     footnote:
-      '«Запас» - сколько ходов бюджета остаётся после плана: бюджет около двух длин плана, поэтому различают уровни именно план и запас, а не прощение.',
+      '«Запас» - сколько ходов бюджета остаётся после плана: пока он около двух длин плана, «Прощение» почти ничего не различает, и спорить надо по «Пене» и по «Сверх бюджета». Плотность выше 0.66 занятности боевой генератор не берёт: фигуры перестают расходиться, и это видно по «Решаемых» и по «Сверх бюджета».',
   },
   tempo: {
     tab: 'Правила гонок',
@@ -185,9 +186,11 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
   const [jamRows, setJamRows] = useState<JamMeasure[]>([]);
   const [raceRows, setRaceRows] = useState<RaceMeasure[]>([]);
   const [tempoRows, setTempoRows] = useState<RaceMeasure[]>([]);
-  // Монет за взятие: панель только проектирует награду, движок пока платит за
-  // длину партии. Число нужно, чтобы увидеть цену правила до его смены.
-  const [coins, setCoins] = useState(2);
+  const [coins, setCoins] = useState(RACE_COIN_PER_CAPTURE);
+  // Насколько плотнее боевой кривой набивать доску в замере «Парковки»: доли
+  // занятности поверх `jamDensity`. Нужено, чтобы ответить, сколько фигур стоит
+  // ставить, - сам генератор такой руки не даёт.
+  const [jamDensity, setJamDensity] = useState(0);
 
   const [runMeta, setRunMeta] = useState<RunMeta | null>(null);
 
@@ -270,7 +273,7 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
     setJamRows([]);
     setProgress(`Уровень 0 из ${ladder.length}`);
     const suite = runJamSuite(
-      { levels: ladder, samples: count, seed },
+      { levels: ladder, samples: count, seed, densityBias: jamDensity / 100 },
       {
         onRow: (row, done, total) => {
           setJamRows((current) => [...current, row]);
@@ -482,6 +485,21 @@ export function VariantsPanel({ level }: { level: number }): ReactNode {
             disabled={running}
           />
         </label>
+        {active === 'jam' && (
+          <label className="adm-field is-inline">
+            <span className="adm-label">Плотность, +п.п.</span>
+            <input
+              type="number"
+              min={0}
+              max={14}
+              step={1}
+              value={jamDensity}
+              onChange={(event) => setJamDensity(Math.max(0, Math.min(14, Number(event.target.value) || 0)))}
+              disabled={running}
+              title="Сколько процентов занятности доски добавить поверх боевой кривой `jamDensity`. Боевой предел 66%: выше него пробка не расходится. Проверка ставит 4, 8 и 12 и смотрит, где ломаются «Решаемых» и «Сверх бюджета»."
+            />
+          </label>
+        )}
         {(active === 'race' || active === 'tempo') && (
           <label className="adm-field is-inline">
             <span className="adm-label">Монет за взятие</span>
@@ -690,6 +708,7 @@ function JamTable({ rows, levels, running }: { rows: JamMeasure[]; levels: numbe
         'Сверх бюджета',
         'Развилка',
         'Прощение',
+        'Пена',
         'Запас',
         'Уникальных',
         'Отличие досок',
@@ -725,6 +744,9 @@ function JamTable({ rows, levels, running }: { rows: JamMeasure[]; levels: numbe
             <td className={item.overBudget > 0 ? 'is-warn' : undefined}>{item.overBudget}</td>
             <td>{item.avgChoice}</td>
             <td>{formatPercent(item.forgiveness, 0)}</td>
+            <td className="is-mono" title="План после хода вне плана вырастает в столько раз; столько их доли убивает задачу совсем">
+              ×{item.penaltyAvg.toFixed(2)} · {formatPercent(item.doomShare, 0)}
+            </td>
             <td className="is-mono">
               {item.slackAvg} из {item.budgetAvg}
             </td>
@@ -867,19 +889,21 @@ function compareGainText(row: RaceMeasure, isBase = false): string {
 }
 
 /**
- * Проекция награды. Движок платит за пережитые ходы и только за проигранный
- * забег (`raceCoinReward`), взятие пока бесплатно. Колонка отвечает на вопрос
- * «сколько было бы, если платить за фигуру»: медиану, а не среднее - редкие
- * длинные партии тянут средний вверх, а платить приходится за обычный забег.
- * Выпад идёт за половину взятия: фигура та же, но король не ушёл с клетки.
+ * Проекция награды. Движок платит за проигранный забег и уже берёт по
+ * `RACE_COIN_PER_CAPTURE` за снятую фигуру; колонка отвечает на вопрос «что
+ * будет, если ставка другая»: слева текущая выплата, справа - при ставке из
+ * панели. Считаем по медиане, а не по среднему: редкие длинные партии тянут
+ * среднее вверх, а платить приходится за обычный забег. Выпад в ставке панели
+ * идёт за половину взятия: фигура та же, но король не ушёл со своей клетки.
  */
 function rewardText(row: RaceMeasure, coins: number): string {
   // Платёж начисляется за проигранный забег. Если половина партий упёрлась в
   // потолок прогона, игрок не проигрывает - и награды нет, как бы ни рос счёт.
   if (row.samples > 0 && row.capped / row.samples > 0.5) return '0: забег не проигран';
-  const now = raceCoinReward(Math.round(row.lengthAvg));
-  const takes = row.capturesMedian * coins + Math.round(row.strikesAvg * Math.floor(coins / 2));
-  return `${now} → ${now + Math.round(takes)}`;
+  const length = Math.round(row.lengthAvg);
+  const now = raceCoinReward(length, Math.round(row.capturesMedian));
+  const other = raceCoinReward(length, Math.round(row.capturesMedian + row.strikesAvg / 2), coins);
+  return `${now} → ${other}`;
 }
 
 function causesText(causes: Record<string, number>, total?: number): string {
@@ -908,7 +932,9 @@ function rewardLine(rows: RaceMeasure[], coins: number): string {
       'Пока забег можно не проигрывать, платить за взятие бессмысленно: деньги начнут капать из ожидания.'
     );
   }
-  const now = Math.round(mean(rows, (row) => raceCoinReward(Math.round(row.lengthAvg))));
+  const now = Math.round(
+    mean(rows, (row) => raceCoinReward(Math.round(row.lengthAvg), Math.round(row.capturesMedian))),
+  );
   const takes = mean(rows, (row) => row.capturesMedian);
   const strikes = mean(rows, (row) => row.strikesAvg);
   const bonus = Math.round(takes * coins + Math.round(strikes * Math.floor(coins / 2)));
@@ -1144,13 +1170,27 @@ function jamFindings(rows: JamMeasure[]): string[] {
     )} из ${runs} - повторов он не даёт.`,
   );
 
+  // Прощение считается против бюджета, поэтому спорить с «Запасом» оно начинает
+  // только вместе с ним: сначала смотрим, что ход вне плана стоит игроку.
   const forgiveness = rows.map((row) => row.forgiveness);
+  const penalty = rows.map((row) => row.penaltyAvg);
+  const doom = rows.map((row) => row.doomShare);
+  const worstDoom = Math.max(...doom);
   out.push(
-    `Прощение первого хода гуляет от ${formatPercent(Math.min(...forgiveness), 0)} до ${formatPercent(
+    `Прощение первого хода ${formatPercent(Math.min(...forgiveness), 0)}-${formatPercent(
       Math.max(...forgiveness),
       0,
-    )} и не монотонно по уровню: метрика уровни не различает, спорить на её основе нельзя.`,
+    )} в пределах бюджета: ход вне плана подорожал до ×${Math.max(...penalty).toFixed(2)} плана` +
+      (worstDoom > 0.005
+        ? ` и в ${formatPercent(worstDoom, 1)} случаев снимает задачу с доски совсем.`
+        : ' и ни разу задачу не убивает.'),
   );
+  const minSlack = Math.min(...rows.map((row) => row.slackAvg));
+  if (minSlack > 14) {
+    out.push(
+      `Пока запас бюджета больше 14 ходов на каждом уровне, «Прощение» измеряет не свободу игрока, а щедрость лимита: хочешь, чтобы ошибка стоила, - режь бюджет до 1.2-1.3 плана и смотри на «Сверх бюджета».`,
+    );
+  }
   return out;
 }
 
@@ -1279,6 +1319,7 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
     'Сверх бюджета',
     'Развилка',
     'Прощение',
+    'Пена',
     'Запас',
     'Уникальных',
     'Сложность',
@@ -1295,7 +1336,7 @@ function jamText(rows: JamMeasure[], meta: { samples: number; seed: number }): s
   lines.push(`| ${head.join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`);
   for (const row of rows) {
     lines.push(
-      `| ${row.level} | ${row.width}x${row.height} | ${row.avgPieces} | ${row.avgCost} | ${row.minCost} | ${row.maxCost} | ${(row.solvedShare * 100).toFixed(1)}% | ${row.overBudget} | ${row.avgChoice} | ${(row.forgiveness * 100).toFixed(0)}% | ${row.slackAvg}/${row.budgetAvg} | ${row.uniqueLayouts}/${row.samples} | ${row.difficulty} | ${row.replayIndex} |`,
+      `| ${row.level} | ${row.width}x${row.height} | ${row.avgPieces} | ${row.avgCost} | ${row.minCost} | ${row.maxCost} | ${(row.solvedShare * 100).toFixed(1)}% | ${row.overBudget} | ${row.avgChoice} | ${(row.forgiveness * 100).toFixed(0)}% | ×${row.penaltyAvg.toFixed(2)} ${(row.doomShare * 100).toFixed(1)}% | ${row.slackAvg}/${row.budgetAvg} | ${row.uniqueLayouts}/${row.samples} | ${row.difficulty} | ${row.replayIndex} |`,
     );
   }
   lines.push('');
@@ -1428,7 +1469,7 @@ function raceText(
     '«До нерешаемой» - ход, после которого перебор не находит ни одного хода, уводящего от смерти в ближайшие три полухода. «Выбор» - сколько легальных ходов было у бота на ходу, «Безопасных» - доля ходов, после которых позиция ещё не проиграна и перебор ещё видит выход; 100% значит, что напряжение в правиле отсутствует. «Фигур/такт» - сколько фигур сдвигается за такт: 1.0 значит «по одной». «Реиграб.» - сводный индекс 0..1 (35% выбора, 25% безопасных ходов, 25% разброса длины, 15% разных стартов).',
   );
   lines.push(
-    '«Награда» - проекция: слева то, сколько платит движок сегодня (`raceCoinReward` - за пережитые ходы и только за проигранный забег), справа сколько было бы, если платить по `монет за взятие` из панели; выпад идёт за половину взятия. Колонка сравнения - тот же бот и те же зёрна на базовом правиле.',
+    '«Награда» - проекция: слева сколько платит движок сейчас (`raceCoinReward` - небольшая база за длину плюс ставка за снятую фигуру, и только за проигранный забег), справа - сколько было бы при ставке `монет за взятие` из панели; выпад там считается за половину взятия. Колонка сравнения - тот же бот и те же зёрна на базовом правиле.',
   );
   lines.push(
     'Уровень в «Гонках» не меняет поле и приток: из него берётся только зерно стартовой пробки, а сложность растёт от пережитых ходов. Поэтому строки лесенки - это разные старты одного поля, и расхождение между ними меньше разброса по зёрнам.',

@@ -265,3 +265,24 @@ describe('баланс и жизни', () => {
     }
   });
 });
+
+describe('такт в два кадра', () => {
+  it('playerOnly отдаёт позицию сразу после хода игрока, до ответа фигур', () => {
+    const s = state({ player: { x: 0, y: 0 }, enemies: [enemy('rook', 2, 2)] });
+    const interim = applyAction(s, { type: 'move', dx: 1 }, { playerOnly: true });
+    const full = applyAction(s, { type: 'move', dx: 1 });
+    expect(interim.player).toEqual({ x: 1, y: 1 });
+    expect(interim.moves).toBe(1);
+    expect(interim.status).toBe('playing');
+    // Фазы противника в этом кадре не было: ни одна фигура не сдвинулась и
+    // никто не родился. Иначе пауза врала бы про угрозу, которую игрок читает.
+    expect(interim.enemies.map((e) => `${e.type}${e.x},${e.y}`)).toEqual(['rook2,2']);
+    // Настоящий кадр того же хода - с ответом фигур, и пешку он не двигает.
+    expect(full.player).toEqual(interim.player);
+  });
+
+  it('победу кадр паузы не прячет', () => {
+    const s = state({ player: { x: 1, y: 1 }, enemies: [enemy('rook', 0, 2)] });
+    expect(applyAction(s, { type: 'move', dx: 0 }, { playerOnly: true }).status).toBe('won');
+  });
+});

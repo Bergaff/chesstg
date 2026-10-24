@@ -99,20 +99,29 @@ const TYPE_WEIGHTS: Array<[JamPieceType, number]> = [
 
 /** Геометрия поля. Ширина растёт медленнее высоты: ряды и есть «пробка». */
 export function jamBoard(level: number): { width: number; height: number } {
-  const width = level <= 10 ? 5 : 6;
-  const height = level <= 6 ? 6 : level <= 16 ? 7 : 8;
+  // Ширина и высота растут вразнобок: 20-й уровень был тупиком лесенки - на
+  // 6x8 оставалось только переставлять фигуры, и 30-й с 40-м играли ту же
+  // задачу. Ряды идут впереди колонок: пробка - это именно ряды.
+  const width = level <= 10 ? 5 : level <= 26 ? 6 : 7;
+  const height = level <= 6 ? 6 : level <= 16 ? 7 : level <= 34 ? 8 : 9;
   return { width, height };
 }
 
-/** Доля занятых клеток. Выше 0.66 пробка не расходится по-человечески. */
-export function jamDensity(level: number): number {
-  return Math.min(0.66, 0.4 + level * 0.012);
+/**
+ * Доля занятых клеток. Выше 0.66 пробка не расходится по-человечески: фигурам
+ * некуда встать, и план превращается в перекладывание. Смещение подаёт
+ * лаборатория, когда измеряет, сколько фигур на доску ещё терпит режим, - в
+ * боевой игре смещения нет.
+ */
+export function jamDensity(level: number, bias = 0): number {
+  const cap = bias > 0 ? 0.8 : 0.66;
+  return Math.min(cap, 0.4 + level * 0.012 + bias);
 }
 
 /** Сколько фигур нужно увести с поля на данном уровне. */
-export function jamPieces(level: number): number {
+export function jamPieces(level: number, bias = 0): number {
   const { width, height } = jamBoard(level);
-  return Math.max(4, Math.round(width * height * jamDensity(level)));
+  return Math.max(4, Math.round(width * height * jamDensity(level, bias)));
 }
 
 /**
@@ -120,8 +129,8 @@ export function jamPieces(level: number): number {
  * примерно за столько. Числа сняты с замера решателя (40 полей на уровень),
  * линейка - 1.6 хода на фигуру плюс один ход на уровень как натяжение пробки.
  */
-export function jamTargetCost(level: number): number {
-  return Math.round(jamPieces(level) * 1.6 + level * 0.6);
+export function jamTargetCost(level: number, bias = 0): number {
+  return Math.round(jamPieces(level, bias) * 1.6 + level * 0.6);
 }
 
 /**
@@ -544,10 +553,12 @@ function buildLayout(args: { width: number; height: number; total: number; level
  * к целевой длине уровня. Слишком короткие отбрасываем: поле, которое
  * расходится за три хода, не задача, а загрузка.
  */
-export function createJamPuzzle(level: number, seed: number, attempts = 24): JamState {
+export function createJamPuzzle(level: number, seed: number, attempts = 24, densityBias = 0): JamState {
   const { width, height } = jamBoard(level);
-  const total = Math.min(jamPieces(level), width * height - 2);
-  const target = jamTargetCost(level);
+  // `densityBias` - ручка лаборатории: сколько фигур на доску добавляем сверх
+  // боевой кривой, чтобы измерить, где пробка перестаёт расходиться.
+  const total = Math.min(jamPieces(level, densityBias), width * height - 2);
+  const target = jamTargetCost(level, densityBias);
   let best: { pieces: JamPiece[]; plan: JamPlan } | null = null;
 
   for (let attempt = 0; attempt < attempts; attempt++) {

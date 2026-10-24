@@ -134,6 +134,48 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         </p>
       </section>
 
+      <div className="account">
+        <span className="label">Сохранение прогресса</span>
+        {inTelegram ? (
+          <p className="account-text">
+            Игра открыта из Telegram, прогресс привязан к твоему аккаунту и не потеряется при перезапуске.
+          </p>
+        ) : linked ? (
+          <>
+            <p className="account-text">Аккаунт Telegram подключён, прогресс переживёт закрытие браузера.</p>
+            <div className="account-actions">
+              <button
+                type="button"
+                className="btn btn-quiet"
+                onClick={() => {
+                  clearSessionToken();
+                  setLinked(false);
+                  void refresh();
+                  toast('Сеанс сброшен, играешь как гость на этом устройстве');
+                }}
+              >
+                Выйти из аккаунта
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="account-text">
+              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Привяжи Telegram: уровень,
+              монеты и рекорды останутся с аккаунтом на любом устройстве, а текущий прогресс переедет следом.
+              Откроется чат бота, там нужно нажать «Да».
+            </p>
+            <TelegramLink
+              onLinked={({ merged }) => {
+                setLinked(true);
+                void refresh();
+                toast(merged ? 'Прогресс привязан к Telegram' : 'Вошли через Telegram');
+              }}
+            />
+          </>
+        )}
+      </div>
+
       <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>
         <span className="cta-body">
           <span className="label">{campaignRun ? 'Незаконченная партия' : 'Кампания'}</span>
@@ -182,48 +224,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <dd className="serif">{SKINS[profile.skin]?.name ?? 'Классика'}</dd>
         </div>
       </dl>
-
-      <div className="account">
-        <span className="label">Сохранение прогресса</span>
-        {inTelegram ? (
-          <p className="account-text">
-            Игра открыта из Telegram, прогресс привязан к твоему аккаунту и не потеряется при перезапуске.
-          </p>
-        ) : linked ? (
-          <>
-            <p className="account-text">Аккаунт Telegram подключён, прогресс переживёт закрытие браузера.</p>
-            <div className="account-actions">
-              <button
-                type="button"
-                className="btn btn-quiet"
-                onClick={() => {
-                  clearSessionToken();
-                  setLinked(false);
-                  void refresh();
-                  toast('Сеанс сброшен, играешь как гость на этом устройстве');
-                }}
-              >
-                Выйти из аккаунта
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="account-text">
-              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Привяжи Telegram: уровень,
-              монеты и рекорды останутся с аккаунтом на любом устройстве, а текущий прогресс переедет следом.
-              Откроется чат бота, там нужно нажать «Да».
-            </p>
-            <TelegramLink
-              onLinked={({ merged }) => {
-                setLinked(true);
-                void refresh();
-                toast(merged ? 'Прогресс привязан к Telegram' : 'Вошли через Telegram');
-              }}
-            />
-          </>
-        )}
-      </div>
 
       <div className="section-head">
         <span className="label">Разделы</span>

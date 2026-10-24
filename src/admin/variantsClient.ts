@@ -41,6 +41,8 @@ export interface JamSuiteRequest {
   levels: number[];
   samples: number;
   seed: number;
+  /** Доли занятности доски поверх боевой кривой `jamDensity`: 0.08 = +8 п.п. */
+  densityBias?: number;
 }
 
 export interface JamSuiteHandlers {
@@ -72,7 +74,12 @@ export function runJamSuite(request: JamSuiteRequest, handlers: JamSuiteHandlers
           if (cancelled) break;
           await new Promise((tick) => window.setTimeout(tick, 0));
           try {
-            const [row] = measureJamLevels([request.levels[index]], request.samples, request.seed);
+            const [row] = measureJamLevels(
+              [request.levels[index]],
+              request.samples,
+              request.seed,
+              request.densityBias ?? 0,
+            );
             handlers.onRow?.(row, index + 1, total);
           } catch (error) {
             reject(error instanceof Error ? error : new Error('jam_measure_failed'));
@@ -112,7 +119,13 @@ export function runJamSuite(request: JamSuiteRequest, handlers: JamSuiteHandlers
       worker = null;
       reject(new Error('worker_failed'));
     };
-    worker.postMessage({ type: 'jam', levels: request.levels, samples: request.samples, seed: request.seed });
+    worker.postMessage({
+      type: 'jam',
+      levels: request.levels,
+      samples: request.samples,
+      seed: request.seed,
+      densityBias: request.densityBias ?? 0,
+    });
   });
 
   return {

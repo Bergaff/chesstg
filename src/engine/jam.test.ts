@@ -78,12 +78,32 @@ describe('парковка: фигуры уходят с поля', () => {
     const small = jamBoard(1);
     const big = jamBoard(40);
     expect(small.width).toBe(5);
-    expect(big.width).toBe(6);
+    // После 20-го уровня поле продолжает расти: раньше лесенка упиралась в 6x8,
+    // и 30-й с 40-м играли ровно ту же задачу, только с другим зерном.
+    expect(jamBoard(20).width).toBe(6);
+    expect(jamBoard(20).height).toBe(8);
+    expect(big.width).toBe(7);
+    expect(big.height).toBe(9);
+    expect(jamBoard(90)).toEqual({ width: 7, height: 9 });
     expect(big.height).toBeGreaterThan(small.height);
     expect(jamDensity(1)).toBeLessThan(jamDensity(30));
     expect(jamDensity(90)).toBeLessThanOrEqual(0.66);
     expect(jamPieces(1)).toBeLessThan(jamPieces(30));
     expect(jamTargetCost(1)).toBeLessThan(jamTargetCost(30));
+  });
+
+  it('плотность лаборатории поднимает фигурность, боевая кривая не тронута', () => {
+    expect(jamDensity(20)).toBeCloseTo(0.64, 2);
+    expect(jamDensity(20, 0.04)).toBeGreaterThan(jamDensity(20));
+    expect(jamDensity(90)).toBeLessThanOrEqual(0.66);
+    expect(jamDensity(90, 0.14)).toBeLessThanOrEqual(0.8);
+    expect(jamPieces(20, 0.08)).toBeGreaterThan(jamPieces(20));
+    // Смещение - только лабораторное: боевой вызов генератора обязан давать
+    // ровно те же поля, что и до ручки.
+    const plain = createJamPuzzle(6, 31337);
+    const same = createJamPuzzle(6, 31337, 24, 0);
+    expect(JSON.stringify(plain.pieces)).toBe(JSON.stringify(same.pieces));
+    expect((plain.plan ?? []).length).toBeGreaterThan(0);
   });
 
   it('план решателя доводит поле до пустой доски', () => {
