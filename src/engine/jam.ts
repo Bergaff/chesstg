@@ -140,10 +140,22 @@ export function jamTargetCost(level: number, bias = 0): number {
  * первом уровне и 1.35 на сороковом. Ниже 1.35 опускаться некуда: сам план жадный,
  * он уже длиннее человеческого, и запас считается от заведомо плохой оценки.
  */
+/**
+ * Доля длины плана, которую разрешается потратить на ошибку. Лестница
+ * договорная: 1.5 на 1-12 (уровни учебные, развязать пробку важнее, чем не
+ * оступиться), 1.35 на 13-24, 1.25 после 25-го. Прежняя формула
+ * (`1.9 - 0.02 × уровень` плюс 3-6 ходов сверху) на 20-м уровне давала запас в
+ * полтора десятка ходов - прощение на ней меряло щедрость лимита, а не свободу
+ * игрока, и пена за ход вне плана была меньше единицы.
+ */
+export function jamBudgetFactor(level: number): number {
+  if (level <= 12) return 1.5;
+  if (level <= 24) return 1.35;
+  return 1.25;
+}
+
 export function jamBudget(level: number, cost = jamTargetCost(level)): number {
-  const factor = Math.max(1.35, 1.9 - level * 0.02);
-  const slack = Math.max(3, 6 - Math.floor(level / 6));
-  return Math.round(cost * factor) + slack;
+  return Math.max(4, Math.round(cost * jamBudgetFactor(level)));
 }
 
 /**

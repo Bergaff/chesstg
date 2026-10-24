@@ -64,7 +64,9 @@ describe('прогон сравнений', () => {
     expect(auditState(createSpecialLevel('race', 8, 4242)!, { maxDepth: 10 }).survival).toBe(true);
   });
 
-  it('отчёт показывает откаты генератора', () => {
+  // Превращение пешки у края добавило поиску кампании ветвлений, и прогон
+  // перестал успевать в обычные 5 с. Потолок поднят, смысл проверки не изменился.
+  it('отчёт показывает откаты генератора', { timeout: 40_000 }, () => {
     const campaign = analyzeVariant({ mode: 'campaign', level: 8, samples: 4, seed: 909 });
     expect(campaign.fallbacks).toBe(0);
     expect(campaign.uniqueLayouts).toBeLessThanOrEqual(campaign.samples);

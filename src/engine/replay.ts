@@ -723,8 +723,11 @@ export interface JamMeasure {
    */
   forgiveness: number;
   /**
-   * Пена хода вне плана: во сколько раз вырастает план после такого хода.
-   * 1.00 - «свободно гуляй», 1.40 - одна ошибка стоит сорока процентов плана.
+   * Пена хода вне плана: (потраченный ход + оставшийся план) / остаток плана на
+   * этом шаге. 1.00 - ход встал ровно вместо планового, 1.40 - ошибка стоит
+   * сорока процентов остатка. Значение ниже единицы честно и означает другое:
+   * решатель на остатке нашёл план короче обещанного, то есть план генератора не
+   * минимален. Мерить имеет смысл только превышение над 1.00.
    */
   penaltyAvg: number;
   /** Доля ходов вне плана, после которых поле вообще не решается. */
@@ -776,10 +779,13 @@ function jamPlanBranching(
   let tried = 0;
   let current = state;
   let step = 0;
-  // Ход уже потрачен, поэтому бюджету осталось столько же минус один шаг.
-  const budgetLeft = Math.max(0, state.budget - 1);
-  const baseCost = Math.max(1, plan.length);
   for (const action of plan) {
+    // И остаток плана, и остаток бюджета считаются от текущего шага: план уже
+    // стоил `step` ходов, а ход вне плана стоит ещё один сверху. Прежний вариант
+    // сверялся с полным планом и полным бюджетом, от чего пена выходила меньше
+    // единицы («ошибка дешевле плана»), а прощение просто кивало запасу.
+    const budgetLeft = Math.max(0, current.budget - current.moves - 1);
+    const baseCost = Math.max(1, plan.length - step);
     const options = jamLegalActions(current);
     choices.push(options.length);
     if (step === 0) {
@@ -795,7 +801,7 @@ function jamPlanBranching(
             doomed += 1;
             continue;
           }
-          penalty.push(solved.moves.length / baseCost);
+          penalty.push((solved.moves.length + 1) / baseCost);
           // Прощением считается только то, что ещё влезает в бюджет: «решается за
           // 90 ходов из данных 60» игрок не сыграет, и называть это свободой нельзя.
           if (solved.moves.length <= budgetLeft) forgiven += 1;

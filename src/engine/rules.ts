@@ -166,6 +166,15 @@ function enemyPhase(state: GameState): void {
         continue;
       }
     }
+    // Пешка у нижнего края: бить ей некуда, идти тоже, и без превращения она
+    // оставалась на поле навсегда. Превращание забирает её ход, зато игрок
+    // видит пешку у края целый такт и может увести короля заранее.
+    if (rules.promoteAtBottom && enemy.type === 'pawn' && enemy.y === 0) {
+      enemy.type = 'queen';
+      state.promoted = (state.promoted ?? 0) + 1;
+      state.lastEvent = 'promoted';
+      continue;
+    }
     if (tempo !== 'all' && enemy.id !== actor) continue;
     if (target) {
       enemy.x = target.x;

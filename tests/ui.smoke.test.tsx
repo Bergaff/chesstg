@@ -316,8 +316,10 @@ describe('UI smoke', () => {
     const start = calls.find((call) => call.url === '/api/run/start');
     expect((start?.body as { mode?: string } | undefined)?.mode).toBe('jam');
     // В предпросмотре видно бюджет перестановок: без него уровень не спланировать.
-    expect(screen.getByText('Перестановок дано')).toBeTruthy();
-    expect(screen.getByText(String(jamInitial.budget))).toBeTruthy();
+    const pre = screen.getByText('Перестановок дано').closest('.pre-meta')!;
+    // Число ищется внутри превью: в HUD столько же монет, и общий поиск по
+    // документу находил бы обе цифры.
+    expect(pre.textContent).toContain(String(jamInitial.budget));
 
     fireEvent.click(screen.getByText('Начать'));
     const grid = await screen.findByRole('grid', { name: 'Поле парковки' });

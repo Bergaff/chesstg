@@ -7,6 +7,7 @@ import {
   jamAtEdge,
   jamBoard,
   jamBudget,
+  jamBudgetFactor,
   jamDensity,
   jamExitMoves,
   jamExitRow,
@@ -403,6 +404,23 @@ describe('парковка: фигуры уходят с поля', () => {
     expect(isJamState(legacy)).toBe(false);
     expect(isJamState(lanes)).toBe(false);
     expect(isJamState(createJamPuzzle(2, 5))).toBe(true);
+  });
+
+  it('бюджет режет ошибку по лесенке уровней', () => {
+    // Лесенка договорная: 1.5 на учебных 1-12, 1.35 на 13-24, 1.25 после 25-го.
+    expect(jamBudgetFactor(1)).toBe(1.5);
+    expect(jamBudgetFactor(12)).toBe(1.5);
+    expect(jamBudgetFactor(13)).toBe(1.35);
+    expect(jamBudgetFactor(24)).toBe(1.35);
+    expect(jamBudgetFactor(25)).toBe(1.25);
+    expect(jamBudget(9, 40)).toBe(60);
+    expect(jamBudget(20, 60)).toBe(81);
+    expect(jamBudget(30, 80)).toBe(100);
+    // Запас над планом обязан быть конечным: на прежней формуле 30-й уровень
+    // имел полтора десятка ходов сверху, и ход вне плана ничего не стоил.
+    expect(jamBudget(30, 80) - 80).toBeLessThan(80 * 0.3);
+    // Совсем маленькая задача не может получить бюджет меньше четырёх ходов.
+    expect(jamBudget(1, 2)).toBe(4);
   });
 
   it('один и тот же seed даёт тот же бюджет: запас считается от плана, а не от уровня', () => {

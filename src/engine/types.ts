@@ -16,6 +16,8 @@ export type LabMode =
   | 'raceDiscovery'
   | 'campaignFreeDiag'
   | 'campaignStrictDiag'
+  | 'campaignPromote'
+  | 'campaignNoPromote'
   | 'jamStrictDiag';
 
 export type AnyMode = GameMode | LabMode;
@@ -81,6 +83,11 @@ export interface GameState {
   lastCapture?: Cell;
   /** Служебная метка последнего события для анимаций. */
   lastEvent?: string;
+  /**
+   * Сколько вражеских пешек превратилось в ферзей за забег (`promoteAtBottom`).
+   * Чистая метрика: на правила не влияет, нужна замерам и разбору забега.
+   */
+  promoted?: number;
 }
 
 export type GameAction =

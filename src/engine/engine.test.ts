@@ -18,6 +18,7 @@ import {
   type Enemy,
   type GameState,
   type PieceType,
+  rulesFor,
 } from './index';
 
 function state(partial: Partial<GameState> = {}): GameState {
@@ -263,6 +264,50 @@ describe('баланс и жизни', () => {
       expect(reward).toBeGreaterThanOrEqual(10);
       expect(reward).toBeLessThanOrEqual(50);
     }
+  });
+});
+
+describe('превращение вражеской пешки у края', () => {
+  // Пешка на нулевом ряду бьёт в пустоту и идти ей некуда: без правила она
+  // оставалась бы на доске навсегда. С правилом - становится ферзём на следующий
+  // такт, и этот такт она не ходит, то есть игрок видит превращание заранее.
+  const stuck = (mode: GameState['mode']): GameState =>
+    state({ mode, width: 5, height: 4, player: { x: 0, y: 1 }, enemies: [enemy('pawn', 4, 1)] });
+
+  it('пешка доезжает до нижнего ряда и на следующем такту становится ферзём', () => {
+    const arrived = applyAction(stuck('campaign'), { type: 'skip' });
+    expect(arrived.enemies[0]).toMatchObject({ type: 'pawn', x: 4, y: 0 });
+    const promoted = applyAction(arrived, { type: 'skip' });
+    expect(promoted.enemies[0]).toMatchObject({ type: 'queen', x: 4, y: 0 });
+    expect(promoted.lastEvent).toBe('promoted');
+    expect(promoted.promoted).toBe(1);
+    // Превращение стоило такта: фигура не сдвинулась.
+    expect(arrived.player).toEqual({ x: 0, y: 1 });
+    // Дальше новый ферзь играет по-своему и второй раз не превращается.
+    const next = applyAction(promoted, { type: 'move', dx: 0 });
+    expect(next.enemies[0].type).toBe('queen');
+    expect(next.promoted).toBe(1);
+    expect([next.enemies[0].x, next.enemies[0].y]).not.toEqual([4, 0]);
+  });
+
+  it('на той же доске без правила пешка замирает навсегда', () => {
+    const arrived = applyAction(stuck('campaignNoPromote'), { type: 'skip' });
+    expect(arrived.enemies[0]).toMatchObject({ type: 'pawn', x: 4, y: 0 });
+    const again = applyAction(arrived, { type: 'skip' });
+    expect(again.enemies[0]).toMatchObject({ type: 'pawn', x: 4, y: 0 });
+    expect(again.promoted ?? 0).toBe(0);
+    // Мёртвая пешка не бьёт и не грозит: поле с ней просто меньше.
+    expect(enemyMoves(again, again.enemies[0]).length).toBe(0);
+  });
+
+  it('правило включено только там, где фигуры застревают', () => {
+    expect(rulesFor('campaign').promoteAtBottom).toBe(true);
+    expect(rulesFor('endless').promoteAtBottom).toBe(true);
+    // В «Гонках» нижний ряд это выход с поля, в «Парковке» фигуры стоят.
+    expect(rulesFor('race').promoteAtBottom).toBe(false);
+    expect(rulesFor('jam').promoteAtBottom).toBe(false);
+    expect(rulesFor('campaignPromote').promoteAtBottom).toBe(true);
+    expect(rulesFor('campaignNoPromote').promoteAtBottom).toBe(false);
   });
 });
 
