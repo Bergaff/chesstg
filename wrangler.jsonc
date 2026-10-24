@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pawn-vs-all",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "html_handling": "none",
+    "run_worker_first": ["/api/*", "/admin", "/admin/*", "/admin.html"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pawn-vs-all",
+      "database_id": "9fc9827a-6f88-49c0-9e9a-cd41418f621b",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production",
+    // Публичные переменные. Всё, что не секрет, держим здесь: `wrangler deploy`
+    // затирает обычные переменные, добавленные только в панели.
+    // WEBAPP_URL участвует в ссылках бота, поэтому должен совпадать с доменом воркера.
+    "WEBAPP_URL": "https://chesstg.tgmg.workers.dev",
+    "BOT_USERNAME": "pawn_vs_all_bot",
+    "ALLOW_GUESTS": "true",
+    "DEV_MODE": "false",
+    "ADSGRAM_SRC": "https://sad.adsgram.ai/js/sad.min.js",
+    "ADSGRAM_BLOCK_ID": "",
+    // Вечные сердца для проверки: Telegram id через запятую. Держим в репозитории,
+    // потому что `wrangler deploy` затирает переменные, заданные только в панели.
+    // Список даёт только сердца: монеты, уровень и остальной прогресс пишутся как обычно.
+    "QA_LIVES_IDS": "369330135, 6856213029"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -1,0 +1,32 @@
+# Скопируй в .dev.vars и заполни для локальной проверки Telegram/платежей.
+# .dev.vars в git не попадает.
+
+BOT_TOKEN=
+WEBHOOK_SECRET=
+
+# Публичные переменные обычно задаются в wrangler.jsonc (vars).
+# Здесь можно переопределить их для локального запуска:
+# WEBAPP_URL=
+# BOT_USERNAME=
+# ALLOW_GUESTS=true
+# Льготы для проверки механики: список Telegram id через запятую. Жизнь не
+# списывается, все темы поля открыты, публикация без взноса, в меню видна
+# лаборатория. В боле задаётся только секретом (wrangler secret put
+# QA_LIVES_IDS), иначе его сотрёт следующий билд. Гостям список не выдаётся.
+# QA_LIVES_IDS=
+# Локально удобно включить демо-рекламу и приём вебхука без секрета:
+# DEV_MODE=true
+# ADSGRAM_SRC=https://sad.adsgram.ai/js/sad.min.js
+# ADSGRAM_BLOCK_ID=
+
+# Админка: доступ по паролю, токен подписывается секретом.
+# В продакшене задаются через wrangler secret put.
+ADMIN_PASSWORD=
+# Либо хеш пароля: sha256 в hex (printf '%s' 'пароль' | sha256sum)
+ADMIN_PASSWORD_HASH=
+ADMIN_SECRET=
+# Необязательно: отдельный секрет для подписи сеансовых токенов сайта.
+# По умолчанию используется ADMIN_SECRET. В боле задаётся в панели:
+# Workers -> chesstg -> Settings -> Variables and Secrets.
+# Меняешь его (или ADMIN_SECRET) = все вошедшие на сайте браузеры войдут заново.
+SESSION_SECRET=
