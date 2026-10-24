@@ -1,4 +1,4 @@
-import { PAID_SKINS, SKINS, type PaidSkinId, type SkinId, SKIN_SET_STARS } from './skins';
+import { PAID_SKINS, SKINS, SKIN_STARS, type PaidSkinId, type SkinId, SKIN_SET_STARS } from './skins';
 
 /** Взнос за то, чтобы свою тему увидели чужие: одна плата на одну тему. */
 export const SHARE_FEE_STARS = 100;
@@ -34,7 +34,7 @@ export const BONUSES: Record<BonusId, BonusDef> = {
     id: 'undo',
     name: 'Отмена хода',
     price: 15,
-    description: 'Откатит последний ход и ответ врагов',
+    description: 'Откатит последний ход и ответ врагов. Ещё по одному за каждые пять пройденных уровней, держать можно до двух',
   },
 };
 
@@ -122,7 +122,11 @@ export function isProductSku(value: unknown): value is ProductSku {
   return typeof value === 'string' && value in PRODUCTS;
 }
 
-/** Тема открыта навсегда, если за неё заплатили; витрина сезона - отдельная ветка. */
+/**
+ * Тема открыта навсегда, если за неё заплатили. Сезонных витрин, где тема
+ * жила бы у всех до конца квартала, в модели нет: платная тема открывается
+ * счётом на звёзды, монетами или льготой `QA_LIVES_IDS` - третьего не дано.
+ */
 export function skinProductOwned(sku: ProductSku, owned: readonly SkinId[]): boolean {
   if (sku === 'skins') return PAID_SKINS.every((id) => owned.includes(id));
   return typeof sku === 'string' && sku.startsWith('skin:') && owned.includes(sku.slice(5) as SkinId);
@@ -131,6 +135,119 @@ export function skinProductOwned(sku: ProductSku, owned: readonly SkinId[]): boo
 
 export function isBonusId(value: unknown): value is BonusId {
   return typeof value === 'string' && value in BONUSES;
+}
+
+// ───────────────────── Монеты как валюта тем ─────────────────────
+
+/**
+ * Курс, по которому монеты пускают в витрину тем: 60 монет за звезду. Чистая
+ * арифметика выбрана специально - две цены одной вещи обязаны сходиться в
+ * голове игрока, а не жить в двух таблицах.
+ *
+ * Монетами продаётся только то, что не стоит живых денег: темы поля. Жизни,
+ * отключение рекламы и взнос за публикацию остаются за звёздами - монеты за
+ * них означали бы, что игрок может оплатить модератора и хостинг тем, что
+ * накликал рекламу в меню.
+ */
+export const COINS_PER_STAR = 60;
+/** Цена всегда кратна 50: «1 180» читается как ошибка, «1 200» - как цель. */
+export const COINS_PRICE_STEP = 50;
+
+export function skinCoinPrice(stars: number): number {
+  if (stars <= 0) return 0;
+  const raw = stars * COINS_PER_STAR;
+  return Math.max(COINS_PRICE_STEP, Math.round(raw / COINS_PRICE_STEP) * COINS_PRICE_STEP);
+}
+
+/** Тема поштучно и набор: те же 20 и 50 звёзд, пересчитанные курсом. */
+export const SKIN_COINS = skinCoinPrice(SKIN_STARS);
+export const SKIN_SET_COINS = skinCoinPrice(SKIN_SET_STARS);
+
+/**
+ * Потолок наград за рекламу в сутки - только для монет, жизни и щит им не
+ * измеряются. Без него монетный магазин ломается в одну кнопку: кулдаун ролика
+ * минута, значит 1 440 монет в день с телефона, который забыли на столе, - это
+ * тема за обед и обнулённая продажа за звёзды. Пять показов - полторы минуты
+ * тапания, обычный игрок смотрит два-три, а ферма упирается в потолок.
+ */
+export const AD_COINS_DAILY_LIMIT = 5;
+
+// ─────────────────────── Бесплатный откат ───────────────────────
+
+/** Каждые столько пройденных уровней кампании дают один откат. */
+export const UNDO_EVERY_LEVELS = 5;
+/** Больше двух откатов держать нельзя: склад из восьми убивает и цену, и смысл. */
+export const UNDO_MAX_HELD = 2;
+
+/** Сколько откатов игрок имел право получить, дойдя до `levelsCleared`. */
+export function undoTokensFor(levelsCleared: number): number {
+  return Math.floor(Math.max(0, levelsCleared) / UNDO_EVERY_LEVELS);
+}
+
+/**
+ * Сколько откатов долить в инвентарь. Право считаем от достигнутого уровня, а
+ * не от факта победы: пропустил игрок пять уровней разом - получит один, и
+ * только до потолка. Покупные откаты потолок не трогает, - за них заплачено,
+ * и уменьшать их никто не вправе; но и бесплатные поверх них не капают.
+ */
+export function undoTopUp(held: number, due: number): number {
+  const current = Math.max(0, Math.floor(held));
+  return Math.max(0, Math.min(UNDO_MAX_HELD, current + Math.max(0, Math.floor(due))) - current);
+}
+
+/**
+ * Экономика монетного магазина: за сколько дней тема копится у игрока данного
+ * уровня. Нужна не для красоты, а чтобы цену нельзя было поставить так, чтобы
+ * один режим кормил другой: считаем доход от побед, от «Парковки» и от
+ * рекламного потолка и сравниваем с ценой.
+ */
+export interface CoinIncomeRow {
+  level: number;
+  /** Монет в день при двух победах в кампании и одной в «Парковке». */
+  perDay: number;
+  /** С учётом рекламного потолка: худший случай для баланса. */
+  perDayWithAds: number;
+  daysForSkin: number;
+  daysForSet: number;
+}
+
+/**
+ * Дни до темы. Уровень победы и уровень «Парковки» берутся одинаковыми - грубо,
+ * но в плюс игроку: режимы он закрывает медленнее кампании. Реклама идёт своим
+ * потоком: два показа в день у обычного игрока и максимум суточного потолка у
+ * того, кто сидит в игре весь день.
+ */
+export function coinEconomy(options?: {
+  levelsPerDay?: number;
+  jamLevelsPerDay?: number;
+  adViewsPerDay?: number;
+}): CoinIncomeRow[] {
+  const levels = options?.levelsPerDay ?? 2;
+  const jam = options?.jamLevelsPerDay ?? 1;
+  const ads = options?.adViewsPerDay ?? 2;
+  return [3, 5, 10, 15, 20, 25, 30].map((level) => {
+    const perLevel = campaignCoinReward(level);
+    const perDay = Math.max(0, Math.round(levels * perLevel + jam * campaignCoinReward(Math.max(1, level - 2))));
+    const perDayWithAds = perDay + Math.min(ads, AD_COINS_DAILY_LIMIT) * AD_COINS_REWARD;
+    const days = (price: number, income: number): number => (income <= 0 ? Infinity : Math.ceil(price / income));
+    return {
+      level,
+      perDay,
+      perDayWithAds,
+      daysForSkin: days(SKIN_COINS, perDayWithAds),
+      daysForSet: days(SKIN_SET_COINS, perDayWithAds),
+    };
+  });
+}
+
+/** Таблица для README и разговора о ценах: те же строки, что считает `coinEconomy`. */
+export function coinEconomyMarkdown(rows = coinEconomy()): string {
+  const head = '| Уровень | Монет в день | С рекламой | Тема за монеты | Набор |\n| --- | --- | --- | --- | --- |';
+  const body = rows.map(
+    (row) =>
+      `| ${row.level} | ${row.perDay} | ${row.perDayWithAds} | ${row.daysForSkin} дн. | ${row.daysForSet} дн. |`,
+  );
+  return [head, ...body].join('\n');
 }
 
 export function campaignCoinReward(level: number): number {

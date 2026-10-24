@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AD_COINS_DAILY_LIMIT,
+  COINS_PRICE_STEP,
   DEFAULT_ECON,
+  PAID_SKINS,
+  SHARE_FEE_STARS,
+  SKIN_COINS,
+  SKIN_SET_COINS,
+  SKIN_SET_STARS,
+  SKIN_STARS,
+  UNDO_MAX_HELD,
+  coinEconomy,
+  coinEconomyMarkdown,
+  skinCoinPrice,
+  undoTopUp,
+  undoTokensFor,
   MAX_BUYER_RATE,
   bestOffer,
   buyerRateAt,
@@ -111,5 +125,49 @@ describe('прогноз магазина', () => {
     expect(report.publish.filtered).toBe(0);
     expect(report.money.cents).toBe(0);
     expect(report.verdicts.length).toBeGreaterThan(0);
+  });
+
+  it('монетные цены тем следуют курсу и не спорят с набором', () => {
+    expect(skinCoinPrice(SKIN_STARS)).toBe(SKIN_COINS);
+    expect(skinCoinPrice(SKIN_SET_STARS)).toBe(SKIN_SET_COINS);
+    expect(SKIN_COINS % COINS_PRICE_STEP).toBe(0);
+    expect(skinCoinPrice(0)).toBe(0);
+    // Набор монетами выгоднее трёх одиночных тем - как и в звёздах.
+    expect(SKIN_SET_COINS).toBeLessThan(SKIN_COINS * PAID_SKINS.length);
+    // Взнос за публикацию за монеты не отдаём: он оплачивает чужую работу.
+    expect(skinCoinPrice(SHARE_FEE_STARS)).toBeGreaterThan(0);
+  });
+
+  it('бесплатный откат капается в два и не трогает покупные', () => {
+    expect(undoTokensFor(4)).toBe(0);
+    expect(undoTokensFor(5)).toBe(1);
+    expect(undoTokensFor(11)).toBe(2);
+    expect(undoTopUp(0, 1)).toBe(1);
+    expect(undoTopUp(1, 1)).toBe(1);
+    expect(undoTopUp(UNDO_MAX_HELD, 1)).toBe(0);
+    // Перескочил пять уровней разом - всё равно не больше потолка.
+    expect(undoTopUp(0, 9)).toBe(UNDO_MAX_HELD);
+    // Купленные откаты не сгорают и не уменьшаются: доплата не отменяет покупку.
+    expect(undoTopUp(5, 1)).toBe(0);
+    expect(undoTopUp(5, 0)).toBe(0);
+  });
+
+  it('экономика монет держит тему в пределах недели-двух, а не в одном вечере', () => {
+    const farm = coinEconomy({ adViewsPerDay: 99 });
+    const quiet = coinEconomy({ adViewsPerDay: 0 });
+    for (const row of farm) {
+      // Даже тот, кто выжимает рекламный потолок, получает тему не раньше,
+      // чем за четыре дня игры: иначе монеты обнуляют продажу за звёзды.
+      expect(row.daysForSkin).toBeGreaterThanOrEqual(4);
+    }
+    for (const row of quiet) {
+      expect(row.daysForSkin).toBeGreaterThanOrEqual(4);
+      expect(row.daysForSkin).toBeLessThanOrEqual(40);
+    }
+    // Реклама ограничена суточным потолком - без него «4 дня» превращаются в минуты.
+    expect(AD_COINS_DAILY_LIMIT).toBe(5);
+    const md = coinEconomyMarkdown();
+    expect(md).toContain('| Уровень |');
+    expect(md).not.toMatch(/NaN|Infinity/);
   });
 });

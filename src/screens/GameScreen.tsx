@@ -1235,6 +1235,12 @@ function WinModal({
           <span>Следующий уровень</span>
           <b>{result.nextLevel}</b>
         </div>
+        {result.undoGranted ? (
+          <div className="reward-item">
+            <span>Бесплатный откат</span>
+            <b>+{result.undoGranted}</b>
+          </div>
+        ) : null}
       </div>
 
       {result.endlessUnlockedNow && (

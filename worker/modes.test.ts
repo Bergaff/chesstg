@@ -168,16 +168,16 @@ describe('прогресс режимов в JSON-колонке', () => {
     expect(qaAccount(env, row)).toBe(true);
     // Без льготы владение - ровно то, что лежит в CSV.
     expect(ownedSkins(row)).toEqual(['classic']);
-    expect(selectedSkin(row, 1, false)).toBe('classic');
+    expect(selectedSkin(row, false)).toBe('classic');
     // Список даёт и купленное, и наградное: «Пепел» за звёзды не продаётся,
     // и без льготы проверяющий не увидел бы её на доске вовсе.
     const free = ownedSkins(row, true);
     expect(free).toEqual(expect.arrayContaining(['classic', 'gold', 'neon', 'royal', 'ash']));
     expect(free).not.toContain('custom');
-    // Надеть тему льготе можно, и витрина сезона при этом ни при чём.
-    expect(skinAvailable(row, 'neon', 1, false)).toBe(false);
-    expect(skinAvailable(row, 'neon', 1, true)).toBe(true);
-    expect(selectedSkin(row, 1, true)).toBe('neon');
+    // Надеть тему льготе можно, и покупка при этом ни при чём: в базе строк нет.
+    expect(skinAvailable(row, 'neon', false)).toBe(false);
+    expect(skinAvailable(row, 'neon', true)).toBe(true);
+    expect(selectedSkin(row, true)).toBe('neon');
     const profile = toProfile(row, 1, true);
     expect(profile.qa).toBe(true);
     expect(profile.skins).toContain('ash');

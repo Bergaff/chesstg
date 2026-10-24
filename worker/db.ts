@@ -11,7 +11,6 @@ import {
   msUntilNextLife,
   PAID_SKINS,
   PLAYABLE_MODES,
-  showcaseSkin,
   RACE_KING_ROW,
   RACE_KING_ROWS,
   RACE_ROWS,
@@ -88,21 +87,26 @@ export function customSkinOf(user: UserRow): CustomSkin | null {
  * и тема-«custom» без самой темы. Возврат денег и перенос аккаунта пишут в
  * `skin` что попало, и игра обязана реагировать доской, а не падением.
  */
-export function selectedSkin(user: UserRow, now = Date.now(), qa = false): SkinId {
+export function selectedSkin(user: UserRow, qa = false): SkinId {
   const wanted = user.skin;
   if (wanted === 'custom') return customSkinOf(user) ? 'custom' : 'classic';
   if (!isSkinId(wanted)) return 'classic';
-  return skinAvailable(user, wanted, now, qa) ? wanted : 'classic';
+  return skinAvailable(user, wanted, qa) ? wanted : 'classic';
 }
 
-/** Открыта ли тема: куплена, бесплатна, с витрины сезона или по льготному списку. */
-export function skinAvailable(user: UserRow, id: SkinId, now = Date.now(), qa = false): boolean {
+/**
+ * Открыта ли тема: куплена (звёздами или монетами), бесплатна, собрана самим
+ * игроком или выдана льготным списком. Сезонных витрин нет - «бесплатно до
+ * конца квартала» означало бы, что одна тема в магазине лежит на полке, а три
+ * нет, и цена набора спорит с собственной щедростью.
+ */
+export function skinAvailable(user: UserRow, id: SkinId, qa = false): boolean {
   if (id === 'classic' || id === 'graphite') return true;
   if (id === 'custom') return customSkinOf(user) !== null;
   if (qa) return true;
+  // Награду не открывает ни покупка, ни щедрость списка: её нужно заработать.
   if (SKINS[id].reward) return ownedSkins(user).includes(id);
-  if (ownedSkins(user).includes(id)) return true;
-  return showcaseSkin(now) === id;
+  return ownedSkins(user).includes(id);
 }
 
 export function toProfile(user: UserRow, now = Date.now(), qa = false) {
@@ -133,9 +137,8 @@ export function toProfile(user: UserRow, now = Date.now(), qa = false) {
     endlessUnlocked: user.max_level > 10,
     adFree: Boolean(user.ad_free),
     skins: ownedSkins(user, qa),
-    skin: selectedSkin(user, now, qa),
+    skin: selectedSkin(user, qa),
     customSkin: customSkinOf(user),
-    showcaseSkin: showcaseSkin(now),
     ashRecordMoves: ASH_RECORD_MOVES,
     inventory: {
       hint: user.inv_hint,

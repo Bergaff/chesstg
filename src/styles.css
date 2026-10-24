@@ -301,6 +301,22 @@ a {
 
 .masthead {
   padding: 26px 0 22px;
+  // Фигура темы стоит справа от текста: на широком экране описание жалось в
+  // 330 пикселей, а половина шапки пустовала. Теперь строка использует ширину
+  // колонки целиком, и заодно видно, что надето.
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.masthead-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.masthead-figure {
+  flex: 0 0 auto;
+  margin-bottom: 4px;
 }
 
 .masthead-kicker {
@@ -326,7 +342,6 @@ a {
 
 .masthead-sub {
   margin-top: 12px;
-  max-width: 330px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
@@ -909,6 +924,15 @@ a {
   font-size: 10.5px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+/* Две цены одной темы стоят столбиком: звёзды и монеты - разные решения, и в
+   одну строку они превращаются в «20 / 1200», что никто не разберёт. */
+.skin-buy-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
 }
 
 .skin-side {
@@ -1863,6 +1887,34 @@ a {
    снимается - иначе знак тонет в рамке. */
 .player-mark-shape {
   border-color: transparent;
+}
+
+/* Фигура темы вне поля: шапка меню, превью. Плашку включаем только там, где
+   она не спорит с фоном экрана. */
+.skin-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  line-height: 1;
+  color: var(--skin-piece, var(--accent));
+}
+
+.skin-mark-plate {
+  border: 1px solid var(--skin-edge, var(--accent));
+  background: var(--skin-plate, transparent);
+}
+
+.skin-mark-glyph {
+  font-size: 1em;
+}
+
+.skin-mark-shape-svg {
+  width: 92%;
+  height: 92%;
+  display: block;
+  fill: var(--skin-piece, var(--accent));
+  stroke: none;
 }
 
 .player-shape {

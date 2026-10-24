@@ -32,13 +32,6 @@ export const SKIN_SET_STARS = 50;
 /** «Пепел» не продаётся: его выигрывают, пережив сто ходов в «Гонках». */
 export const ASH_RECORD_MOVES = 100;
 
-/**
- * Витрина сезона: одна из платных тем открыта всем на текущий квартал.
- * Скинутая в магазин тема без витрины продаётся один раз тому, кто её уже
- * хотел; витрина же возвращает игрока в магазин после смены сезона.
- */
-export const SHOWCASE_ROTATION: PaidSkinId[] = ['gold', 'neon', 'royal'];
-
 export interface SkinTokens {
   /** Фигура игрока. */
   piece: string;
@@ -222,46 +215,20 @@ export function skinTokens(skin: SkinTokens): Record<TokenKey, string> {
 }
 
 /**
- * Тема открыта, если она куплена, бесплатна, является текущей самодельной или
- * стоит на витрине этого сезона.
+ * Тема открыта, если за неё заплатили, она бесплатна или собрана самим
+ * игроком. Бесплатных витрин и сезонных раздач больше нет: тема либо ваша,
+ * либо её можно купить - за звёзды или за монеты (см. `SKIN_COINS`).
  */
 export function skinUnlocked(
   id: SkinId,
   owned: readonly SkinId[],
-  now: number = Date.now(),
   hasCustom = false,
 ): boolean {
   if (id === 'custom') return hasCustom;
-  // Награда не покупается и не выдаётся витриной: её нужно заработать, и
-  // «бесплатная по цене» для неё не аргумент.
+  // Награду не покупают ни за что: её нужно заработать.
   if (SKINS[id].reward) return owned.includes(id);
   if (SKINS[id].stars <= 0) return true;
-  if (owned.includes(id)) return true;
-  return showcaseSkin(now) === id;
-}
-
-/** Тема текущего квартала: ротация по номеру квартала, а не по случайному зерну. */
-export function showcaseSkin(now: number = Date.now()): PaidSkinId {
-  const date = new Date(now);
-  const quarter = Math.floor(date.getUTCMonth() / 3) + (date.getUTCFullYear() % 8) * 4;
-  return SHOWCASE_ROTATION[quarter % SHOWCASE_ROTATION.length];
-}
-
-/** Как подписать витрину, чтобы игрок понял, что срок ограничен. */
-/**
- * Сколько тема остаётся открытой для всех. Отдельная строка потому, что магазин
- * вставляет её в середину предложения, а не показывает как заголовок.
- */
-export function showcaseRemaining(now: number = Date.now()): string {
-  const ends = showcaseEndsAt(now);
-  const days = Math.max(1, Math.ceil((ends - now) / 86_400_000));
-  return `в витрине до конца сезона, ещё ${days} дн.`;
-}
-
-export function showcaseEndsAt(now: number = Date.now()): number {
-  const date = new Date(now);
-  const lastMonth = 3 * (Math.floor(date.getUTCMonth() / 3) + 1) - 1;
-  return Date.UTC(date.getUTCFullYear(), lastMonth + 1, 0, 23, 59, 59);
+  return owned.includes(id);
 }
 
 /**

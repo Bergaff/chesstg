@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { AD_COINS_REWARD, LIFE_REGEN_MS, type GameMode } from '../engine';
+import { AD_COINS_REWARD, LIFE_REGEN_MS, resolveSkin, type GameMode } from '../engine';
 import { useApp } from '../context/AppContext';
 import { api, ApiError, clearSessionToken, isLinked } from '../lib/api';
 import { getTg } from '../lib/telegram';
@@ -9,6 +9,7 @@ import { useCountdown, useNow } from '../lib/hooks';
 import type { AdRewardResponse } from '../lib/types';
 import { HeartsRow, Hud, ProfileChip } from '../components/Hud';
 import { ChallengeBanner } from '../components/ChallengeBanner';
+import { SkinMark } from '../components/SkinMark';
 
 interface MenuScreenProps {
   onPlay: (mode: GameMode) => void;
@@ -27,6 +28,9 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
   const now = useNow(1000, adLoading || cooldownUntil > 0);
   const cooldownLeft = Math.max(0, cooldownUntil - now);
 
+  // Тема надета на аккаунт, поэтому она в шапке: цвета экрана тема красит, а
+  // без фигуры игрока в меню было не видно, надел ты свою «Кляксу» или нет.
+  const skin = resolveSkin(profile.skin, profile.customSkin ?? null);
   const campaignRun = active.campaign;
   const modes = profile.modes;
 
@@ -130,15 +134,20 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       )}
 
       <section className="masthead">
-        <span className="label masthead-kicker">Шахматные головоломки в Telegram</span>
-        <h1 className="masthead-title serif">
-          <span>Край</span> <em>доски</em>
-        </h1>
-        <p className="masthead-sub">
-          Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю,
-          «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои,
-          жизни - общие.
-        </p>
+        <div className="masthead-text">
+          <span className="label masthead-kicker">Шахматные головоломки в Telegram</span>
+          <h1 className="masthead-title serif">
+            <span>Край</span> <em>доски</em>
+          </h1>
+          <p className="masthead-sub">
+            Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю,
+            «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои,
+            жизни - общие.
+          </p>
+        </div>
+        <span className="masthead-figure">
+          <SkinMark skin={skin} size={40} plate />
+        </span>
       </section>
 
       <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>

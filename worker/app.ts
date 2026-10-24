@@ -42,9 +42,14 @@ import {
   RuleError,
   rulesFor,
   type RunAction,
+  type SkinId,
   PRODUCTS,
-  showcaseEndsAt,
-  showcaseSkin,
+  AD_COINS_DAILY_LIMIT,
+  PAID_SKINS,
+  SKIN_SET_COINS,
+  skinCoinPrice,
+  undoTopUp,
+  undoTokensFor,
   SKINS,
   snapshotOf,
 } from '../src/engine';
@@ -865,6 +870,16 @@ app.post('/api/run/:id/finish', async (c) => {
     }
   }
 
+  // Бесплатный откат за каждые пять пройденных уровней кампании. Право считаем
+  // от достигнутого уровня, а не от факта победы: перескочил пять уровней разом
+  // - получил один, и держит не больше двух. Покупные откаты потолок не трогает
+  // (за них заплачено), но и бесплатные поверх них не капают.
+  const undoDue =
+    outcome === 'won' && mode === 'campaign'
+      ? undoTokensFor(Math.max(0, maxLevelAfter - 1)) - undoTokensFor(Math.max(0, user.max_level - 1))
+      : 0;
+  const undoGrant = undoTopUp(Number(user.inv_undo ?? 0), undoDue);
+
   const wasUnlocked = modeUnlocked('endless', user.max_level);
   const endlessUnlockedNow = !wasUnlocked && modeUnlocked('endless', maxLevelAfter);
   const finishId = crypto.randomUUID();
@@ -895,6 +910,7 @@ app.post('/api/run/:id/finish', async (c) => {
           : null,
     endlessUnlockedNow,
     ...(ashAward ? { skinAward: SKINS.ash.name } : {}),
+    ...(undoGrant > 0 ? { undoGranted: undoGrant } : {}),
   };
 
   const runUpdate = c.env.DB.prepare(
@@ -941,6 +957,10 @@ app.post('/api/run/:id/finish', async (c) => {
   }
   if (ashAward) {
     set.push(`skins = CASE WHEN skins LIKE '%ash%' THEN skins ELSE skins || ',ash' END`);
+  }
+  if (undoGrant > 0) {
+    set.push('inv_undo = inv_undo + ?');
+    binds.push(undoGrant);
   }
   binds.push(user.id, run.id, finishId);
 
@@ -1101,9 +1121,9 @@ app.post('/api/profile/skin', async (c) => {
   const skin = body.skin;
   if (!isSkinId(skin)) fail(400, 'bad_skin', 'Неизвестный скин');
   // Владелец темы решает сам, а «не открыто» отвечает только за то, за что
-  // заплатили: бесплатные темы, своя тема и тема с витрины сезона открываются
-  // без счёта - проверка одна на все три случая, `skinAvailable`.
-  if (!skinAvailable(authCtx.user, skin, nowMs(), qaAccount(c.env, authCtx.user))) {
+  // заплатили: бесплатные темы и своя тема открываются без счёта - проверка
+  // одна на все случаи, `skinAvailable`.
+  if (!skinAvailable(authCtx.user, skin, qaAccount(c.env, authCtx.user))) {
     fail(403, 'skin_locked', 'Тема не открыта');
   }
 
@@ -1145,20 +1165,65 @@ app.post('/api/shop/open', (c) => {
   return c.json({ ok: true });
 });
 
-/** Что витрина показывает в этом сезоне: подпись в магазине рисуется по этим числам. */
-app.get('/api/skins/showcase', (c) => {
+/**
+ * Тема за монеты. Звёзды остаются валютой того, что стоит живых денег (жизни,
+ * отключение рекламы, взнос за проверку), а витрину тем можно закрыть и игрой:
+ * цена выведена из звёздной курсом `COINS_PER_STAR` и округлена до 50. Счёта нет,
+ * webhook нет, возврата нет - списание и выдача идут одной транзакцией, а строки
+ * в `payments` не появляются, чтобы звёздная выручка не врала.
+ *
+ * Тема награды («Пепел») сюда не продаётся: у неё нет цены, и купить её значит
+ * обнулить рекорд в 100 ходов, ради которого её и держат.
+ */
+app.post('/api/skins/buy-coins', async (c) => {
+  const authCtx = auth(c);
+  const body = await readJson(c);
+  const target = body.target;
+  const qa = qaAccount(c.env, authCtx.user);
+
+  let ids: SkinId[];
+  let price: number;
+  if (target === 'set') {
+    ids = [...PAID_SKINS];
+    price = SKIN_SET_COINS;
+  } else if (isSkinId(target) && !SKINS[target].reward && SKINS[target].stars > 0) {
+    ids = [target];
+    price = skinCoinPrice(SKINS[target].stars);
+  } else {
+    fail(400, 'bad_skin', 'За монеты продаются только платные темы поля');
+  }
+
+  const owned = ownedSkins(authCtx.user);
+  const freshIds = ids.filter((id) => !owned.includes(id));
+  if (freshIds.length === 0) {
+    fail(409, 'already_owned', target === 'set' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
+  }
+  // Льгота не отменяет цену, она отменяет необходимость платить: список и так
+  // держит темы открытыми, и покупать их за монеты незачем.
+  if (qa) fail(409, 'already_owned', 'Темы поля открыты вашему аккаунту');
+
   const now = nowMs();
-  const id = showcaseSkin(now);
-  return c.json({
-    skin: id,
-    name: SKINS[id].name,
-    stars: SKINS[id].stars,
-    endsAt: showcaseEndsAt(now),
-    shareFee: PRODUCTS.share.stars,
-    singleFee: SKIN_STARS,
-    setFee: SKIN_SET_STARS,
-    ashRecordMoves: ASH_RECORD_MOVES,
+  const all = [...new Set<SkinId>(['classic', ...owned, ...freshIds])].join(',');
+  const wear = freshIds.includes('gold') ? 'gold' : freshIds[0]!;
+  const updated = await c.env.DB.prepare(
+    `UPDATE users SET coins = coins - ?, skins = ?, skin = ?, updated_at = ?
+     WHERE id = ? AND coins >= ?`,
+  )
+    .bind(price, all, wear, now, authCtx.user.id, price)
+    .run();
+
+  if (Number(updated.meta?.changes ?? 0) === 0) {
+    fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price}`, { price });
+  }
+
+  const after = await getUserById(c.env, authCtx.user.id);
+  if (!after) fail(500, 'user_missing');
+  logEventInBackground(c.env, c.executionCtx, authCtx.user.id, 'coins_spent', price, {
+    kind: target === 'set' ? 'skins' : `skin:${String(target)}`,
+    source: 'shop',
   });
+
+  return c.json({ ok: true, spent: price, profile: toProfile(after, nowMs(), qaAccount(c.env, after)) });
 });
 
 /**
@@ -1332,6 +1397,20 @@ app.post('/api/ads/reward', async (c) => {
       ),
     ]);
   } else if (kind === 'coins') {
+    // Суточный потолок только у монет: минуты между роликами - не защита,
+    // 1 440 показов в день обнуляют любую цену в монетах. Жизни и щит в свой
+    // потолок упираются сами (MAX_LIVES и «щит уже взят в этом забеге»).
+    const dayStart = Math.floor(now / 86_400_000) * 86_400_000;
+    const taken = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM ad_events WHERE user_id = ? AND kind = 'coins' AND created_at >= ?`,
+    )
+      .bind(authCtx.user.id, dayStart)
+      .first<{ n: number }>();
+    if (Number(taken?.n ?? 0) >= AD_COINS_DAILY_LIMIT) {
+      fail(429, 'daily_limit', `На сегодня все ${AD_COINS_DAILY_LIMIT} наград за рекламу забраны`, {
+        retryInMs: dayStart + 86_400_000 - now,
+      });
+    }
     await c.env.DB.batch([
       c.env.DB.prepare('UPDATE users SET coins = coins + ?, updated_at = ? WHERE id = ?').bind(AD_COINS_REWARD, now, user.id),
       c.env.DB.prepare('INSERT INTO ad_events (user_id, kind, created_at) VALUES (?, ?, ?)').bind(

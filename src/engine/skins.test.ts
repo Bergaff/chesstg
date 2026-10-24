@@ -16,8 +16,6 @@ import {
   decodeSkinCode,
   encodeSkinCode,
   resolveSkin,
-  showcaseEndsAt,
-  showcaseSkin,
   skinAppVars,
   skinIsLight,
   skinTokens,
@@ -58,18 +56,23 @@ describe('темы поля', () => {
     expect(PRODUCTS.share.kind).toBe('fee');
   });
 
-  it('витрина сезона отдаёт платную тему бесплатно и только на квартал', () => {
-    const moment = Date.UTC(2026, 1, 1);
-    const shown = showcaseSkin(moment);
-    expect(PAID_SKINS).toContain(shown);
-    expect(skinUnlocked(shown, [], moment)).toBe(true);
-    const other = PAID_SKINS.find((id) => id !== shown);
-    if (other) expect(skinUnlocked(other, [], moment)).toBe(false);
-    expect(skinUnlocked(other ?? 'classic', [other ?? 'classic'], moment)).toBe(true);
-    expect(showcaseEndsAt(moment)).toBeGreaterThan(moment);
-    // Награда не продаётся, не зависит от витрины и не выдаётся просто так.
-    expect(skinUnlocked('ash', [], moment)).toBe(false);
-    expect(skinUnlocked('ash', ['ash'], moment)).toBe(true);
+  /**
+   * Сезонной бесплатной витрины больше нет: тема либо куплена (звёздами или
+   * монетами), либо заработана. Проверка держит это как инвариант - стоит
+   * вернуть «бесплатно на квартал», и тест красный.
+   */
+  it('бесплатных витрин нет: тема либо куплена, либо заработана', () => {
+    for (const id of PAID_SKINS) {
+      expect(skinUnlocked(id, []), id).toBe(false);
+      expect(skinUnlocked(id, [id]), id).toBe(true);
+    }
+    expect(skinUnlocked('classic', [])).toBe(true);
+    expect(skinUnlocked('graphite', [])).toBe(true);
+    expect(skinUnlocked('custom', [], false)).toBe(false);
+    expect(skinUnlocked('custom', [], true)).toBe(true);
+    // Награда не продаётся: ни цены, ни пути «открыть покупкой» у неё нет.
+    expect(skinUnlocked('ash', [])).toBe(false);
+    expect(skinUnlocked('ash', ['ash'])).toBe(true);
     expect(SKINS.ash.reward).toBe(true);
     expect(SKINS.ash.stars).toBe(0);
     expect(ASH_RECORD_MOVES).toBe(100);

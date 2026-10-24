@@ -7,12 +7,13 @@ import {
   PRODUCTS,
   SKINS,
   SKIN_ORDER,
+  SKIN_SET_COINS,
   SKIN_SET_STARS,
+  SKIN_COINS,
   SKIN_STARS,
   productSkuForSkin,
   resolveSkin,
-  showcaseRemaining,
-  showcaseSkin,
+  skinCoinPrice,
   skinUnlocked,
   type BonusId,
   type CustomSkin,
@@ -42,6 +43,9 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
   const [buyingBonus, setBuyingBonus] = useState<BonusId | null>(null);
   const [selectingSkin, setSelectingSkin] = useState<SkinId | null>(null);
   const [paying, setPaying] = useState<ProductSku | null>(null);
+  // Монетная покупка идёт своим флагом: `paying` держит SKU звёздного товара, а
+  // набора за монеты в нём нет и быть не должно - счёт на звёзды не создаётся.
+  const [coinBuying, setCoinBuying] = useState<PaidSkinId | 'set' | null>(null);
   const [purchaseDone, setPurchaseDone] = useState<ProductSku | null>(null);
   const [setModal, setSetModal] = useState(false);
   const [studio, setStudio] = useState(false);
@@ -49,7 +53,6 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
   const [installing, setInstalling] = useState<number | null>(null);
 
   const ownedSet = PAID_SKINS.every((skin) => profile.skins.includes(skin));
-  const shown = showcaseSkin();
   const wearing = resolveSkin(profile.skin, profile.customSkin);
 
   // Открытие витрины пишется в журнал: без этой метрики доля покупателей в
@@ -93,7 +96,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
       setStudio(true);
       return;
     }
-    if (!skinUnlocked(skin, profile.skins, Date.now(), Boolean(profile.customSkin))) {
+    if (!skinUnlocked(skin, profile.skins, Boolean(profile.customSkin))) {
       setSetModal(true);
       return;
     }
@@ -107,6 +110,36 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
       toast(error instanceof ApiError ? error.message : 'Не удалось выбрать скин', 'error');
     } finally {
       setSelectingSkin(null);
+    }
+  }
+
+  /**
+   * Тема за монеты. Отдельный путь, а не `buyProduct`: звёзды идут через счёт и
+   * webhook, монеты списываются на месте - и возвратом тут не пахнет, возвращать
+   * нечего. Тема награды (`ash`) сюда не доходит: её нельзя купить ни за что.
+   */
+  async function buySkinWithCoins(target: PaidSkinId | 'set'): Promise<void> {
+    if (paying || coinBuying) return;
+    const price = target === 'set' ? SKIN_SET_COINS : skinCoinPrice(SKINS[target].stars);
+    if (profile.coins < price) {
+      toast(`Не хватает ${formatNumber(price - profile.coins)} монет: их дают за уровни и рекорды`, 'info');
+      return;
+    }
+    setCoinBuying(target);
+    try {
+      const response = await api<{ profile: Profile }>('/api/skins/buy-coins', {
+        method: 'POST',
+        body: { target },
+      });
+      setProfile(response.profile);
+      await refresh();
+      hapticNotify('success');
+      toast(target === 'set' ? 'Все темы ваши' : 'Тема куплена за монеты', 'success');
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : 'Покупка за монеты не прошла', 'error');
+      await refresh().catch(() => undefined);
+    } finally {
+      setCoinBuying(null);
     }
   }
 
@@ -293,23 +326,33 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
             <SkinPreview skin={wearing} cell={34} />
             <div className="feature-main">
               <span className="label label-accent">{ownedSet ? 'Коллекция открыта' : 'Темы поля'}</span>
-              <h2>{SKINS[shown].name} - этот сезон бесплатно</h2>
+              <h2>{wearing.name} - надета сейчас</h2>
               <p>
-                {SKINS[shown].description}.{' '}
+                {wearing.custom ? 'Ваши цвета: собраны в студии и не показываются никому, пока вы сами не выставите их в галерею.' : SKINS[wearing.id].description}.{' '}
                 {ownedSet
                   ? 'Все платные темы ваши - надевайте любую.'
-                  : `Набор из ${PAID_SKINS.length} тем стоит ${SKIN_SET_STARS} звёзд, каждая тема поштучно - ${SKIN_STARS}.`}
+                  : `Набор из ${PAID_SKINS.length} тем стоит ${SKIN_SET_STARS} звёзд или ${formatNumber(SKIN_SET_COINS)} монет, тема поштучно - ${SKIN_STARS} звёзд или ${formatNumber(SKIN_COINS)} монет. Монеты идут из игры: уровни, рекорды и ролики.`}
               </p>
               <div className="skin-feature-actions">
                 {ownedSet ? null : (
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => void buyProduct('skins')}
-                    disabled={paying !== null}
-                  >
-                    {paying === 'skins' ? 'Открываем' : `Набор за ${SKIN_SET_STARS} звёзд`}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => void buyProduct('skins')}
+                      disabled={paying !== null || coinBuying !== null}
+                    >
+                      {paying === 'skins' ? 'Открываем' : `Набор за ${SKIN_SET_STARS} звёзд`}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => void buySkinWithCoins('set')}
+                      disabled={paying !== null || coinBuying !== null}
+                    >
+                      {coinBuying === 'set' ? 'Считаем' : `Набор за ${formatNumber(SKIN_SET_COINS)} монет`}
+                    </button>
+                  </>
                 )}
                 <button type="button" className="btn btn-outline" onClick={() => setStudio(true)}>
                   {profile.customSkin ? 'Поправить свою тему' : 'Собрать свою тему'}
@@ -322,9 +365,8 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
           <div className="skin-list">
             {SKIN_ORDER.map((id) => {
               const skin = SKINS[id];
-              const unlocked = skinUnlocked(id, profile.skins, Date.now(), Boolean(profile.customSkin));
+              const unlocked = skinUnlocked(id, profile.skins, Boolean(profile.customSkin));
               const active = profile.skin === id;
-              const onShowcase = shown === id && !profile.skins.includes(id);
               return (
                 <div className={cn('skin-row', active && 'active')} key={id}>
                   <button
@@ -337,15 +379,14 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
                     <span className="skin-text">
                       <span className="skin-name">
                         {skin.name}
-                        {onShowcase && <span className="owned-count">витрина</span>}
                         {active && <span className="owned-count">надета</span>}
                       </span>
                       <span className="skin-desc">
                         {skin.reward
                           ? `${skin.description}. За ${ASH_RECORD_MOVES} пережитых ходов в «Гонках».`
-                          : onShowcase
-                            ? `${skin.description}. Тема ${showcaseRemaining()}`
-                            : `${skin.description}. ${unlocked ? 'Открыта навсегда.' : 'Входит в набор или покупается отдельно.'}`}
+                          : unlocked
+                            ? `${skin.description}. Открыта навсегда.`
+                            : `${skin.description}. ${skin.stars} звёзд или ${formatNumber(skinCoinPrice(skin.stars))} монет.`}
                       </span>
                     </span>
                   </button>
@@ -364,14 +405,24 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
                         {selectingSkin === id ? 'Примерка' : 'надеть'}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        className="buy-btn"
-                        onClick={() => void buyProduct(productSkuForSkin(id as PaidSkinId))}
-                        disabled={paying !== null}
-                      >
-                        {paying === `skin:${id}` ? 'Оплата' : `${skin.stars} звёзд`}
-                      </button>
+                      <span className="skin-buy-pair">
+                        <button
+                          type="button"
+                          className="buy-btn"
+                          onClick={() => void buyProduct(productSkuForSkin(id as PaidSkinId))}
+                          disabled={paying !== null}
+                        >
+                          {paying === `skin:${id}` ? 'Оплата' : `${skin.stars} звёзд`}
+                        </button>
+                        <button
+                          type="button"
+                          className="buy-btn buy-btn-quiet"
+                          onClick={() => void buySkinWithCoins(id as PaidSkinId)}
+                          disabled={paying !== null || coinBuying !== null}
+                        >
+                          {coinBuying === id ? 'Ждём' : `${formatNumber(skinCoinPrice(skin.stars))} монет`}
+                        </button>
+                      </span>
                     )}
                   </span>
                 </div>
@@ -527,7 +578,8 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
           <span className="label">Набор скинов</span>
           <h2 className="modal-title">Темы поля</h2>
           <p className="modal-text">
-            Эта тема не открыта. Набор из трёх тем - {PRODUCTS.skins.stars} звёзд, каждая тема поштучно - {PRODUCTS['skin:gold'].stars}. Свои цвета в студии стоят ноль: они для вас.
+            Эта тема не открыта. Набор из {PAID_SKINS.length} тем - {PRODUCTS.skins.stars} звёзд или {formatNumber(SKIN_SET_COINS)} монет,
+            каждая тема поштучно - {PRODUCTS['skin:gold'].stars} звёзд или {formatNumber(SKIN_COINS)} монет. Свои цвета в студии стоят ноль: они для вас.
           </p>
           <div className="modal-actions">
             <button type="button" className="btn btn-primary" onClick={() => { setSetModal(false); void buyProduct('skins'); }} disabled={paying !== null}>

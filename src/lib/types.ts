@@ -57,8 +57,6 @@ export interface Profile {
   skin: SkinId;
   /** Собранная игроком тема (или установленная из галереи): бесплатно и для себя. */
   customSkin: CustomSkin | null;
-  /** Тема текущего сезона на витрине: она открыта всем до конца квартала. */
-  showcaseSkin?: SkinId;
   /** Сколько ходов в «Гонках» открывают «Пепел». */
   ashRecordMoves?: number;
   inventory: Record<'hint' | 'freeze' | 'undo', number>;
@@ -155,6 +153,8 @@ export interface FinishResult {
   endlessUnlockedNow: boolean;
   /** Название темы, открытой этой партией («Пепел» за 100 ходов в «Гонках»). */
   skinAward?: string;
+  /** То же число, что и в ответе `/api/run/:id/finish` для экрана наград. */
+  undoGranted?: number;
   alreadyFinished?: boolean;
 }
 

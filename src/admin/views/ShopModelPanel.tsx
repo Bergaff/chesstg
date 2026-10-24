@@ -1,8 +1,14 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import {
+  AD_COINS_DAILY_LIMIT,
+  AD_COINS_REWARD,
+  coinEconomy,
   DEFAULT_ECON,
   ECON_ASSUMED_KEYS,
+  PAID_SKINS,
   PRODUCTS,
+  SKIN_COINS,
+  SKIN_SET_COINS,
   calibrateEcon,
   econMarkdown,
   projectShop,
@@ -113,6 +119,9 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
   // кнопкой - заодно видно, какой период подставлен.
 
   const publish = report.publish;
+  // Монетная полка считается движком (та же функция, что печатает таблицу в
+  // README): панель не имеет права держать свою арифметику цен.
+  const coinRows = coinEconomy();
   const single = PRODUCTS['skin:gold'].stars;
   const set = PRODUCTS.skins.stars;
   const fee = PRODUCTS.share.stars;
@@ -247,6 +256,39 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
             </tr>
           ))}
         </Table>
+      </Panel>
+
+      <Panel
+        title="Монетная полка тем"
+        note={`Тема стоит ${SKIN_COINS} монет, набор - ${SKIN_SET_COINS}: обе цены выведены из звёзд курсом 60, поэтому «поштучно/набор» здесь тот же смысл. Реклама даёт ${AD_COINS_REWARD} монет и не больше ${AD_COINS_DAILY_LIMIT} показов в сутки - без потолка эта таблица превращается в «тема за вечер»`}
+      >
+        <Metric
+          label="Тема за монеты"
+          value={`${SKIN_COINS} м`}
+          hint={`${PAID_SKINS.length} темы · набор ${SKIN_SET_COINS} м`}
+          tone="accent"
+        />
+        <Metric
+          label="Быстрее всех копит"
+          value={`${coinRows[coinRows.length - 1].daysForSkin} дн.`}
+          hint={`на L${coinRows[coinRows.length - 1].level}, два ролика в день`}
+        />
+        <Table head={['Уровень', 'Монет в день', 'С рекламой', 'Тема', 'Набор']} empty="">
+          {coinRows.map((row) => (
+            <tr key={row.level}>
+              <td className="adm-num">L{row.level}</td>
+              <td className="adm-num">{row.perDay}</td>
+              <td className="adm-num">{row.perDayWithAds}</td>
+              <td className="adm-num">{row.daysForSkin} дн.</td>
+              <td className="adm-num">{row.daysForSet} дн.</td>
+            </tr>
+          ))}
+        </Table>
+        <p className="adm-hint">
+          Монеты - второй путь к тем же темам, и он не должен быть короче звёздного: счёт на
+          20 звёзд закрывается за ~10 побед, а 1 200 монет - за те же ~10 дней. Если строка
+          «Тема» падает ниже четырёх дней, цену или потолок рекламы надо пересматривать.
+        </p>
       </Panel>
 
       <Panel title="Публикация своей темы" note="Взнос работает фильтром: он режет поток «накидал за минуту» и оплачивает проверку">

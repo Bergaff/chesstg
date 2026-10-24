@@ -144,7 +144,14 @@ beforeEach(() => {
   Object.assign(profile, structuredClone(baseProfile));
   initial = createCampaignLevel(1, SEED);
   jamInitial = null;
-  finishOutcome = { ...finishOutcome, outcome: 'won', capturedBy: null, lives: 5, coinsEarned: 10 };
+  finishOutcome = {
+    ...finishOutcome,
+    outcome: 'won',
+    capturedBy: null,
+    lives: 5,
+    coinsEarned: 10,
+    undoGranted: undefined,
+  };
   (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, 'scrollTo', { value: vi.fn(), writable: true });
   class FakeResizeObserver {
@@ -240,6 +247,19 @@ beforeEach(() => {
             },
           ],
         });
+      }
+      if (url === '/api/skins/buy-coins') {
+        const target = (body as { target?: string })?.target ?? 'gold';
+        const price = target === 'set' ? 3000 : 1200;
+        if (profile.coins < price) {
+          return jsonResponse({ ok: false, error: 'not_enough_coins', message: `Не хватает монет: нужно ${price}` }, 402);
+        }
+        const owned = target === 'set' ? ['classic', 'gold', 'neon', 'royal'] : ['classic', target];
+        // Моку нужно менять сам профиль, а не только ответ: `buySkinWithCoins`
+        // после покупки делает refresh(), и без этого витрина вернулась бы к
+        // некупленному состоянию на том же шаге.
+        Object.assign(profile, { coins: profile.coins - price, skins: owned, skin: target === 'set' ? 'gold' : target });
+        return jsonResponse({ ok: true, spent: price, profile: { ...profile } });
       }
       if (url === '/api/skins/install') {
         return jsonResponse({ ok: true, profile: { ...profile, skin: 'custom', customSkin: gallerySkin } });
@@ -360,21 +380,50 @@ describe('UI smoke', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  it('покупает тему за монеты одним запросом, без счёта на звёзды', async () => {
+    const before = { coins: profile.coins, skins: [...profile.skins], skin: profile.skin };
+    profile.coins = 2000;
+    await boot();
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
+    // Кнопка внутри пары цен: сама строка темы - тоже кнопка («надеть»), и по
+    // имени её не отличить, поэтому идём по разметке, а не по доступному имени.
+    await screen.findByText(/надета сейчас/);
+    const firstPair = document.querySelector('.skin-buy-pair')!;
+    const coinButton = firstPair.querySelectorAll('button')[1] as HTMLButtonElement;
+    expect(coinButton.textContent).toContain('монет');
+    fireEvent.click(coinButton);
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/skins/buy-coins')).toBe(true));
+    expect((calls.find((call) => call.url === '/api/skins/buy-coins')!.body as { target?: string }).target).toBe('gold');
+    // Звёздный счёт не создаётся: монеты списывает сама игра.
+    expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
+    // Купленное надевается сразу: у этой темы цены больше нет, а у двух прочих
+    // остаются обе - покупка одной темы не обязана перекрашивать весь список.
+    await waitFor(() => expect(document.querySelectorAll('.skin-buy-pair')).toHaveLength(2));
+    expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('на вас')).toBeTruthy();
+    Object.assign(profile, before);
+  });
+
   it('ходит по экранам магазина и рекордов', async () => {
     await boot();
     fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
     expect(await screen.findByText('Бонусы на партию')).toBeTruthy();
     expect(screen.getByText('Подсказка')).toBeTruthy();
-    // Вкладка тем: витрина сезона, цена каждой темы поштучно и путь в студию.
+    // Вкладка тем: в шапке надетая тема, у каждой платной - обе цены и путь в
+    // студию. Сезонной витрины больше нет: «бесплатно до конца квартала» было
+    // второй ценой на тот же товар, и спорить с набором ей нечем.
     fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
-    const feature = await screen.findByText(/этот сезон бесплатно/);
-    expect(feature.textContent).toContain('бесплатно');
-    // Платные темы продаются по одной: у каждой своя кнопка с ценой. Тема с
-    // витрины в этом квартале открыта всем, поэтому кнопок три минус одна.
-    expect(screen.getAllByText('20 звёзд')).toHaveLength(2);
-    expect(screen.getByText('витрина')).toBeTruthy();
+    const feature = await screen.findByText(/надета сейчас/);
+    expect(feature.textContent).toContain('Латунь');
+    expect(screen.queryByText(/этот сезон бесплатно/)).toBeNull();
+    expect(screen.queryByText('витрина')).toBeNull();
+    expect(screen.getAllByText('20 звёзд')).toHaveLength(3);
+    const pairs = document.querySelectorAll('.skin-buy-pair');
+    expect(pairs).toHaveLength(3);
+    expect(pairs[0]?.textContent).toMatch(/монет/);
     expect(screen.getByText(/Набор из 3 тем стоит 50 звёзд/)).toBeTruthy();
-    expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/За 100 пережитых ходов в «Гонках»/)).toBeTruthy();
     expect(screen.getByText('награда')).toBeTruthy();
     // Своя тема: ряд есть, темы нет - кнопка ведёт в студию, а не в покупку.
@@ -733,6 +782,9 @@ describe('UI smoke', () => {
   });
 
   it('показывает экран победы с наградой', async () => {
+    // Сервер доложил о бесплатном откате за пять пройденных уровней - он и на
+    // экране наград обязан появиться, иначе игрок не узнает, что у него есть.
+    finishOutcome = { ...finishOutcome, undoGranted: 1 };
     initial = {
       ...initial,
       width: 3,
@@ -754,6 +806,8 @@ describe('UI smoke', () => {
     expect(screen.getAllByText('Следующий уровень').length).toBeGreaterThan(0);
     expect(screen.getAllByText('+10').length).toBeGreaterThan(0);
     expect(screen.getByText('Бросить вызов')).toBeTruthy();
+    expect(screen.getByText('Бесплатный откат')).toBeTruthy();
+    expect(screen.getByText('+1')).toBeTruthy();
   });
 
   it('показывает поражение и предложение рекламы', async () => {
@@ -823,6 +877,7 @@ describe('UI smoke', () => {
     expect(screen.getByText('10')).toBeTruthy();
     expect(calls.some((call) => call.url === '/api/shop/bonus')).toBe(true);
   });
+
 
 
 

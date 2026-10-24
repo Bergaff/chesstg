@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeState, applyActions, type GameAction, type GameState } from './index';
+import { analyzeState, applyActions, SKIN_COINS, type GameAction, type GameState } from './index';
 
 const API = process.env.API_URL ?? 'http://127.0.0.1:8787';
 
@@ -117,6 +117,35 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(finish2.status).toBe(200);
     expect(finish2.data.profile.level).toBe(3);
     expect(finish2.data.profile.coins).toBe(32);
+  });
+
+  /**
+   * Откат за пять уровней выдаёт сервер, и выдача живёт в том же `UPDATE`, что
+   * уровень и монеты: ошибись мы в скобке, падал бы каждый финиш, а не только
+   * бонус. Право считаем по достигнутому уровню, поэтому он приходит на победе
+   * над пятым уровнем (следующий - шестой) и больше раза на пять уровней.
+   */
+  it('каждая пятая победа в кампании доливает откат, склад держит два', async () => {
+    const api = makeClient();
+    let held = 0;
+    for (let level = 1; level <= 6; level++) {
+      const start = await api('/api/run/start', { method: 'POST', body: JSON.stringify({ mode: 'campaign' }) });
+      expect(start.status).toBe(200);
+      const run = start.data.run;
+      expect(run.level).toBe(level);
+      const win = analyzeState(run.initial as GameState, { maxDepth: 6, maxNodes: 8000 });
+      expect(win.solvable).toBe(true);
+      const finish = await api(`/api/run/${run.id}/finish`, {
+        method: 'POST',
+        body: JSON.stringify({ actions: win.path }),
+      });
+      expect(finish.status).toBe(200);
+      expect(finish.data.result.outcome).toBe('won');
+      const granted = Number(finish.data.result.undoGranted ?? 0);
+      expect(granted).toBe(level === 5 ? 1 : 0);
+      held += granted;
+      expect(Number(finish.data.profile.inventory.undo)).toBe(held);
+    }
   });
 
   it('бонус без гранта отклоняется, а с грантом работает', async () => {
@@ -238,7 +267,8 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(freePublish.data.error).toBe('payment_required');
     expect(freePublish.data.message).toContain('магаз');
 
-    // Тема, за которую не платили, не надевается - кроме витрины сезона и наград.
+    // Тема, за которую не платили, не надевается: кроме наград её открывает
+    // только покупка - звёздами или монетами.
     const locked = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'royal' }) });
     expect([200, 403]).toContain(locked.status);
     if (locked.status === 403) expect(locked.data.error).toBe('skin_locked');
@@ -247,14 +277,28 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(unknown.status).toBe(400);
   });
 
-  it('витрина магазина отвечает цифрами, которыми платит клиент', async () => {
+  /**
+   * Сезонной витрины больше нет, поэтому у гостя ровно два пути к теме: счёт на
+   * звёзды и монеты, заработанные в игре. Второй путь проверяем здесь - он не
+   * проходит через Telegram Payments, и цена обязана держаться на сервере.
+   */
+  it('тема за монеты: без денег не продаётся, награда не продаётся вовсе', async () => {
     const api = makeClient();
-    const res = await api('/api/skins/showcase');
-    expect(res.status).toBe(200);
-    expect(['gold', 'neon', 'royal']).toContain(res.data.skin);
-    expect(res.data.shareFee).toBeGreaterThan(0);
-    expect(res.data.setFee).toBeGreaterThan(res.data.singleFee);
-    expect(res.data.endsAt).toBeGreaterThan(Date.now());
+    const tooPoor = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: 'gold' }) });
+    // Гость стартует с 30 монетами: списания не было, и строки в журнале тоже.
+    expect(tooPoor.status).toBe(402);
+    expect(tooPoor.data.error).toBe('not_enough_coins');
+    expect(tooPoor.data.price).toBe(SKIN_COINS);
+    const after = await api('/api/session', { method: 'POST', body: '{}' });
+    expect(after.status).toBe(200);
+    expect(after.data.profile.coins).toBeLessThan(SKIN_COINS);
+
+    const reward = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: 'ash' }) });
+    expect(reward.status).toBe(400);
+    expect(reward.data.error).toBe('bad_skin');
+    const junk = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: '<script>' }) });
+    expect(junk.status).toBe(400);
+
     const opened = await api('/api/shop/open', { method: 'POST', body: '{}' });
     expect(opened.status).toBe(200);
   });
