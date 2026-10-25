@@ -16,6 +16,7 @@ import {
   contrastRatio,
   parseHex,
   decodeSkinCode,
+  extractSkinCode,
   encodeSkinCode,
   resolveSkin,
   skinAppVars,

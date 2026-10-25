@@ -73,8 +73,19 @@ export interface SkinDef extends SkinTokens {
   reward?: boolean;
 }
 
-/** Глифы, из которых можно собрать свою тему: всё остальное на 36 пикселях сливается. */
-export const GLYPH_CHOICES = ['♟', '♙', '⛟', '♜', '♞', '⚘', '✜', '❖', '◈', '●'] as const;
+/**
+ * Глифы, из которых можно собрать свою тему: всё остальное на 36 пикселях сливается.
+ * шахматных фигур в списке нет намеренно: ладья и конь на поле читаются как чужие
+ * боецы, а не как знак игрока, - свои темы рисуют знаком, а не фигурой, и для этого
+ * хватает абстракции.
+ */
+export const GLYPH_CHOICES = ['♟', '♙', '⛟', '⚘', '✜', '❖', '◈', '●', '✦', '✚', '▲'] as const;
+/**
+ * Знаки, которые были в галерее раньше. Их не предлагаем, но принимает разбор
+ * чужого кода: тема, расшаренная месяц назад, обязана встать как есть, а не
+ * молча поменять знак на пешку.
+ */
+export const GLYPH_LEGACY = ['♜', '♞'] as const;
 
 export const SKINS: Record<SkinId, SkinDef> = {
   classic: {
@@ -527,7 +538,11 @@ export function checkSkin(raw: unknown): SkinCheck {
   const skin: CustomSkin = {
     name,
     tokens,
-    glyph: GLYPH_CHOICES.includes(glyph as (typeof GLYPH_CHOICES)[number]) ? glyph : SKINS.classic.glyph,
+    glyph:
+      GLYPH_CHOICES.includes(glyph as (typeof GLYPH_CHOICES)[number]) ||
+      GLYPH_LEGACY.includes(glyph as (typeof GLYPH_LEGACY)[number])
+        ? glyph
+        : SKINS.classic.glyph,
     ...(path ? { path } : {}),
     sharedBy: typeof input.sharedBy === 'string' ? cleanName(input.sharedBy) : null,
   };
@@ -566,8 +581,22 @@ export function encodeSkinCode(skin: CustomSkin): string {
   return CODE_PREFIX + toBase64(JSON.stringify(payload));
 }
 
+/**
+ * Вынуть код из произвольного текста. Нужен потому, что код копируют из чужого
+ * сообщения: там он стоит в рамке ```, рядом подпись «Код темы ... - вставь в
+ * студии», а Telegram ещё и дописывает переносы. Требовать, чтобы вставка начиналась
+ * с префикса, означало бы «не читается» на ровном месте, поэтому ищем префикс и
+ * берём идущую за ним base64-строку.
+ */
+export function extractSkinCode(text: string): string {
+  const start = text.indexOf(CODE_PREFIX);
+  if (start < 0) return '';
+  const body = text.slice(start + CODE_PREFIX.length).match(/^[A-Za-z0-9+/=_-]+/)?.[0] ?? '';
+  return CODE_PREFIX + body;
+}
+
 export function decodeSkinCode(code: string): CustomSkin | null {
-  const text = code.trim();
+  const text = extractSkinCode(code.trim());
   if (!text.startsWith(CODE_PREFIX)) return null;
   let parsed: unknown;
   try {

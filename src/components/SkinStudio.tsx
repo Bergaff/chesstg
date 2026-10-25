@@ -250,7 +250,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
    */
   async function shareCode() {
     const status = await shareContent(
-      trf('Код темы «{0}» для «Край доски» - вставь в студии:\n{1}', [name, encoded]),
+      trf('Код темы «{0}» для «Край доски» - вставь в студии:\n```\n{1}\n```', [name, encoded]),
       appBaseUrl(config.webappUrl),
     );
     if (status === 'copied') toast(tr('Код скопирован - вставь в чат сам'), 'success');

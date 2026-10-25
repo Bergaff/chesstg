@@ -1422,6 +1422,19 @@ a {
   border-bottom-color: var(--accent);
 }
 
+.records-share {
+  // Кнопка живёт в строке фильтра: правый край занят, и кнопка подтянута к нему,
+  // а «ваше место» стоит сразу за ней - так видно, чем именно ты делишься.
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.filter-row .my-rank {
+  margin-left: 12px;
+}
+
 .my-rank {
   margin-left: auto;
   font-size: 10px;

@@ -94,9 +94,6 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
           <span className="label">{tr('Таблица лидеров')}</span>
           <h1 className="page-title">{tr('Рекорды')}</h1>
         </div>
-        <button type="button" className="btn btn-quiet" style={{ minHeight: 30, padding: '0 4px', fontSize: 11 }} onClick={() => void shareRecord()}>
-          {tr('Поделиться')}
-        </button>
       </header>
 
       <div className="metric-row">
@@ -133,6 +130,14 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
         </button>
         <button type="button" className={cn('filter', scope === 'friends' && 'active')} onClick={() => setScope('friends')}>
           {tr('Друзья')}
+        </button>
+        {/*
+            Поделиться стоит в строке фильтра, между «Друзьями» и «вашим местом»:
+            в шапке кнопка спорила с заголовком, а результат таблицы смотрят вот
+            здесь - делиться тем, что видно рядом.
+          */}
+        <button type="button" className="btn btn-outline records-share" onClick={() => void shareRecord()}>
+          {tr('Поделиться')}
         </button>
         {myRank > 0 && <span className="my-rank">{tr('ваше место:')} {myRank}</span>}
       </div>

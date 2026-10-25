@@ -495,7 +495,7 @@ export const EN: Record<string, string> = {
   'Код темы «{0}» для «Край доски»: {1}': 'Theme code "{0}" for Board Edge:\n{1}',
   'Код скопирован': 'Code copied',
   'Скопируйте код из поля вручную': 'Copy the code from the field by hand',
-  'Код темы «{0}» для «Край доски» - вставь в студии: {1}': 'Theme code "{0}" for Board Edge - paste it in the studio:\n{1}',
+  'Код темы «{0}» для «Край доски» - вставь в студии: ``` {1} ```': 'Theme “{0}” for Board Edge - paste it in the studio:\n```\n{1}\n```',
   'Код скопирован - вставь в чат сам': 'Code copied - paste it into the chat yourself',
   'Не удалось открыть чат': 'Could not open the chat',
   'Тема в очереди на проверку': 'The theme is queued for review',
