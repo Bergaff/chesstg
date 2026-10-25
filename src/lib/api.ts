@@ -118,10 +118,30 @@ export function authHeaders(): Record<string, string> {
   return { 'X-Guest-Id': guestId() };
 }
 
+/**
+ * Потолок ожидания ответа. Без него висит не только запрос, но и кнопка:
+ * магазин ставит «надеть» в занятое состояние и ждёт ответа, а коннект после
+ * перезапуска воркера (деплой, `wrangler dev` после пересборки) не отвечает
+ * никогда. Выглядит это ровно как «тема не меняется, подвисает».
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(ms)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 interface ApiOptions {
   method?: 'GET' | 'POST';
   body?: unknown;
   signal?: AbortSignal;
+  /** Переопределяет потолок ожидания; нужен долгим операциям вроде ожидания счёта. */
+  timeoutMs?: number;
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
@@ -133,10 +153,18 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   }
 
   let response: Response;
+  const signal = options.signal ?? timeoutSignal(options.timeoutMs ?? REQUEST_TIMEOUT_MS);
   try {
-    response = await fetch(path, { method: options.method ?? (body ? 'POST' : 'GET'), headers, body, signal: options.signal });
+    response = await fetch(path, { method: options.method ?? (body ? 'POST' : 'GET'), headers, body, signal });
   } catch (error) {
-    if ((error as Error)?.name === 'AbortError') throw error;
+    const name = (error as Error)?.name;
+    // Чужой `signal` - это «не жди, я передумал»: его отдаём вызывающему как есть.
+    if (name === 'AbortError' && options.signal?.aborted) throw error;
+    // Молчание сервера отрываем от настоящей сети: у него свой текст и своя
+    // попытка повтора, и оно обязано отпускать кнопку, а не вешать экран.
+    if (name === 'AbortError' || name === 'TimeoutError') {
+      throw new ApiError(0, 'timeout', tr('Сервер не отвечает'));
+    }
     throw new ApiError(0, 'network', tr('Нет связи с сервером. Проверь интернет и попробуй ещё раз.'));
   }
 
@@ -177,7 +205,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
  */
 function retryable(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
-  if (error.code === 'network') return true;
+  if (error.code === 'network' || error.code === 'timeout') return true;
   if (error.code === 'db_not_ready' || error.code === 'db_unavailable') return false;
   return error.status >= 500 && error.status < 600;
 }

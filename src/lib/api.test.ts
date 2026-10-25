@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiWithRetry, ApiError } from './api';
+import { api, apiWithRetry, ApiError } from './api';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -8,6 +8,35 @@ function jsonResponse(status: number, body: unknown): Response {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+describe('таймаут запроса', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('отпускает кнопку, когда сервер молчит', async () => {
+    // Запрос, который никогда не завершится, - ровно то, что игрок описывает как
+    // «тема подвисает»: кнопка стоит занятой, пока браузер сам не сдался.
+    const fetchMock = vi.fn(
+      (_path: string, init: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }));
+          });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api('/api/profile/skin', { method: 'POST', body: { skin: 'gold' }, timeoutMs: 25 })).rejects.toMatchObject(
+      { code: 'timeout' },
+    );
+    expect(vi.isMockFunction(fetchMock)).toBe(true);
+  });
+});
 
 describe('повторы запросов', () => {
   beforeEach(() => {
