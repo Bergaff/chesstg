@@ -100,6 +100,16 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
     ctx.strokeStyle = '#ffffff';
   }, []);
 
+  // Холст обязан показывать те же цвета, что и доска: штрих - цветом фигуры,
+  // фон - плашкой. Белой линией на клетке игрок рисовал одно, а «В контур»
+  // выдавал другое, и замкнутая дуга оставляла внутри область без цвета -
+  // она читалась как «мнимая линия», которой контур на самом деле не замыкается.
+  useEffect(() => {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    ctx.strokeStyle = /^#([0-9a-f]{3,8})$/i.test(tokens.piece) ? tokens.piece : '#ffffff';
+  }, [tokens.piece]);
+
   function pointOf(event: ReactPointerEvent<HTMLCanvasElement>): [number, number] {
     const canvas = event.currentTarget;
     const box = canvas.getBoundingClientRect();

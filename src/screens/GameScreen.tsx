@@ -887,6 +887,18 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             <span className="status-item on">{tr('фигуры заморожены')}</span>
           </>
         )}
+        {/*
+          Кнопка «В меню» живёт ровно до первого хода. Стрелка слева делает то
+          же, но на новом поле игрок решает «играть или посмотреть другое», и
+          искать для этого стрелку в шапке - лишний шаг; после первого хода
+          кнопка уходит, чтобы не толкаться с подсветкой и не давать случайный
+          тап у края поля.
+        */}
+        {state.moves === 0 && state.status === 'playing' && (
+          <button type="button" className="game-exit" onClick={requestExit}>
+            {tr('В меню')}
+          </button>
+        )}
       </div>
 
       <div className="board-area">

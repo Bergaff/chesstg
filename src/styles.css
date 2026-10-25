@@ -1282,7 +1282,10 @@ a {
   width: 132px;
   height: 132px;
   border: 1px solid var(--skin-edge, var(--line-strong));
-  background: var(--skin-cell-dark, #201e16);
+  // Клетка под плашкой: без плашки холст выглядит клеткой поля, с плашкой -
+  // ровно тем, чем фигура будет на доске.
+  background-color: var(--skin-cell-dark, #201e16);
+  background-image: linear-gradient(var(--skin-plate, transparent), var(--skin-plate, transparent));
   touch-action: none;
   cursor: crosshair;
 }
@@ -1650,6 +1653,19 @@ a {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+/* Выход в меню на старте поля: правый край строки статуса, чтобы не спорить с
+   счётчиками и не уехать под поле. */
+.game-exit {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
 }
 
 .game-status::-webkit-scrollbar {
