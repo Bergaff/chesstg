@@ -414,7 +414,7 @@ App), `Authorization: Bearer <session>` (сайт после входа) либ�
 
 ## Продвижение
 
-План запуска (каталоги, Shorts и Reels, Reddit, кросс-промо, Telegram Ads, локализации) в [`docs/promo.md`](docs/promo.md). Как устроен отбор уровней и вкладка «Лаборатория» в [`docs/levels.md`](docs/levels.md). В коде уже есть механики для него: реферальные ссылки `ref_<code>`, вызовы друзей `ch_<level>_<score>`, шаринг результата и таблица друзей.
+План запуска (каталоги, Shorts и Reels, Reddit, кросс-промо, Telegram Ads, локализации) в [`docs/promo.md`](docs/promo.md), порядок выката, подключения рекламы Adsgram и подачи в каталог Telegram - в [`docs/launch.md`](docs/launch.md). Как устроен отбор уровней и вкладка «Лаборатория» в [`docs/levels.md`](docs/levels.md). В коде уже есть механики для него: реферальные ссылки `ref_<code>`, вызовы друзей `ch_<level>_<score>`, шаринг результата и таблица друзей.
 
 ---
 
