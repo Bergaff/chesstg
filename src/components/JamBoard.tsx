@@ -119,7 +119,6 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                     target && interactive && 'cell-move',
                     exitHere && 'cell-exit',
                     fromLast && 'cell-flash',
-                    leftHere && 'cell-left',
                     hintHere && 'cell-hint',
                     hintPiece && 'cell-hint-source',
                   )}

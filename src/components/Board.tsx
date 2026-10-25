@@ -212,7 +212,6 @@ export function Board({
               const isPlayer = state.player.x === x && state.player.y === y;
               const move = moves.find((m) => m.x === x && m.y === y);
               const arrived = moved.find((m) => m.to.x === x && m.to.y === y);
-              const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
               const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
               // Клетка, куда король встанет под бой: подсветка нужна, потому что
@@ -238,7 +237,6 @@ export function Board({
                     move?.strike && 'cell-strike',
                     risk && 'cell-risk',
                     flash && 'cell-flash',
-                    leftCell && 'cell-left',
                     hintIndex >= 0 && 'cell-hint',
                     hintIndex === 1 && 'cell-hint-2',
                     captured && 'cell-captured',
