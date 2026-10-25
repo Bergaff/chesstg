@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeState, applyActions, SKIN_COINS, type GameAction, type GameState } from './index';
+import {
+  analyzeState,
+  applyActions,
+  SKIN_COINS,
+  SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_STARS,
+  type GameAction,
+  type GameState,
+} from './index';
 
 const API = process.env.API_URL ?? 'http://127.0.0.1:8787';
 
@@ -213,7 +221,7 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(typeof res.data.myRank).toBe('number');
   });
 
-  it('своя тема: для себя бесплатно, мусор не проходит', async () => {
+  it('своя тема: без мастерской не надевается, мусор не проходит', async () => {
     const api = makeClient();
     const session = await api('/api/session', { method: 'POST', body: '{}' });
     expect(session.status).toBe(200);
@@ -236,26 +244,36 @@ describe.runIf(apiReachable)('API integration', () => {
     expect(invisible.status).toBe(422);
     expect(String(invisible.data.message)).toContain('не видно');
 
+    // Тема собрана читаемая - и всё равно не сохранится: гость не платил за
+    // право носить своё. Цена живёт на сервере, а не в подписи кнопки.
     const saved = await api('/api/profile/skin-custom', {
       method: 'POST',
       body: JSON.stringify({ skin: { name: 'Проверка', glyph: '❖', tokens: readableTokens } }),
     });
-    expect(saved.status).toBe(200);
-    expect(saved.data.profile.skin).toBe('custom');
-    expect(saved.data.profile.customSkin.name).toBe('Проверка');
-    expect(saved.data.readability.ok).toBe(true);
+    expect(saved.status).toBe(402);
+    expect(saved.data.error).toBe('workshop_locked');
+    expect(saved.data.stars).toBe(SKIN_CUSTOM_STARS);
+    expect(saved.data.coins).toBe(SKIN_CUSTOM_COINS);
+    const after = await api('/api/session', { method: 'POST', body: '{}' });
+    expect(after.data.profile.skin).toBe('classic');
+    expect(after.data.profile.customSkin).toBeNull();
 
-    // Свою тему можно снять - и она снимается без счёта.
+    // Снять тему можно и без мастерской: отказ в платеже не должен запирать
+    // игрока в чужом рисунке, который он унаследовал до смены правил.
     const back = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'classic' }) });
     expect(back.status).toBe(200);
     expect(back.data.profile.skin).toBe('classic');
 
-    // Чужая тема из галереи ставится бесплатно, но только одобренная.
+    // Чужая тема из галереи ставится только с мастерской: `skin_custom` - тот же
+    // слот, и обходить им цену полки нельзя.
     const gallery = await api('/api/skins/gallery');
     expect(gallery.status).toBe(200);
     expect(Array.isArray(gallery.data.items)).toBe(true);
     const install = await api('/api/skins/install', { method: 'POST', body: JSON.stringify({ id: 999999 }) });
     expect(install.status).toBe(404);
+    const installLocked = await api('/api/skins/install', { method: 'POST', body: JSON.stringify({ id: 1 }) });
+    expect([402, 404]).toContain(installLocked.status);
+    if (installLocked.status === 402) expect(installLocked.data.error).toBe('workshop_locked');
 
     // Публикация без взноса - путь льготного списка. Обычному аккаунту сервер
     // отвечает 403 и отправляет в магазин: взнос и есть фильтр очереди.
@@ -292,6 +310,12 @@ describe.runIf(apiReachable)('API integration', () => {
     const after = await api('/api/session', { method: 'POST', body: '{}' });
     expect(after.status).toBe(200);
     expect(after.data.profile.coins).toBeLessThan(SKIN_COINS);
+
+    // Мастерская своей темы - та же монетная полка и тот же курс.
+    const workshop = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: 'custom' }) });
+    expect(workshop.status).toBe(402);
+    expect(workshop.data.error).toBe('not_enough_coins');
+    expect(workshop.data.price).toBe(SKIN_CUSTOM_COINS);
 
     const reward = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: 'ash' }) });
     expect(reward.status).toBe(400);

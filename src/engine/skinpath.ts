@@ -158,6 +158,62 @@ export function silhouettePath(mask: Uint8Array, size: number): string {
   return `M ${points.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
 }
 
+/** Один штрих пальца: список точек в координатах холста. */
+export type Stroke = [number, number][];
+
+/**
+ * Контур из штрихов - то, чем студия рисует фигуру.
+ *
+ * Силуэт по строкам (`silhouettePath`) для рисунка пальцем не годится: левый и
+ * правый край на каждой строке закрывают всё, что между ними, поэтому замкнутый
+ * круг становится залитым диском, а незамкнутый - залитым «почти кругом». Игрок
+ * рисует пешку и получает пятнашку именно отсюда. Здесь же каждый штрих
+ * остаётся тем, чем был: отдельный подпуть без `Z`, линия. Ни о какой заливке
+ * речи нет - фигура, которую видно штрихом, а не крашеной клеткой.
+ *
+ * Точки упрощаются тем же Рамером-Даугласом-Пекером: рука дрожит, а в code
+ * темы каждый знак стоит байт.
+ */
+export function strokesPath(strokes: Stroke[], size: number = GRID): string {
+  const kept = strokes.filter((stroke) => stroke.length >= 2).map((stroke) => simplify(stroke, 0.8));
+  const flat = kept.flat();
+  if (flat.length < 2) return '';
+  let minX = size;
+  let maxX = 0;
+  let minY = size;
+  let maxY = 0;
+  for (const [x, y] of flat) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+  const scale = (SILHOUETTE_BOX - 3) / Math.max(width, height);
+  const padX = (SILHOUETTE_BOX - width * scale) / 2;
+  const padY = (SILHOUETTE_BOX - height * scale) / 2;
+  const parts = kept
+    .filter((stroke) => stroke.length >= 2)
+    .map((stroke) =>
+      stroke
+        .map(([x, y]): [number, number] => [
+          Number((padX + (x - minX) * scale).toFixed(1)),
+          Number((padY + (y - minY) * scale).toFixed(1)),
+        ]),
+    )
+    .map((stroke) => `M ${stroke.map(([x, y]) => `${x} ${y}`).join(' L ')}`);
+  if (parts.length === 0) return '';
+  return parts.join(' ');
+}
+
+/**
+ * Толщина штриха в тех же 32 единицах, что и сам путь. Держим в движке: доска,
+ * превью студии и плашка в шапке меню обязаны рисовать одну и ту же фигуру, а
+ * не три разные толщины.
+ */
+export const PATH_STROKE_WIDTH = 2.6;
+
 /** Готовый путь из кадра: то, чем пользуется студия. */
 export function pathFromFrame(source: Rgba, mode: 'alpha' | 'dark' = 'alpha'): { path: string; coverage: number } {
   const mask = inkMask(source, mode);

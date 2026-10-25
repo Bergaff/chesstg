@@ -87,22 +87,31 @@ export function customSkinOf(user: UserRow): CustomSkin | null {
  * и тема-«custom» без самой темы. Возврат денег и перенос аккаунта пишут в
  * `skin` что попало, и игра обязана реагировать доской, а не падением.
  */
+/**
+ * Открыта ли мастерская: право носить свою тему куплено (звёздами или монетами)
+ * либо выдано льготой из `QA_LIVES_IDS`. Студия при этом открыта всем - платят
+ * не за рисование, а за то, что надели.
+ */
+export function workshopOwned(user: UserRow, qa = false): boolean {
+  return qa || Number(user.custom_paid ?? 0) === 1;
+}
+
 export function selectedSkin(user: UserRow, qa = false): SkinId {
   const wanted = user.skin;
-  if (wanted === 'custom') return customSkinOf(user) ? 'custom' : 'classic';
+  if (wanted === 'custom') return workshopOwned(user, qa) && customSkinOf(user) ? 'custom' : 'classic';
   if (!isSkinId(wanted)) return 'classic';
   return skinAvailable(user, wanted, qa) ? wanted : 'classic';
 }
 
 /**
  * Открыта ли тема: куплена (звёздами или монетами), бесплатна, собрана самим
- * игроком или выдана льготным списком. Сезонных витрин нет - «бесплатно до
+ * игроком в оплаченной мастерской или выдана льготным списком. Сезонных витрин нет - «бесплатно до
  * конца квартала» означало бы, что одна тема в магазине лежит на полке, а три
  * нет, и цена набора спорит с собственной щедростью.
  */
 export function skinAvailable(user: UserRow, id: SkinId, qa = false): boolean {
   if (id === 'classic' || id === 'graphite') return true;
-  if (id === 'custom') return customSkinOf(user) !== null;
+  if (id === 'custom') return workshopOwned(user, qa) && customSkinOf(user) !== null;
   if (qa) return true;
   // Награду не открывает ни покупка, ни щедрость списка: её нужно заработать.
   if (SKINS[id].reward) return ownedSkins(user).includes(id);
@@ -136,6 +145,7 @@ export function toProfile(user: UserRow, now = Date.now(), qa = false) {
     endlessBestMoves: user.endless_best_moves,
     endlessUnlocked: user.max_level > 10,
     adFree: Boolean(user.ad_free),
+    customPaid: workshopOwned(user, qa),
     skins: ownedSkins(user, qa),
     skin: selectedSkin(user, qa),
     customSkin: customSkinOf(user),

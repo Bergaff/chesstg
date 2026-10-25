@@ -42,6 +42,7 @@ const profile: Profile = {
   coins: 30,
   lives: 5,
   maxLives: 5,
+  customPaid: false,
   nextLifeAt: null,
   nextLifeInMs: 0,
   serverNow: Date.now(),
@@ -227,6 +228,16 @@ beforeEach(() => {
         return jsonResponse({ ok: true, profile: { ...profile, skin: (body as { skin?: string })?.skin } });
       }
       if (url === '/api/profile/skin-custom') {
+        // Право носить свою тему сервер проверяет сам. Мок обязан отвечать тем же
+        // 402, иначе тест «сначала мастерская, потом надевание» ничего не
+        // проверяет: клиент мог бы сохранить тему и без покупки.
+        const locked = !profile.customPaid && !profile.qa && (body as { skin?: unknown })?.skin != null;
+        if (locked) {
+          return jsonResponse(
+            { ok: false, error: 'workshop_locked', message: 'Свою тему надеют за 80 звёзд или 4800 монет', stars: 80, coins: 4800 },
+            402,
+          );
+        }
         return jsonResponse({
           ok: true,
           readability: { glyph: 9, board: 9, ok: true, why: '' },
@@ -250,11 +261,16 @@ beforeEach(() => {
       }
       if (url === '/api/skins/buy-coins') {
         const target = (body as { target?: string })?.target ?? 'gold';
-        const price = target === 'set' ? 3000 : 1200;
+        const price = target === 'set' ? 3000 : target === 'custom' ? 4800 : 1200;
         if (profile.coins < price) {
           return jsonResponse({ ok: false, error: 'not_enough_coins', message: `Не хватает монет: нужно ${price}` }, 402);
         }
         const owned = target === 'set' ? ['classic', 'gold', 'neon', 'royal'] : ['classic', target];
+        if (target === 'custom') {
+          // Мастерская - право, а не тема: список `skins` она не трогает.
+          Object.assign(profile, { coins: profile.coins - price, customPaid: true });
+          return jsonResponse({ ok: true, spent: price, profile: { ...profile } });
+        }
         // Моку нужно менять сам профиль, а не только ответ: `buySkinWithCoins`
         // после покупки делает refresh(), и без этого витрина вернулась бы к
         // некупленному состоянию на том же шаге.
@@ -262,6 +278,9 @@ beforeEach(() => {
         return jsonResponse({ ok: true, spent: price, profile: { ...profile } });
       }
       if (url === '/api/skins/install') {
+        if (!profile.customPaid && !profile.qa) {
+          return jsonResponse({ ok: false, error: 'workshop_locked', message: 'Нужна мастерская: 80 звёзд или 4800 монет' }, 402);
+        }
         return jsonResponse({ ok: true, profile: { ...profile, skin: 'custom', customSkin: gallerySkin } });
       }
       return jsonResponse({ ok: true });
@@ -399,13 +418,78 @@ describe('UI smoke', () => {
     expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
     // Купленное надевается сразу: у этой темы цены больше нет, а у двух прочих
     // остаются обе - покупка одной темы не обязана перекрашивать весь список.
-    await waitFor(() => expect(document.querySelectorAll('.skin-buy-pair')).toHaveLength(2));
+    // Четвёртая пара - мастерская своей темы: она никуда не делась, потому что
+    // монеты покупают право, а не тему.
+    await waitFor(() => expect(document.querySelectorAll('.skin-buy-pair')).toHaveLength(3));
     expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('на вас')).toBeTruthy();
     Object.assign(profile, before);
   });
 
+  /**
+   * Своя тема перестала быть бесплатной: право её носить покупают, рисование
+   * остаётся даром. Тест держит три вещи - цену в двух валютах, отказ сохранять
+   * без оплаты и то, что код темы по-прежнему можно забрать целиком.
+   */
+  it('свою тему надеют только с оплаченной мастерской', async () => {
+    await boot();
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
+    expect(await screen.findByText(/носит её тот, кто заплатил: 80 звёзд/)).toBeTruthy();
+
+    const customRow = Array.from(document.querySelectorAll('.skin-row')).find((row) =>
+      row.textContent?.includes('Своя тема'),
+    )!;
+    const labels = Array.from(customRow.querySelectorAll('button')).map((button) => button.textContent);
+    expect(labels).toContain('80 звёзд');
+    expect(labels).toContain('4 800 монет');
+
+    // Студия открыта и без покупки: кнопка обещает цену, а не «надеть», и своего
+    // POST на сохранение отсюда не уходит - сервер ответил бы 402.
+    fireEvent.click(customRow.querySelector('.skin-row-main')!);
+    expect(await screen.findByText('Студия')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Открыть мастерскую: 80/ })).toBeTruthy();
+    expect(screen.getByText('Скопировать код')).toBeTruthy();
+    expect(screen.getByText('Поделиться в Telegram')).toBeTruthy();
+    // Заливки нет: холст помнит штрихи, и в контур уходит линия.
+    expect(screen.getByText(/каждый штрих станет ровной линией/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Открыть мастерскую: 80/ }));
+    expect(await screen.findByText(/Оплата звёздами ещё не подключена/)).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/profile/skin-custom')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Позже' }));
+
+    // Монетами: не хватает - и запроса нет, сервер надо беречь от пустых ударов.
+    // Кнопку ищем внутри пары цен: сама строка темы - тоже кнопка, и в её имени
+    // цена повторяется, так что по тексту её не отличить.
+    fireEvent.click(customRow.querySelector('.skin-buy-pair')!.querySelectorAll('button')[1] as HTMLButtonElement);
+    expect(await screen.findByText(/Не хватает 4 770 монет/)).toBeTruthy();
+    expect(calls.some((call) => call.url === '/api/skins/buy-coins')).toBe(false);
+
+  });
+
+  /** Те же 4 800 монет открывают мастерскую - и больше цен в строке нет. */
+  it('мастерскую своей темы можно открыть монетами, без счёта на звёзды', async () => {
+    profile.coins = 5000;
+    await boot();
+    fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
+    fireEvent.click(screen.getByRole('tab', { name: 'Темы' }));
+    const row = Array.from(document.querySelectorAll('.skin-row')).find((item) =>
+      item.textContent?.includes('Своя тема'),
+    )!;
+    fireEvent.click(row.querySelector('.skin-buy-pair')!.querySelectorAll('button')[1] as HTMLButtonElement);
+    await waitFor(() => expect(calls.some((call) => call.url === '/api/skins/buy-coins')).toBe(true));
+    expect((calls.find((call) => call.url === '/api/skins/buy-coins')!.body as { target?: string }).target).toBe('custom');
+    // Звёздного счёта нет: монеты списывает сама игра, и в `payments` строка не ляжет.
+    expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
+    // Темы ещё нет - значит строка зовёт собирать, а не править, и цен у неё нет.
+    expect(await screen.findByText('собрать')).toBeTruthy();
+    expect(screen.getByText(/Мастерская открыта: правится в любой момент/)).toBeTruthy();
+  });
+
   it('ходит по экранам магазина и рекордов', async () => {
+    // Мастерская уже открыта: этот прогон проверяет витрину и студию, а не
+    // покупку права - для него есть соседний тест ниже.
+    profile.customPaid = true;
     await boot();
     fireEvent.click(screen.getByText(/Бонусы за монеты/).closest('button')!);
     expect(await screen.findByText('Бонусы на партию')).toBeTruthy();
@@ -420,14 +504,19 @@ describe('UI smoke', () => {
     expect(screen.queryByText('витрина')).toBeNull();
     expect(screen.getAllByText('20 звёзд')).toHaveLength(3);
     const pairs = document.querySelectorAll('.skin-buy-pair');
+    // Три темы полки: у своей темы цен нет - мастерская открыта.
     expect(pairs).toHaveLength(3);
     expect(pairs[0]?.textContent).toMatch(/монет/);
     expect(screen.getByText(/Набор из 3 тем стоит 50 звёзд/)).toBeTruthy();
     expect(screen.getAllByText('надеть').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/За 100 пережитых ходов в «Гонках»/)).toBeTruthy();
     expect(screen.getByText('награда')).toBeTruthy();
-    // Своя тема: ряд есть, темы нет - кнопка ведёт в студию, а не в покупку.
+    // Своя тема при открытой мастерской: кнопка ведёт в студию, цен у строки нет.
     expect(screen.getByText('Своя тема')).toBeTruthy();
+    // Править нечего - тема ещё не собрана, поэтому строка зовёт в студию словом
+    // «собрать», а не «студия»: кнопка обещает то, чего у игрока ещё нет.
+    expect(screen.getByText('собрать')).toBeTruthy();
+    expect(screen.queryByText('студия')).toBeNull();
     // Превью есть у каждой строки списка (шесть тем, своя строка и одна из
     // галереи) плюс большой образец в шапке - без превью магазин продаёт цвета,
     // которые никто не видел на доске.
@@ -437,9 +526,12 @@ describe('UI smoke', () => {
     fireEvent.click(screen.getByRole('button', { name: /Собрать свою тему/ }));
     expect(await screen.findByText('Студия')).toBeTruthy();
     expect(screen.getByText(/Показать всем: 100/)).toBeTruthy();
-    // Своя тема сохраняётся одним POST-ом со всеми восемью цветами: сервер
-    // проверяет читаемость сам, и «надеть бесплатно» не имеет права просить счёт.
-    fireEvent.click(screen.getByRole('button', { name: 'Надеть бесплатно' }));
+    expect(screen.getByText('Скопировать код')).toBeTruthy();
+    expect(screen.getByText('Поделиться в Telegram')).toBeTruthy();
+    // Своя тема сохраняется одним POST-ом со всеми восемью цветами: сервер
+    // проверяет читаемость сам, а счёт на мастерскую уже закрыт - права на
+    // правку и на надевание повторно не продаются.
+    fireEvent.click(screen.getByRole('button', { name: 'Надеть' }));
     await waitFor(() => expect(calls.some((call) => call.url === '/api/profile/skin-custom')).toBe(true));
     const saved = calls.find((call) => call.url === '/api/profile/skin-custom')!.body as {
       skin: { name: string; tokens: Record<string, string>; glyph: string };
@@ -449,7 +541,8 @@ describe('UI smoke', () => {
     expect(calls.some((call) => call.url === '/api/shop/invoice')).toBe(false);
     expect(await screen.findByText(/автор Тест · поставили 3/)).toBeTruthy();
 
-    // Галерея: чужую тему ставят себе бесплатно, и она надевается.
+    // Галерея: чужую тему ставят себе без доплаты (мастерская уже открыта), и она
+    // надевается. Без мастерской та же кнопка упёрлась бы в 402 - мок это умеет.
     fireEvent.click(screen.getByRole('button', { name: /Медь/ }));
     await waitFor(() => expect(calls.some((call) => call.url === '/api/skins/install')).toBe(true));
     // Тема из галереи наделась: её имя видно и в строке галереи, и в строке
@@ -488,12 +581,20 @@ describe('UI smoke', () => {
     expect(screen.getAllByText('Закрыт').length).toBe(3);
     expect(screen.getByText('Парковка').closest('button')?.className).toContain('cta-block');
     expect(screen.getByText('Гонки').closest('button')?.className).toContain('cta-block');
-    expect(document.querySelector('.mode-cards')).not.toBeNull();
-    // Блок про вход - ниже режимов: сначала видно, куда идти.
+    // Четыре входа лежат в сетке 2×2, а не четырьмя полосами: полосы выталкивали
+    // «Магазин» и «Рекорды» за нижний край экрана.
+    const grid = document.querySelector('.menu-modes')!;
+    expect(grid).not.toBeNull();
+    expect(grid.querySelectorAll('.cta-block')).toHaveLength(4);
+    expect(screen.getByText('Кампания').closest('button')?.className).toContain('cta-primary');
+    // Разделы идут сразу за режимами, а блок про вход - под ними: магазин и
+    // рекорды должны попадаться на глаз без прокрутки.
+    const sections = document.querySelector('.menu-list')!;
     const account = document.querySelector('.account')!;
-    const cards = document.querySelector('.mode-cards')!;
     // eslint-disable-next-line no-bitwise
-    expect(account.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(sections.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // eslint-disable-next-line no-bitwise
+    expect(grid.compareDocumentPosition(sections) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('бесконечный режим входит той же кнопкой, что остальные режимы', async () => {

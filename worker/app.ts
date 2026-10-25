@@ -45,6 +45,8 @@ import {
   type SkinId,
   PRODUCTS,
   AD_COINS_DAILY_LIMIT,
+  SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_STARS,
   PAID_SKINS,
   SKIN_SET_COINS,
   skinCoinPrice,
@@ -92,6 +94,7 @@ import {
   resumableRun,
   serializeRun,
   toProfile,
+  workshopOwned,
 } from './db';
 import { fail, HttpError, isPrefix, parseActions, parseRunMode, parseStartOptions, readJson, nowMs } from './http';
 import { createInvoice, fulfillPayment, getPayment, isProductSku, publishSkinShare, refundPayment } from './payments';
@@ -1183,34 +1186,60 @@ app.post('/api/skins/buy-coins', async (c) => {
 
   let ids: SkinId[];
   let price: number;
-  if (target === 'set') {
+  // Мастерская - не тема: её не надевают, ею открывают право надеть свою.
+  // Отдельная ветка нужна ещё и затем, чтобы `skins` (список выплат и
+  // возвратов) не пополнился строкой, за которую никто не платил звёздами.
+  const workshop = target === 'custom';
+  if (workshop) {
+    ids = [];
+    price = SKIN_CUSTOM_COINS;
+  } else if (target === 'set') {
     ids = [...PAID_SKINS];
     price = SKIN_SET_COINS;
   } else if (isSkinId(target) && !SKINS[target].reward && SKINS[target].stars > 0) {
     ids = [target];
     price = skinCoinPrice(SKINS[target].stars);
   } else {
-    fail(400, 'bad_skin', 'За монеты продаются только платные темы поля');
+    fail(400, 'bad_skin', 'За монеты продаются только платные темы поля и мастерская');
   }
 
   const owned = ownedSkins(authCtx.user);
   const freshIds = ids.filter((id) => !owned.includes(id));
-  if (freshIds.length === 0) {
+  if (workshop) {
+    if (qaAccount(c.env, authCtx.user)) fail(409, 'already_owned', 'Мастерская открыта вашему аккаунту');
+    if (workshopOwned(authCtx.user)) fail(409, 'already_owned', 'Мастерская уже открыта');
+  } else if (freshIds.length === 0) {
     fail(409, 'already_owned', target === 'set' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
   }
   // Льгота не отменяет цену, она отменяет необходимость платить: список и так
   // держит темы открытыми, и покупать их за монеты незачем.
-  if (qa) fail(409, 'already_owned', 'Темы поля открыты вашему аккаунту');
+  if (qa && !workshop) fail(409, 'already_owned', 'Темы поля открыты вашему аккаунту');
 
   const now = nowMs();
-  const all = [...new Set<SkinId>(['classic', ...owned, ...freshIds])].join(',');
-  const wear = freshIds.includes('gold') ? 'gold' : freshIds[0]!;
-  const updated = await c.env.DB.prepare(
-    `UPDATE users SET coins = coins - ?, skins = ?, skin = ?, updated_at = ?
-     WHERE id = ? AND coins >= ?`,
-  )
-    .bind(price, all, wear, now, authCtx.user.id, price)
-    .run();
+  let updated;
+  if (workshop) {
+    // Тему, которую уже нарисовали, надеваем сразу: платить второй раз за
+    // «надеть» игрок не должен. Если рисунка нет, `skin` не трогаем -
+    // `custom_paid` открывает мастерскую, а не выдумывает тему.
+    updated = await c.env.DB.prepare(
+      `UPDATE users
+         SET coins = coins - ?, custom_paid = 1,
+             skin = CASE WHEN skin_custom <> '' THEN 'custom' ELSE skin END,
+             updated_at = ?
+       WHERE id = ? AND coins >= ?`,
+    )
+      .bind(price, now, authCtx.user.id, price)
+      .run();
+  } else {
+    const all = [...new Set<SkinId>(['classic', ...owned, ...freshIds])].join(',');
+    const wear = freshIds.includes('gold') ? 'gold' : freshIds[0]!;
+    updated = await c.env.DB.prepare(
+      `UPDATE users SET coins = coins - ?, skins = ?, skin = ?, updated_at = ?
+       WHERE id = ? AND coins >= ?`,
+    )
+      .bind(price, all, wear, now, authCtx.user.id, price)
+      .run();
+  }
 
   if (Number(updated.meta?.changes ?? 0) === 0) {
     fail(402, 'not_enough_coins', `Не хватает монет: нужно ${price}`, { price });
@@ -1219,7 +1248,7 @@ app.post('/api/skins/buy-coins', async (c) => {
   const after = await getUserById(c.env, authCtx.user.id);
   if (!after) fail(500, 'user_missing');
   logEventInBackground(c.env, c.executionCtx, authCtx.user.id, 'coins_spent', price, {
-    kind: target === 'set' ? 'skins' : `skin:${String(target)}`,
+    kind: workshop ? 'custom' : target === 'set' ? 'skins' : `skin:${String(target)}`,
     source: 'shop',
   });
 
@@ -1227,9 +1256,11 @@ app.post('/api/skins/buy-coins', async (c) => {
 });
 
 /**
- * Своя тема: бесплатно и навсегда, но только для того, кто её собрал. Приватный
- * цвет не видит никто, поэтому проверять нечего и брать не за что. Платит тот,
- * кто хочет, чтобы тему увидели чужие, - отдельный счёт на `sku = 'share'`.
+ * Своя тема: сохранить и надеть. Рисование бесплатное - счёт за него студия не
+ * выставит никогда, иначе код темы нельзя было бы отправить другу. Платит тот,
+ * кто надевает: право живёт в `custom_paid`, купленное за звёзды или за монеты.
+ * Раньше своя тема для себя стоила ноль, и это убивало продажу готовых: те же
+ * восемь цветов можно намалевать за минуту.
  */
 app.post('/api/profile/skin-custom', async (c) => {
   const authCtx = auth(c);
@@ -1248,6 +1279,15 @@ app.post('/api/profile/skin-custom', async (c) => {
   const check = checkSkin(body.skin);
   if (!check.ok) {
     fail(422, 'skin_unreadable', check.error ?? 'Тему не видно на доске', { readability: check.readability });
+  }
+
+  // Мусор отбивается до цены: «не вижу тему» - дело первое, а счёт игроку
+  // выставляют только тогда, когда надевать есть что.
+  if (!workshopOwned(authCtx.user, qaAccount(c.env, authCtx.user))) {
+    fail(402, 'workshop_locked', `Свою тему надеют за ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`, {
+      stars: SKIN_CUSTOM_STARS,
+      coins: SKIN_CUSTOM_COINS,
+    });
   }
 
   await c.env.DB.prepare(`UPDATE users SET skin_custom = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
@@ -1292,7 +1332,12 @@ function shareItem(row: ShareRow) {
   };
 }
 
-/** Галерея одобренных тем. Поставить любую можно бесплатно. */
+/**
+ * Галерея одобренных тем. Свою тему автор носит бесплатно (если мастерская
+ * оплачена), чужую ставят к себе через неё же: `skin_custom` - тот же слот, что
+ * и свой рисунок, и открывать его чужим кодом даром значило бы обойти цену
+ * всей полки.
+ */
 app.get('/api/skins/gallery', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT s.id, s.name, s.payload, s.created_at, s.installs, u.first_name AS author
@@ -1327,6 +1372,15 @@ app.post('/api/skins/install', async (c) => {
   if (!row) fail(404, 'share_not_found', 'Этой темы в галерее нет');
   const item = shareItem(row);
   if (!item) fail(422, 'skin_broken', 'Запись темы повреждена');
+  // Чужая тема попадает в тот же `skin_custom`, что и своя, - значит и право
+  // носить то же. Иначе «купи код в чате» заменяет покупку тем: переслал
+  // «Корону» другу, и он ничего не заплатил.
+  if (!workshopOwned(authCtx.user, qaAccount(c.env, authCtx.user))) {
+    fail(402, 'workshop_locked', `Чтобы поставить чужую тему, нужна мастерская: ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`, {
+      stars: SKIN_CUSTOM_STARS,
+      coins: SKIN_CUSTOM_COINS,
+    });
+  }
 
   const skin = { ...item.skin, sharedBy: item.author };
   const now = nowMs();

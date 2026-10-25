@@ -6,6 +6,8 @@ import {
   PAID_SKINS,
   SHARE_FEE_STARS,
   SKIN_COINS,
+  SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_STARS,
   SKIN_SET_COINS,
   SKIN_SET_STARS,
   SKIN_STARS,
@@ -130,6 +132,11 @@ describe('прогноз магазина', () => {
   it('монетные цены тем следуют курсу и не спорят с набором', () => {
     expect(skinCoinPrice(SKIN_STARS)).toBe(SKIN_COINS);
     expect(skinCoinPrice(SKIN_SET_STARS)).toBe(SKIN_SET_COINS);
+    // Мастерская своей темы - самая дорогая вещь в лавке монет: 80 звёзд курсом
+    // 60 = 4 800, то есть ~24 дня на рекламном потолке. Дешевле набора она
+    // опускать не может: своя тема повторяет всю полку.
+    expect(skinCoinPrice(SKIN_CUSTOM_STARS)).toBe(SKIN_CUSTOM_COINS);
+    expect(SKIN_CUSTOM_COINS).toBeGreaterThan(SKIN_SET_COINS);
     expect(SKIN_COINS % COINS_PRICE_STEP).toBe(0);
     expect(skinCoinPrice(0)).toBe(0);
     // Набор монетами выгоднее трёх одиночных тем - как и в звёздах.

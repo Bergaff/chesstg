@@ -150,27 +150,69 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         </span>
       </section>
 
-      <button type="button" className="cta-block" onClick={() => onPlay('campaign')}>
-        <span className="cta-body">
-          <span className="label">Кампания</span>
-          <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
-          <span className="cta-meta">
-            {campaignRun
-              ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}${
-                  profile.levelsCleared > 0 ? ` · пройдено ${formatNumber(profile.levelsCleared)}` : ''
-                }`
-              : profile.levelsCleared > 0
-                ? `Уровень ${profile.level}, пройдено ${formatNumber(profile.levelsCleared)}`
-                : 'Уровень 1, путь начинается'}
+      {/*
+        Четыре входа в игру одной сеткой 2×2: полосы на всю ширину выталкивали
+        «Магазин» и «Рекорды» за нижний край, и их искали скроллом.
+      */}
+      <div className="menu-modes">
+        <button type="button" className="cta-block cta-primary" onClick={() => onPlay('campaign')}>
+          <span className="cta-body">
+            <span className="label">Кампания</span>
+            <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
+            <span className="cta-meta">
+              {campaignRun
+                ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
+                : profile.levelsCleared > 0
+                  ? `Уровень ${profile.level}, пройдено ${formatNumber(profile.levelsCleared)}`
+                  : 'Уровень 1, путь начинается'}
+            </span>
           </span>
-        </span>
-        <span className="cta-arrow" aria-hidden="true">→</span>
-      </button>
+          <span className="cta-arrow" aria-hidden="true">→</span>
+        </button>
 
-      <div className="mode-cards">
         {modeCard('jam', 'Парковка', 'Пробка фигур: белых за нижний край, чёрных за верхний.')}
         {modeCard('race', 'Гонки', 'Король в полосе против фигур сверху.')}
         {modeCard('endless', 'Бесконечный режим', 'Пешка идёт всё выше, сложность растёт каждые пять ходов.')}
+      </div>
+
+      <div className="section-head">
+        <span className="label">Разделы</span>
+        <span className="label">{profile.lives < profile.maxLives ? 'жизни восстанавливаются' : 'все жизни в запасе'}</span>
+      </div>
+
+      <div className="menu-list">
+        <button type="button" className="menu-row" onClick={goShop}>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Магазин</span>
+            <span className="menu-row-desc">Бонусы за монеты, скины и покупки за звёзды</span>
+          </span>
+          <span className="menu-row-end">→</span>
+        </button>
+
+        <button type="button" className="menu-row" onClick={goRecords}>
+          <span className="menu-row-main">
+            <span className="menu-row-title">Рекорды</span>
+            <span className="menu-row-desc">Мировая таблица и друзья, пришедшие по ссылке</span>
+          </span>
+          <span className="menu-row-end">→</span>
+        </button>
+
+        {/*
+          Разбор расстановок и статистика - служебная часть, и в общем меню она
+          только путает: игроку некуда вести ссылку на чужую кухню. Показываем её
+          аккаунтам из льготного списка `QA_LIVES_IDS`, у остальных строки нет.
+          Сам /admin при этом закрыт паролем для всех.
+        */}
+        {profile.qa && (
+          <a className="menu-row" href="/admin">
+            <span className="menu-row-main">
+              <span className="menu-row-title">Лаборатория</span>
+              <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
+            </span>
+            <span className="menu-row-end">→</span>
+          </a>
+        )}
+
       </div>
 
       <div className="account">
@@ -215,46 +257,6 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         )}
       </div>
 
-
-      <div className="section-head">
-        <span className="label">Разделы</span>
-        <span className="label">{profile.lives < profile.maxLives ? 'жизни восстанавливаются' : 'все жизни в запасе'}</span>
-      </div>
-
-      <div className="menu-list">
-        <button type="button" className="menu-row" onClick={goShop}>
-          <span className="menu-row-main">
-            <span className="menu-row-title">Магазин</span>
-            <span className="menu-row-desc">Бонусы за монеты, скины и покупки за звёзды</span>
-          </span>
-          <span className="menu-row-end">→</span>
-        </button>
-
-        <button type="button" className="menu-row" onClick={goRecords}>
-          <span className="menu-row-main">
-            <span className="menu-row-title">Рекорды</span>
-            <span className="menu-row-desc">Мировая таблица и друзья, пришедшие по ссылке</span>
-          </span>
-          <span className="menu-row-end">→</span>
-        </button>
-
-        {/*
-          Разбор расстановок и статистика - служебная часть, и в общем меню она
-          только путает: игроку некуда вести ссылку на чужую кухню. Показываем её
-          аккаунтам из льготного списка `QA_LIVES_IDS`, у остальных строки нет.
-          Сам /admin при этом закрыт паролем для всех.
-        */}
-        {profile.qa && (
-          <a className="menu-row" href="/admin">
-            <span className="menu-row-main">
-              <span className="menu-row-title">Лаборатория</span>
-              <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
-            </span>
-            <span className="menu-row-end">→</span>
-          </a>
-        )}
-
-      </div>
 
       {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
 

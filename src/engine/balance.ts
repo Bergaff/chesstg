@@ -1,4 +1,12 @@
-import { PAID_SKINS, SKINS, SKIN_STARS, type PaidSkinId, type SkinId, SKIN_SET_STARS } from './skins';
+import {
+  PAID_SKINS,
+  SKINS,
+  SKIN_CUSTOM_STARS,
+  SKIN_STARS,
+  type PaidSkinId,
+  type SkinId,
+  SKIN_SET_STARS,
+} from './skins';
 
 /** Взнос за то, чтобы свою тему увидели чужие: одна плата на одну тему. */
 export const SHARE_FEE_STARS = 100;
@@ -40,7 +48,7 @@ export const BONUSES: Record<BonusId, BonusDef> = {
 
 export const BONUS_ORDER: BonusId[] = ['hint', 'freeze', 'undo'];
 
-export type ProductSku = 'lives' | 'noads' | 'skins' | 'share' | `skin:${PaidSkinId}`;
+export type ProductSku = 'lives' | 'noads' | 'skins' | 'custom' | 'share' | `skin:${PaidSkinId}`;
 
 export interface ProductDef {
   sku: ProductSku;
@@ -82,9 +90,20 @@ export const PRODUCTS: Record<ProductSku, ProductDef> = {
     badge: `${PAID_SKINS.length} темы`,
     kind: 'skin',
   },
-  // Взнос за публикацию: для себя тема бесплатна всегда, платит тот, кто хочет
-  // поставить её в общую галерею. Цена отсекает поток «накидал за минуту» и
-  // оплачивает проверку каждой заявки.
+  // Мастерская своих тем: платит не автор, а тот, кто носит. Пока своей темой
+  // можно пользоваться бесплатно, полка из трёх тем не продаётся - кто купит
+  // «Корону» за 20 звёзд, если те же восемь цветов доступны в студии даром.
+  custom: {
+    sku: 'custom',
+    title: 'Своя тема поля',
+    stars: SKIN_CUSTOM_STARS,
+    description: 'Открывает мастерскую: свои цвета и свой контур фигуры, только для себя',
+    badge: 'Навсегда',
+    kind: 'fee',
+  },
+  // Взнос за публикацию: платит тот, кто хочет поставить свою тему в общую
+  // галерею. Цена отсекает поток «накидал за минуту» и оплачивает проверку
+  // каждой заявки.
   share: {
     sku: 'share',
     title: 'Показать тему всем',
@@ -111,6 +130,7 @@ export const PRODUCT_ORDER: ProductSku[] = [
   'lives',
   'skins',
   ...PAID_SKINS.map((id): ProductSku => `skin:${id}`),
+  'custom',
   'noads',
 ];
 
@@ -159,9 +179,10 @@ export function skinCoinPrice(stars: number): number {
   return Math.max(COINS_PRICE_STEP, Math.round(raw / COINS_PRICE_STEP) * COINS_PRICE_STEP);
 }
 
-/** Тема поштучно и набор: те же 20 и 50 звёзд, пересчитанные курсом. */
+/** Тема поштучно, набор и мастерская: те же 20, 50 и 80 звёзд, пересчитанные курсом. */
 export const SKIN_COINS = skinCoinPrice(SKIN_STARS);
 export const SKIN_SET_COINS = skinCoinPrice(SKIN_SET_STARS);
+export const SKIN_CUSTOM_COINS = skinCoinPrice(SKIN_CUSTOM_STARS);
 
 /**
  * Потолок наград за рекламу в сутки - только для монет, жизни и щит им не

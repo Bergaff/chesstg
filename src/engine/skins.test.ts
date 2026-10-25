@@ -6,8 +6,10 @@ import {
   MIN_GLYPH_CONTRAST,
   PAID_SKINS,
   PRODUCTS,
+  SHARE_FEE_STARS,
   SKINS,
   SKIN_ORDER,
+  SKIN_CUSTOM_STARS,
   SKIN_SET_STARS,
   SKIN_STARS,
   checkSkin,
@@ -70,6 +72,11 @@ describe('темы поля', () => {
     expect(skinUnlocked('graphite', [])).toBe(true);
     expect(skinUnlocked('custom', [], false)).toBe(false);
     expect(skinUnlocked('custom', [], true)).toBe(true);
+    // Право носить свою тему - товар, и стоит он дороже всей полки: своя тема
+    // повторяет любую из трёх, а набор открывает их разом.
+    expect(SKINS.custom.stars).toBe(SKIN_CUSTOM_STARS);
+    expect(SKIN_CUSTOM_STARS).toBeGreaterThan(SKIN_SET_STARS);
+    expect(SKIN_CUSTOM_STARS).toBeLessThan(SHARE_FEE_STARS);
     // Награда не продаётся: ни цены, ни пути «открыть покупкой» у неё нет.
     expect(skinUnlocked('ash', [])).toBe(false);
     expect(skinUnlocked('ash', ['ash'])).toBe(true);

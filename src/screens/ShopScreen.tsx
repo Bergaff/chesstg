@@ -7,6 +7,8 @@ import {
   PRODUCTS,
   SKINS,
   SKIN_ORDER,
+  SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_STARS,
   SKIN_SET_COINS,
   SKIN_SET_STARS,
   SKIN_COINS,
@@ -45,7 +47,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
   const [paying, setPaying] = useState<ProductSku | null>(null);
   // Монетная покупка идёт своим флагом: `paying` держит SKU звёздного товара, а
   // набора за монеты в нём нет и быть не должно - счёт на звёзды не создаётся.
-  const [coinBuying, setCoinBuying] = useState<PaidSkinId | 'set' | null>(null);
+  const [coinBuying, setCoinBuying] = useState<PaidSkinId | 'set' | 'custom' | null>(null);
   const [purchaseDone, setPurchaseDone] = useState<ProductSku | null>(null);
   const [setModal, setSetModal] = useState(false);
   const [studio, setStudio] = useState(false);
@@ -92,7 +94,9 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
     if (skin === profile.skin || selectingSkin) return;
     // Своя тема надевается всегда: она либо уже в профиле, либо её ещё не
     // собрали - и тогда вместо надевания открываем студию.
-    if (skin === 'custom' && !profile.customSkin) {
+    if (skin === 'custom' && (!profile.customSkin || !profile.customPaid)) {
+      // Студия открыта всем: без рисунка и без мастерской надевать нечего,
+      // поэтому здесь просто показываем, где это собирается и сколько стоит.
       setStudio(true);
       return;
     }
@@ -118,9 +122,16 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
    * webhook, монеты списываются на месте - и возвратом тут не пахнет, возвращать
    * нечего. Тема награды (`ash`) сюда не доходит: её нельзя купить ни за что.
    */
-  async function buySkinWithCoins(target: PaidSkinId | 'set'): Promise<void> {
+  /** Цена монетами одной вещи: тема, набор или мастерская - всё из курса `COINS_PER_STAR`. */
+  function coinPriceOf(target: PaidSkinId | 'set' | 'custom'): number {
+    if (target === 'set') return SKIN_SET_COINS;
+    if (target === 'custom') return SKIN_CUSTOM_COINS;
+    return skinCoinPrice(SKINS[target].stars);
+  }
+
+  async function buySkinWithCoins(target: PaidSkinId | 'set' | 'custom'): Promise<void> {
     if (paying || coinBuying) return;
-    const price = target === 'set' ? SKIN_SET_COINS : skinCoinPrice(SKINS[target].stars);
+    const price = coinPriceOf(target);
     if (profile.coins < price) {
       toast(`Не хватает ${formatNumber(price - profile.coins)} монет: их дают за уровни и рекорды`, 'info');
       return;
@@ -134,7 +145,10 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
       setProfile(response.profile);
       await refresh();
       hapticNotify('success');
-      toast(target === 'set' ? 'Все темы ваши' : 'Тема куплена за монеты', 'success');
+      toast(
+        target === 'set' ? 'Все темы ваши' : target === 'custom' ? 'Мастерская открыта' : 'Тема куплена за монеты',
+        'success',
+      );
     } catch (error) {
       toast(error instanceof ApiError ? error.message : 'Покупка за монеты не прошла', 'error');
       await refresh().catch(() => undefined);
@@ -449,16 +463,39 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
                     {profile.customSkin?.sharedBy ? ` · от ${profile.customSkin.sharedBy}` : ''}
                   </span>
                   <span className="skin-desc">
-                    {profile.customSkin
-                      ? 'Собрана в студии. Правится в любой момент, для вас - бесплатно.'
-                      : 'Цвета доски, фон и фигура. Для себя - бесплатно, показ другим стоит звёзд.'}
+                    {profile.qa
+                      ? 'Льгота: мастерская открыта вашему аккаунту, правьте и надевайте без доплат.'
+                      : profile.customPaid
+                        ? 'Мастерская открыта: правится в любой момент и надевается без доплат.'
+                        : `Цвета доски, фон и фигура. Своя тема повторяет любую из полки, поэтому носит её тот, кто заплатил: ${SKIN_CUSTOM_STARS} звёзд или ${formatNumber(SKIN_CUSTOM_COINS)} монет. Рисовать, смотреть и передавать код - бесплатно.`}
                   </span>
                 </span>
               </button>
               <span className="skin-side">
-                <button type="button" className="buy-btn buy-btn-quiet" onClick={() => setStudio(true)}>
-                  {profile.customSkin ? 'студия' : 'собрать'}
-                </button>
+                {profile.customPaid || profile.qa ? (
+                  <button type="button" className="buy-btn buy-btn-quiet" onClick={() => setStudio(true)}>
+                    {profile.customSkin ? 'студия' : 'собрать'}
+                  </button>
+                ) : (
+                  <span className="skin-buy-pair">
+                    <button
+                      type="button"
+                      className="buy-btn"
+                      onClick={() => void buyProduct('custom')}
+                      disabled={paying !== null}
+                    >
+                      {paying === 'custom' ? 'Оплата' : `${SKIN_CUSTOM_STARS} звёзд`}
+                    </button>
+                    <button
+                      type="button"
+                      className="buy-btn buy-btn-quiet"
+                      onClick={() => void buySkinWithCoins('custom')}
+                      disabled={paying !== null || coinBuying !== null}
+                    >
+                      {coinBuying === 'custom' ? 'Ждём' : `${formatNumber(SKIN_CUSTOM_COINS)} монет`}
+                    </button>
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -466,6 +503,12 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
           {gallery.length > 0 && (
             <>
               <span className="label section-label">Галерея игроков</span>
+              {!profile.customPaid && !profile.qa && (
+                <p className="modal-note">
+                  Поставить чужую тему можно с открытой мастерской: она попадает в тот же слот, что и
+                  ваш собственный рисунок.
+                </p>
+              )}
               <div className="skin-list">
                 {gallery.map((item) => (
                   <div className="skin-row" key={item.id}>
@@ -500,10 +543,12 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
           )}
 
           <p className="ledger">
-            Своя тема для себя не стоит ничего и не требует проверки: её видите только вы. Делиться
-            дороже - {PRODUCTS.share.stars} звёзд за то, чтобы тему поставили в общую галерею, и
-            каждая заявка проходит проверку. Поделиться кодом бесплатно можно всегда: скопируйте его в
-            студии, перешлите в чат, другой игрок вставит - и тема станет его.
+            Своя тема не требует проверки: её видите только вы, и модератора для неё нет. Платят за
+            право носить - {SKIN_CUSTOM_STARS} звёзд или {formatNumber(SKIN_CUSTOM_COINS)} монет:
+            иначе полка из готовых тем не продаётся, а те же восемь цветов доступны в студии. Показать
+            тему чужим стоит ещё {PRODUCTS.share.stars} звёзд - это взнос за проверку, а не за право.
+            Код темы передаётся бесплатно: скопируйте его в студии или перешлите в чат, вставивший
+            получит тему к себе, а у автора ничего не изменится.
           </p>
 
           <div className="legal-link-row">
@@ -513,7 +558,13 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
         </div>
       )}
 
-      {studio && <SkinStudio onClose={() => setStudio(false)} onShare={shareSkin} />}
+      {studio && (
+        <SkinStudio
+          onClose={() => setStudio(false)}
+          onShare={shareSkin}
+          onUnlock={() => buyProduct('custom')}
+        />
+      )}
 
       {tab === 'stars' && (
         <div>

@@ -1,5 +1,5 @@
 import { type CSSProperties, type ReactNode } from 'react';
-import { SKINS, skinTokens, skinVars, type SkinTokens } from '../engine';
+import { PATH_STROKE_WIDTH, SKINS, skinTokens, skinVars, type SkinTokens } from '../engine';
 import { cn } from '../lib/format';
 
 /**
@@ -33,7 +33,7 @@ export function SkinPreview({
         <span className={cn('sp-player', full.path && 'sp-player-shape')}>
           {full.path ? (
             <svg viewBox="0 0 32 32" focusable="false">
-              <path d={full.path} />
+              <path d={full.path} strokeWidth={PATH_STROKE_WIDTH} />
             </svg>
           ) : (
             full.glyph

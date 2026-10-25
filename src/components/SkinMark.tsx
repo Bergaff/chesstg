@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import type { ResolvedSkin } from '../engine';
+import { PATH_STROKE_WIDTH, type ResolvedSkin } from '../engine';
 import { cn } from '../lib/format';
 
 /**
@@ -28,7 +28,7 @@ export function SkinMark({
     <span className={cn('skin-mark', path && 'skin-mark-shape', plate && 'skin-mark-plate', className)} style={style} aria-hidden="true">
       {path ? (
         <svg className="skin-mark-shape-svg" viewBox="0 0 32 32" focusable="false">
-          <path d={path} />
+          <path d={path} strokeWidth={PATH_STROKE_WIDTH} />
         </svg>
       ) : (
         <span className="skin-mark-glyph">{skin.glyph}</span>

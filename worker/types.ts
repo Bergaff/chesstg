@@ -58,6 +58,8 @@ export interface UserRow {
   skin: string;
   /** JSON самодельной темы: цвета, глиф и контур. Пустая строка - темы нет. */
   skin_custom: string;
+  /** Мастерская куплена: без этого свою тему нельзя надеть (миграция 0006). */
+  custom_paid?: number;
   inv_hint: number;
   inv_freeze: number;
   inv_undo: number;

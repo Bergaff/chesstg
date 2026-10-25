@@ -397,19 +397,59 @@ a {
 }
 
 /*
- * Карточки «Парковки» и «Гонок» - младшие братья кнопки кампании: та же
- * структура, чуть меньше заголовок, чтобы «Кампания» осталась главным входом.
+ * Четыре входа в игру - сеткой 2×2. Полосы на всю ширину съедали экран так,
+ * что «Магазин» и «Рекорды» уезжали за нижний край: их приходилось искать
+ * скроллом. Квадратная сетка оставляет те же четыре кнопки в двух строках, а
+ * кампания отличается не размером, а акцентной рамкой и плашкой.
  */
-.mode-cards {
-  display: flex;
-  flex-direction: column;
+.menu-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: 10px;
 }
 
+.menu-modes .cta-block {
+  // Почти квадрат: 1 / 0.78 - компромисс между «плитка» и читаемостью подписи.
+  position: relative;
+  aspect-ratio: 1 / 0.78;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px;
+}
+
+.menu-modes .cta-body {
+  flex: 1 1 auto;
+}
+
+.menu-modes .cta-title {
+  font-size: 21px;
+}
+
+.menu-modes .cta-meta {
+  // Подпись режимов длиннее карточки: три строки и обрыв многоточием, а не
+  // бесконечная карточка, из-за которой сетка распухает.
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.menu-modes .cta-arrow {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  font-size: 18px;
+}
+
+.menu-modes .cta-primary {
+  border-color: var(--accent);
+}
+
 .cta-mode {
-  min-height: 68px;
-  padding: 12px 16px;
+  padding: 12px;
   background: transparent;
 }
 
@@ -740,23 +780,33 @@ a {
 }
 
 .tabs {
+  // Три вкладки на всю ширину, а не три подписи по левому краю: пальцем в
+  // них должно попадать легко, а на узком экране 12-px подпись с
+  // девятимиллиметровым подложечным полем - это не кнопка.
   display: flex;
-  gap: 20px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .tab {
-  padding: 0 0 9px;
-  margin-bottom: -1px;
-  border-bottom: 1px solid transparent;
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 
 .tab.active {
-  border-bottom-color: var(--accent);
+  border-color: var(--accent-dim);
+  background: var(--accent-wash);
   color: var(--ink);
 }
 
@@ -788,7 +838,9 @@ a {
 
 .shop-intro p {
   margin-top: 8px;
-  max-width: 350px;
+  // Без планки в 350px: описание вкладки должно занимать ширину колонки, как
+  // карточки ниже. Планка появилась, когда рядом был боковой блок, и на
+  // десктопе оставляла справа пустой край - текст обрывался на середине строки.
   font-size: 12px;
   line-height: 1.55;
   color: var(--muted);
@@ -928,6 +980,25 @@ a {
 
 /* Две цены одной темы стоят столбиком: звёзды и монеты - разные решения, и в
    одну строку они превращаются в «20 / 1200», что никто не разберёт. */
+.studio-code-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.studio-code-actions .btn {
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.studio-code-size {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+
 .skin-buy-pair {
   display: flex;
   flex-direction: column;
@@ -1014,7 +1085,15 @@ a {
 .sp-player svg {
   width: 74%;
   height: 74%;
-  fill: var(--skin-piece, var(--accent));
+  // Своя тема рисуется штрихом: игрок ведёт линию пальцем, и она обязана
+  // остаться линией. Заливка (`fill`) превращала любой замкнутый контур в
+  // диск, а незамкнутый - в «почти диск»: пешка выходила пятнашкой. Толщину
+  // штриха задаёт движок (`PATH_STROKE_WIDTH`) атрибутом пути - та же цифра на
+  // доске, в превью и в шапке меню.
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Чужая фигура всегда в стандартных цветах: по ней и проверяют, что тема не
@@ -1913,16 +1992,22 @@ a {
   width: 92%;
   height: 92%;
   display: block;
-  fill: var(--skin-piece, var(--accent));
-  stroke: none;
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .player-shape {
   width: 74%;
   height: 74%;
   display: block;
-  fill: var(--skin-piece, var(--accent));
-  stroke: none;
+  // Тот же штрих, что в превью и в шапке меню: путь из студии - линия, а не
+  // залитая область, и на клетке в 36 пикселей заливка съедала фигуру целиком.
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .player-glyph {

@@ -3,12 +3,14 @@ import {
   GRID,
   MAX_COVERAGE,
   MIN_COVERAGE,
+  PATH_STROKE_WIDTH,
   SILHOUETTE_BOX,
   inkMask,
   isSafePath,
   maskCoverage,
   pathFromFrame,
   silhouettePath,
+  strokesPath,
   simplify,
 } from './index';
 
@@ -98,5 +100,55 @@ describe('силуэт из рисунка', () => {
     expect(isSafePath('L 1 1')).toBe(false);
     expect(isSafePath('')).toBe(false);
     expect(isSafePath(`M ${'1 '.repeat(7000)}`)).toBe(false);
+  });
+
+  /**
+   * Штрихи - то, ради чего студия не отдаёт рисунок на растеризацию. Замкнёшь
+   * круг (или оставь в нём щель) - и внутри должно быть пусто: ни `Z`, ни
+   * второго контура, ни «заливки всей клетки».
+   */
+  it('штрихи остаются линиями: без замыкания и без заливки', () => {
+    const circle: [number, number][] = [];
+    for (let a = 0; a <= Math.PI * 1.9; a += 0.05) {
+      circle.push([32 + Math.cos(a) * 22, 32 + Math.sin(a) * 22]);
+    }
+    const path = strokesPath([circle], GRID);
+    expect(path.startsWith('M ')).toBe(true);
+    expect(path).not.toContain('Z');
+    expect((path.match(/M/g) ?? []).length).toBe(1);
+    const coords = path.match(/-?\d+(\.\d+)?/g)?.map(Number) ?? [];
+    expect(coords.length % 2).toBe(0);
+    expect(Math.max(...coords)).toBeLessThanOrEqual(SILHOUETTE_BOX);
+    expect(Math.min(...coords)).toBeGreaterThanOrEqual(0);
+    // Дрожащая рука даёт сотни точек, в коде темы каждый знак на счету.
+    expect(coords.length / 2).toBeLessThan(circle.length);
+    expect(isSafePath(path)).toBe(true);
+  });
+
+  it('каждый штрих - отдельный подпуть, а не контур вокруг всего рисунка', () => {
+    const cross = strokesPath(
+      [
+        [
+          [8, 8],
+          [56, 56],
+        ],
+        [
+          [8, 56],
+          [56, 8],
+        ],
+      ],
+      GRID,
+    );
+    expect((cross.match(/M/g) ?? []).length).toBe(2);
+    expect(cross).not.toContain('Z');
+    // Тычок в одну точку - не фигура: студия скажет «нарисуй крупнее», а не
+    // сохранит невидимку.
+    expect(strokesPath([[[4, 4]]], GRID)).toBe('');
+    expect(strokesPath([], GRID)).toBe('');
+  });
+
+  it('толщина штриха задана один раз и она не нулевая', () => {
+    expect(PATH_STROKE_WIDTH).toBeGreaterThan(1);
+    expect(PATH_STROKE_WIDTH).toBeLessThan(5);
   });
 });

@@ -12,42 +12,54 @@ import {
   GRID,
   PRODUCTS,
   SKINS,
+  SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_STARS,
   TOKEN_KEYS,
   TOKEN_LABELS,
   checkSkin,
   decodeSkinCode,
   encodeSkinCode,
+  inkMask,
+  maskCoverage,
   pathFromFrame,
   skinReadability,
   skinTokens,
   skinVars,
+  strokesPath,
   type CustomSkin,
   type TokenKey,
 } from '../engine';
 import { useApp } from '../context/AppContext';
 import { api, ApiError } from '../lib/api';
-import { cn } from '../lib/format';
-import { hapticNotify } from '../lib/telegram';
+import { appBaseUrl, cn, formatNumber } from '../lib/format';
+import { hapticNotify, shareContent } from '../lib/telegram';
 import { Modal } from './Modal';
 import { SkinPreview } from './SkinPreview';
 
 /**
- * Студия темы: цвета доски, глиф или свой контур - и всё это бесплатно.
+ * Студия темы: цвета доски, глиф или свой контур.
  *
- * Правило, из которого студия растёт: своё для себя ничего не стоит, платит
- * только тот, кто хочет, чтобы тему надели чужие. Поэтому здесь две разные
- * кнопки: «Надеть» (никогда не просит звёзды) и «Показать всем» (счёт на взнос
- * и очередь проверки). Плюс код темы - им можно поделиться в чате бесплатно,
- * потому что чужая доска от этого не меняется и проверять нечего.
+ * Рисовать бесплатно и всегда - иначе нельзя: код темы пересылают в чат, и за
+ * превью спроса не бывает. Платит тот, кто надевает: право носить свою тему
+ * стоит `SKIN_CUSTOM_STARS` звёзд (или `SKIN_CUSTOM_COINS` монет) и покупается
+ * один раз на аккаунт. До этой цены своя тема была даром, и из-за этого полка
+ * готовых тем пустовала: восемь цветов и контур всякий раз можно навести руками
+ * за минуту. Второе правило - заливки нет: холст помнит штрихи, и в контур
+ * уходит линия, а не залитая область (иначе круг с щелью становился диском).
+ *
+ * «Показать всем» - отдельный счёт на взнос: он оплачивает чужую работу,
+ * проверку заявки, и к праву носить своё отношения не имеет.
  */
 interface SkinStudioProps {
   onClose: () => void;
   /** Счёт на публикацию выставляет магазин: у него уже есть цикл оплаты. */
   onShare: (skin: CustomSkin) => Promise<boolean>;
+  /** Открыть мастерскую: тот же цикл оплаты, что у звёздных товаров. */
+  onUnlock: () => Promise<boolean>;
 }
 
-export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
-  const { profile, setProfile, toast } = useApp();
+export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): ReactNode {
+  const { profile, config, setProfile, toast } = useApp();
   const base = profile.customSkin ?? null;
   const [name, setName] = useState(base?.name ?? 'Своя тема');
   const [tokens, setTokens] = useState<Record<TokenKey, string>>(
@@ -56,11 +68,16 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
   const [glyph, setGlyph] = useState(base?.glyph ?? SKINS.classic.glyph);
   const [path, setPath] = useState<string | undefined>(base?.path);
   const [code, setCode] = useState('');
-  const [busy, setBusy] = useState<'save' | 'share' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'share' | 'unlock' | null>(null);
   const [notice, setNotice] = useState('');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawing = useRef(false);
+  // Штрихи держим списком точек, а не только пикселями холста: из пикселей
+  // обратно линию не собрать, остаётся силуэт, а силуэт заливает всё, что
+  // ограничено контуром. Это и есть тот «круг стал диском», из-за которого
+  // нарисованная пешка превращалась в пятнашку.
+  const strokes = useRef<[number, number][][]>([]);
 
   const skin = useMemo(() => ({ ...tokens, glyph, path }), [tokens, glyph, path]);
   const read = useMemo(() => skinReadability(skin), [skin]);
@@ -76,6 +93,8 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    // Толщина на холсте и толщина штриха в контуре - один масштаб (64 к 32),
+    // иначе игрок видит одно, а на доске появляется другое.
     ctx.lineWidth = 5;
     ctx.strokeStyle = '#ffffff';
   }, []);
@@ -97,6 +116,7 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     const [x, y] = pointOf(event);
     ctx.beginPath();
     ctx.moveTo(x, y);
+    strokes.current = [...strokes.current, [[x, y]]];
   }
 
   function onMove(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -106,6 +126,8 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     const [x, y] = pointOf(event);
     ctx.lineTo(x, y);
     ctx.stroke();
+    const last = strokes.current[strokes.current.length - 1];
+    if (last) strokes.current[strokes.current.length - 1] = [...last, [x, y]];
   }
 
   function onUp(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -118,29 +140,42 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    strokes.current = [];
     setPath(undefined);
     setNotice('');
   }
 
+  /**
+   * «В контур»: штрихи холста становятся путём SVG. Пиксели нужны только как
+   * мера - по ним судим, рисовал игрок фигуру или ткнул пальцем.
+   */
   function trace() {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d', { willReadFrequently: true });
     if (!canvas || !ctx) return;
     const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const result = pathFromFrame({ data: frame.data, size: canvas.width }, 'alpha');
-    if (!result.path) {
-      setNotice(
-        result.coverage < 0.02
-          ? 'Слишком мало линий: нарисуй фигуру крупнее, на всю клетку.'
-          : result.coverage > 0.92
-            ? 'Залитый квадрат фигурой не читается: оставь между линиями пустое.'
-            : 'Контур не получился: попробуй замкнутый силуэт.',
-      );
+    const coverage = maskCoverage(inkMask({ data: frame.data, size: canvas.width }, 'alpha'));
+    if (coverage < 0.02) {
+      setNotice('Слишком мало линий: нарисуй фигуру крупнее, на всю клетку.');
       return;
     }
-    setPath(result.path);
-    setNotice(`Контур готов: залято ${Math.round(result.coverage * 100)}% клетки.`);
+    if (coverage > 0.92) {
+      setNotice('Залитый квадрат фигурой не читается: оставь между линиями пустое.');
+      return;
+    }
+    // Штрихов может и не быть - например, если код темы вставили, а рисование
+    // начали поверх: тогда остаётся старый добрый силуэт.
+    const path = strokes.current.length > 0 ? strokesPath(strokes.current, canvas.width) : pathFromFrame({ data: frame.data, size: canvas.width }, 'alpha').path;
+    if (!path) {
+      setNotice('Контур не получился: проведи несколько длинных линий.');
+      return;
+    }
+    setPath(path);
+    setNotice(`Контур готов: линии занимают ${Math.round(coverage * 100)}% клетки, ${path.length} знаков.`);
   }
+
+  // Льгота `QA_LIVES_IDS` открывает мастерскую без счёта - как с темами полки.
+  const unlocked = profile.qa || profile.customPaid;
 
   async function save() {
     if (busy) return;
@@ -148,6 +183,15 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
     if (!check.ok) {
       toast(check.error ?? 'Тему не видно на доске', 'error');
       return;
+    }
+    if (!unlocked) {
+      // Сначала право, потом сохранение: сервер бы и так ответил 402, но счёт
+      // на звёзды выставит магазин - у него уже есть цикл оплаты и ожидания.
+      setBusy('unlock');
+      const granted = await onUnlock().catch(() => false);
+      setBusy(null);
+      if (!granted) return;
+      toast('Мастерская открыта, надеваем тему', 'success');
     }
     setBusy('save');
     try {
@@ -157,13 +201,56 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
       });
       setProfile(response.profile);
       hapticNotify('success');
-      toast('Своя тема надета - бесплатно и навсегда', 'success');
+      toast(unlocked ? 'Своя тема надета' : 'Своя тема надета - мастерская открыта навсегда', 'success');
       onClose();
     } catch (error) {
       toast(error instanceof ApiError ? error.message : 'Сохранить не удалось', 'error');
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * Код темы: его вставляют в поле «Вставить код», поэтому копируем целиком, без
+   * «поделиться». Clipboard API в WebApp есть не всегда - тогда выделяем код в
+   * служебном поле и просим браузер скопировать его; если и это молча
+   * не работает, подсказываем, как скопировать руками.
+   */
+  async function copyCode() {
+    const text = `Код темы «${name}» для «Край доски»:\n${encoded}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Код скопирован', 'success');
+      return;
+    } catch {
+      /* старый WebView без clipboard - пробуем через выделение */
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch {
+      copied = false;
+    }
+    area.remove();
+    toast(copied ? 'Код скопирован' : 'Скопируйте код из поля вручную', copied ? 'success' : 'info');
+  }
+
+  /**
+   * Поделиться в Telegram: открывается готовое сообщение, где код уже вшит в
+   * текст, а ссылкой идёт игра. Никаких «скопируйте вручную» - у принявшего
+   * тема встанет в поле «Вставить код» целиком.
+   */
+  async function shareCode() {
+    const status = await shareContent(`Код темы «${name}» для «Край доски» - вставь в студии:\n${encoded}`, appBaseUrl(config.webappUrl));
+    if (status === 'copied') toast('Код скопирован - вставь в чат сам', 'success');
+    if (status === 'failed') toast('Не удалось открыть чат', 'error');
   }
 
   async function share() {
@@ -202,8 +289,10 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
       <span className="label">Студия</span>
       <h2 className="modal-title">Своя тема поля</h2>
       <p className="modal-text">
-        Для себя - бесплатно и навсегда. Показать тему чужим стоит {PRODUCTS.share.stars} звёзд: взнос
-        оплачивает проверку заявки и отсекает поток «накидал за минуту».
+        Рисовать, красить превью и передавать код - бесплатно и без границ. Платит тот, кто надевает:
+        {unlocked ? 'ваша мастерская уже открыта, правки ничего не стоят' : `мастерская ${SKIN_CUSTOM_STARS} звёзд или ${formatNumber(SKIN_CUSTOM_COINS)} монет, один раз на аккаунт`} -
+        а показать тему чужим стоит {PRODUCTS.share.stars} звёзд: взнос оплачивает проверку заявки и
+        отсекает поток «накидал за минуту».
       </p>
 
       <div className="studio-head">
@@ -279,8 +368,9 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
         />
         <div className="studio-draw-side">
           <p className="modal-note">
-            Нарисуй фигуру пальцем и нажми «В контур»: рисунок становится ровным краем, а не
-            картинкой - мыло на клетке в 36 пикселей не читается вовсе.
+            Нарисуй фигуру пальцем и нажми «В контур»: каждый штрих станет ровной линией, а не
+            заливкой - замкнёшь круг, и внутри останется пусто. Мыло на клетке в 36 пикселей не
+            читается вовсе, поэтому контур, а не картинка.
           </p>
           <div className="studio-draw-actions">
             <button type="button" className="btn btn-outline" onClick={trace}>
@@ -292,7 +382,7 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
           </div>
           {path && (
             <button type="button" className="studio-quiet" onClick={() => setPath(undefined)}>
-              Вернуть глиф ({path.length} знаков контура)
+              Вернуть глиф ({formatNumber(path.length)} знаков контура)
             </button>
           )}
           {notice && <p className="studio-note">{notice}</p>}
@@ -301,9 +391,19 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
 
       <span className="label section-label">Код темы</span>
       <p className="modal-note">
-        Этим текстом можно поделиться в чате - бесплатно: чужая доска от этого не меняется.
+        Этим текстом делятся в чате бесплатно: чужая доска от него не меняется, а вставивший получает
+        тему к себе. Надеть её он сможет со своей мастерской.
       </p>
       <textarea className="studio-code" readOnly value={encoded} rows={3} onFocus={(e) => e.currentTarget.select()} />
+      <div className="studio-code-actions">
+        <button type="button" className="btn btn-quiet" onClick={() => void copyCode()}>
+          Скопировать код
+        </button>
+        <button type="button" className="btn btn-quiet" onClick={() => void shareCode()}>
+          Поделиться в Telegram
+        </button>
+        <span className="studio-code-size">{formatNumber(encoded.length)} знаков</span>
+      </div>
       <div className="studio-code-row">
         <input
           type="text"
@@ -318,7 +418,13 @@ export function SkinStudio({ onClose, onShare }: SkinStudioProps): ReactNode {
 
       <div className="modal-actions">
         <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy !== null || !read.ok}>
-          {busy === 'save' ? 'Надеваем' : 'Надеть бесплатно'}
+          {busy === 'save'
+            ? 'Надеваем'
+            : busy === 'unlock'
+              ? 'Открываем мастерскую'
+              : unlocked
+                ? 'Надеть'
+                : `Открыть мастерскую: ${SKIN_CUSTOM_STARS}`}
         </button>
         <button type="button" className="btn btn-outline" onClick={() => void share()} disabled={busy !== null || !read.ok}>
           {busy === 'share'

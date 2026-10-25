@@ -10,7 +10,7 @@ import {
   SKINS,
   type SkinId,
 } from '../src/engine';
-import { ownedSkins } from './db';
+import { ownedSkins, workshopOwned } from './db';
 import { logEvent } from './events';
 import { fail } from './http';
 import { callTelegram } from './telegram';
@@ -100,6 +100,9 @@ export async function createInvoice(
   const owned = ownedSkins(user);
 
   if (sku === 'noads' && user.ad_free) fail(409, 'already_owned', 'Реклама уже отключена');
+  // Мастерскую покупают один раз на аккаунт: права «нарисовать ещё одну» за те
+  // же звёзды не существует - вторая покупка была бы платой за ничто.
+  if (sku === 'custom' && workshopOwned(user)) fail(409, 'already_owned', 'Мастерская уже открыта');
   if (sku === 'lives' && lives.lives >= MAX_LIVES) fail(409, 'lives_full', 'Жизни уже полны');
   if (skinProductOwned(sku, owned)) {
     fail(409, 'already_owned', sku === 'skins' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
@@ -192,6 +195,18 @@ function entitlementStatements(env: WorkerEnv, payment: PaymentRow, user: UserRo
       ),
     ];
   }
+  if (payment.sku === 'custom') {
+    // Товар - право, а не тема: `skin_custom` и надетая тема остаются как есть,
+    // платёж только поднимает флаг. Поэтому и возврат откатывает ровно его.
+    return [
+      env.DB.prepare(`UPDATE users SET custom_paid = 1, updated_at = ? WHERE id = ? AND ${guard}`).bind(
+        now,
+        user.id,
+        payment.charge_id,
+        now,
+      ),
+    ];
+  }
   if (payment.sku === 'share') {
     // Оплаченный черновик становится заявкой в очереди. Сама выдача - не товар,
     // а право встать в очередь: тему ещё должен одобрить тот, кто её проверяет.
@@ -258,6 +273,17 @@ export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<b
         now,
         user.id,
       ),
+    );
+  }
+  if (payment.sku === 'custom') {
+    // Возврат закрывает мастерскую, но рисунок не стирает: игрок его делал сам,
+    // и при следующей покупке получит свою тему обратно. Надеть её он сможет
+    // снова с открытой мастерской - `selectedSkin` об этом знает.
+    statements.push(
+      env.DB.prepare(
+        `UPDATE users SET custom_paid = 0, skin = CASE WHEN skin = 'custom' THEN 'classic' ELSE skin END,
+         updated_at = ? WHERE id = ?`,
+      ).bind(now, user.id),
     );
   }
   const single = skuSkin(payment.sku);

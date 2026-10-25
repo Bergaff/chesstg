@@ -293,10 +293,12 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getWebhookInfo"
 - `noads` 150 звёзд, навсегда отключает рекламу;
 - `skins` 50 звёзд, открывает все платные темы поля и сразу надевает первую из них;
 - `skin:gold`, `skin:neon`, `skin:royal` по 20 звёзд - тема поштучно, набор покупать не нужно;
+- `custom` 80 звёзд - мастерская своей темы: право надевать то, что нарисовал сам (см. 5.1);
 - `share` 100 звёзд - взнос за публикацию своей темы в галерее игроков.
 
-Товар в `payments.sku` - текст, а не перечисление: новые SKU не требуют ни миграции, ни правки таблицы, только
-записи в `PRODUCTS` в `src/engine/balance.ts`. Тема и взнос за публикацию живут на этом же механизме.
+Товар в `payments.sku` - текст, а не перечисление: новый SKU не требует ни миграции, ни правки таблицы,
+только записи в `PRODUCTS` в `src/engine/balance.ts`. Тема, мастерская и взнос за публикацию живут на
+этом же механизме.
 
 Поток:
 
@@ -332,13 +334,22 @@ skin_shares(id, user_id, name, payload, status, note, installs, charge_id, creat
 ```
 
 `status`: `draft` - сохранено «для себя», `pending` - внесли 100 звёзд и ждёт разбора, `approved` - в галерее,
-`rejected` - отказ. Схема закрывается миграцией `worker/migrations/0005_skins.sql` (`SCHEMA_VERSION` становится 5):
+`rejected` - отказ. Схема закрывается миграциями `migrations/0005_skins.sql` и `migrations/0006_custom_workshop.sql`
+(`SCHEMA_VERSION` становится 6): вторая добавляет `users.custom_paid` - право носить свою тему.
 локально `npm run db:local`, в проде `npm run db:remote`; полным файлом - `docs/db-setup.sql`. Таблица отсутствует -
 и `/api/health` добавляет предупреждение `skin_tables_missing`, игра при этом продолжается: темы просто не
 публикуются, а магазин показывает то, что открыто всегда.
 
+Право носить своё - отдельный товар: `sku: "custom"`, 80 звёзд (или `POST /api/skins/buy-coins` с
+`target: "custom"` за 4 800 монет), один раз на аккаунт, дальше `custom_paid = 1` и любые правки бесплатны.
+`POST /api/profile/skin-custom` и `POST /api/skins/install` без этого флага отвечают `402 workshop_locked`
+с обеими ценами в теле: чужой код темы попадает в тот же `skin_custom`, и открывать его даром означало бы
+обойти цену всей полки. Возврат счёта закрывает мастерскую (`custom_paid = 0`, тема снимается), но рисунок
+не стирает - заплатит снова и получит свою «Кляксу» обратно. Тем, у кого тема была собрана до этого
+решения, миграция ставит `custom_paid = 1`: за смену правил платить не за что.
+
 Порядок такой: игрок собирает тему в студии (она проходит `checkSkin` на клиенте и на сервере - один и тот же код),
-сохраняет бесплатно, платит взнос - `POST /api/shop/invoice` с `sku: "share"` создаёт `payments` и строку
+сохраняет себе, платит взнос - `POST /api/shop/invoice` с `sku: "share"` создаёт `payments` и строку
 `skin_shares` в статусе `draft`, webhook `successful_payment` переводит её в `pending`. Дальше разбирает
 админка (`/admin`, вкладка «Темы», `POST /api/admin/skins/review`). Галерея отдаёт только `approved`, а
 «поставить» - это копирование темы к себе в `skin_custom`, ничего не стоит. Аккаунт из `QA_LIVES_IDS` минует
@@ -395,7 +406,7 @@ skin_shares(id, user_id, name, payload, status, note, installs, charge_id, creat
 
 ## 7. Продакшен-чек-лист
 
-- [ ] `database_id` заменён, миграции применены (последняя `0004_mode_levels.sql`).
+- [ ] `database_id` заменён, миграции применены (последняя `0006_custom_workshop.sql`).
 - [ ] `BOT_TOKEN` и `WEBHOOK_SECRET` заданы как секреты.
 - [ ] `ADSGRAM_BLOCK_ID` вписан. Пока его нет, рекламных наград и кнопок в интерфейсе не видно это штатное поведение, а не поломка.
 - [ ] `DEV_MODE: "false"`, `WEBAPP_URL` HTTPS, `BOT_USERNAME` заполнен.

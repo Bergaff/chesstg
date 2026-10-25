@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ENDLESS_VIEW_ROWS,
+  PATH_STROKE_WIDTH,
   PIECE_GLYPH,
   RACE_WIDTH,
   endlessViewport,
@@ -311,7 +312,7 @@ export function Board({
                       <span className={cn('player-mark', playerPath && 'player-mark-shape')}>
                         {playerPath ? (
                           <svg className="player-shape" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                            <path d={playerPath} />
+                            <path d={playerPath} strokeWidth={PATH_STROKE_WIDTH} />
                           </svg>
                         ) : (
                           <span className="player-glyph">{playerGlyph}</span>

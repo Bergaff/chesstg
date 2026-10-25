@@ -212,6 +212,24 @@ CREATE INDEX IF NOT EXISTS idx_skin_shares_status ON skin_shares (status, create
 CREATE INDEX IF NOT EXISTS idx_skin_shares_user ON skin_shares (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_skin_shares_charge ON skin_shares (charge_id);
 
+-- ── 0006_custom_workshop.sql ────────────────────────────────────
+-- Своя тема перестала быть бесплатной.
+--
+-- Пока мастерская открыта всем, полка из трёх тем не продаётся: те же восемь
+-- цветов и любой контур доступны в студии даром, и «Корона» за 20 звёзд
+-- выглядит глупо. Поэтому право носить свою тему - товар, как жизни или
+-- отключение рекламы. Рисовать при этом бесплатно: студия, превью и код темы
+-- открыты всем, платит тот, кто надевает.
+--
+-- Колонка, а не запись в CSV `skins`: мастерская - это право, а не тема,
+-- и примешивать её к списку покупок значит однажды потерять чужую выплату
+-- (см. 0005 про `skin_custom`).
+ALTER TABLE users ADD COLUMN custom_paid INTEGER NOT NULL DEFAULT 0;
+
+-- Тем, кто собрал тему до этого решения, не грабим: отбирать то, что человек
+-- уже носит, не за что, и за смену правил он платить не должен.
+UPDATE users SET custom_paid = 1 WHERE skin_custom <> '';
+
 -- Служебная таблица, в которую wrangler записывает применённые миграции.
 -- Отметки ниже нужны, чтобы `npm run db:remote` позже ничего не повторял.
 CREATE TABLE IF NOT EXISTS d1_migrations (
@@ -225,6 +243,7 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0002_admin.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0003_auth_link.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0004_mode_levels.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0005_skins.sql');
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0006_custom_workshop.sql');
 
 -- Проверка: вернутся все таблицы базы, включая d1_migrations.
 -- Число таблиц руками не держим - оно меняется с каждой миграцией.
