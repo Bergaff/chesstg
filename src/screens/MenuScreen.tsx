@@ -11,6 +11,7 @@ import { HeartsRow, Hud, ProfileChip } from '../components/Hud';
 import { ChallengeBanner } from '../components/ChallengeBanner';
 import { SkinMark } from '../components/SkinMark';
 import { tr, trf } from '../lib/i18n';
+import { LangToggle } from '../components/LangToggle';
 
 interface MenuScreenProps {
   onPlay: (mode: GameMode) => void;
@@ -125,6 +126,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         <ProfileChip profile={profile} />
         <div className="topbar-actions">
           <Hud profile={profile} onCoins={goShop} onLives={goShopStars} />
+          <LangToggle />
           <button type="button" className="help-btn" onClick={onOpenRules} aria-label={tr('Правила игры')}>
             ?
           </button>
@@ -151,7 +153,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           </span>
         </div>
         <p className="masthead-sub">
-          {tr('Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю, «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои, жизни - общие.')}
+          {tr('Одна доска и четыре способа на ней выжить: провести пешку сквозь фигуры в кампании, развести пробку в «Парковке», удержать короля в полосе в «Гонках» и подняться как можно выше - без финиша. Правила у режимов свои, жизни общие.')}
         </p>
       </section>
 

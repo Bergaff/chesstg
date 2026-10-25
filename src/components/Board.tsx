@@ -215,7 +215,6 @@ export function Board({
               const leftCell = moved.find((m) => m.from.x === x && m.from.y === y);
               const flash = state.lastCapture && state.lastCapture.x === x && state.lastCapture.y === y;
               const hintIndex = hint.findIndex((h) => h.x === x && h.y === y);
-              const isFinish = state.mode !== 'endless' && rules.goal === 'top' && y === state.height - 1;
               // Клетка, куда король встанет под бой: подсветка нужна, потому что
               // «безопасно ли» игрок по одним только фигурам не сосчитает.
               const risk =
@@ -233,7 +232,6 @@ export function Board({
                   className={cn(
                     'cell',
                     dark ? 'cell-dark' : 'cell-light',
-                    isFinish && 'cell-finish',
                     move && interactive && 'cell-move',
                     move?.takes && 'cell-take',
                     // Выпад через линию: клетка бьётся, но король на неё не встаёт.
@@ -330,6 +328,15 @@ export function Board({
               );
             }),
           )}
+          {/*
+            Линия финиша. Раньше она была рамкой верхней клетки, и на каждом
+            ходе фигур мигала: въезжающая в ряд фигура перекрывает границу
+            собственной клетки, поэтому линия то пропадала, то возвращалась.
+            Теперь это отдельный слой над полем - его перекрыть нечем.
+          */}
+          {rules.goal === 'top' && state.mode !== 'endless' && cell > 0 ? (
+            <span className="board-finish" aria-hidden="true" />
+          ) : null}
           {/* Граница полосы игрока: за неё король не выходит. Линия именно
               правило, а не декор, поэтому она тонкая, красная и пунктирная. */}
           {rules.kingRows > 0 && cell > 0 && viewport.from < rules.kingRows ? (
@@ -349,13 +356,19 @@ export function Board({
                 <span
                   key={`${piece.id}-${turn}`}
                   className="piece enemy-piece piece-swept"
-                  style={{
-                    left: piece.x * (cell + gap),
-                    top: (viewport.to - 1 - piece.y) * (cell + gap),
-                    width: cell,
-                    height: cell,
-                    fontSize: Math.round(cell * 0.56),
-                  }}
+                  style={
+                    {
+                      left: piece.x * (cell + gap),
+                      top: (viewport.to - 1 - piece.y) * (cell + gap),
+                      width: cell,
+                      height: cell,
+                      fontSize: Math.round(cell * 0.56),
+                      // До низа поля, а не на клетку вниз: снятая фигура может
+                      // стоять в полосе короля, и сдвиг на ряд там читался как
+                      // дрожание на месте.
+                      '--sweep-travel': `${boardHeight - (viewport.to - 1 - piece.y) * (cell + gap) + FRAME_PAD}px`,
+                    } as CSSProperties
+                  }
                 >
                   <span className="piece-glyph">{PIECE_GLYPH[piece.type]}</span>
                 </span>

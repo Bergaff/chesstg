@@ -1,6 +1,6 @@
 import { attackerId, cloneState, enemyAttacksCell, enemyTarget, legalMoves } from './board';
 import { Rng } from './rng';
-import { RACE_SPAWN_ROWS, raceSpawnPool, raceTierForMoves, raceWidthForSpawned } from './race';
+import { RACE_SPAWN_ROWS, RACE_STALL_TURNS, raceSpawnPool, raceTierForMoves, raceWidthForSpawned } from './race';
 
 /** Кем пополняется поле: конь и слон создают уклонения, ладья прижимает ряд. */
 const SPAWN_POOL = ['pawn', 'pawn', 'knight', 'bishop', 'rook'] as const;
@@ -191,6 +191,20 @@ function enemyPhase(state: GameState): void {
       state.capturedBy = enemy.type;
       state.lastEvent = 'captured';
       return;
+    }
+    // Сброс из полосы. Лента в «Гонках» никуда не едет, поэтому фигура,
+    // вставшая в ряд короля, по своим правилам оттуда не уходит: вниз ей
+    // дальше от цели, чем вдоль ряда. Значит поле разрасталось бы стояками -
+    // ладья или конь встали рядом и ждут. Правило: простояла RACE_STALL_TURNS
+    // тактов в полосе и не взяла короля - уходит в сброс тем же путём, что и
+    // дошедшая до края, то есть через нижний край поля.
+    if (rules.exitAtBottom && rules.kingRows > 0) {
+      const inBand = enemy.y < rules.kingRows;
+      enemy.stall = inBand ? (enemy.stall ?? 0) + 1 : 0;
+      if (enemy.stall >= RACE_STALL_TURNS) {
+        escaped.push(enemy.id);
+        enemy.stall = 0;
+      }
     }
   }
 

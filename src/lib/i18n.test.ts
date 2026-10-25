@@ -26,6 +26,7 @@ import {
 const UI_FILES = [
   'src/App.tsx',
   'src/lib/format.ts',
+  'src/components/LangToggle.tsx',
   'src/screens/MenuScreen.tsx',
   'src/screens/GameScreen.tsx',
   'src/screens/ShopScreen.tsx',

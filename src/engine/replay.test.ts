@@ -183,10 +183,13 @@ describe('прогон сравнений', () => {
   }, 120_000);
 
   it('сравнение с базовым правилом добавляет колонку, а не меняет прогон', () => {
-    const plain = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120 })[0];
+    // Проба в шесть досок, а не в две: направление «без выпада взятий не больше»
+    // на двух досках тонет в шуме зерен, и тест падал на совпадении, а не на
+    // правиле. Шесть досок держат направление на всех контрольных зёрнах.
+    const plain = measureRaceLevels([9], { samples: 6, seed: 818, cap: 120 })[0];
     expect(plain!.comparison).toBeUndefined();
     expect(plain!.mode).toBe('race');
-    const compared = measureRaceLevels([9], { samples: 2, seed: 818, cap: 120, compare: true })[0];
+    const compared = measureRaceLevels([9], { samples: 6, seed: 818, cap: 120, compare: true })[0];
     // Тот же набор зёрен и тот же потолок: база обязана совпасть цифра в цифру,
     // иначе «прирост от правила» считается по разным партиям.
     expect(compared!.doomMedian).toBe(plain!.doomMedian);

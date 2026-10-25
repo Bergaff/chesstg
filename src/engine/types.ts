@@ -37,6 +37,12 @@ export interface Enemy {
   type: PieceType;
   x: number;
   y: number;
+  /**
+   * Сколько тактов подряд фигура стоит в полосе короля, не взяв его. Счётчик
+   * нужен только там, где лента не уносит ряды («Гонки»); в остальных режимах
+   * поля нет, и правило молчит.
+   */
+  stall?: number;
 }
 
 export interface PlayerCell {

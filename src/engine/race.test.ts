@@ -359,6 +359,23 @@ describe('Гонки: король против фигур сверху', () => 
     expect(rookNext.lastEvent).not.toBe('swept');
   });
 
+  it('ладья, вставшая в полосу короля, уходит в сброс', () => {
+    // До нижнего ряда ладья доезжает, только если король стоит ниже: когда он в
+    // том же ряду, шаг вниз отдаляет её от цели, и жадный ход оставляет фигуру на
+    // предпоследнем ряду навсегда. Отсюда правило сброса: два такта в полосе - и
+    // фигура уходит с поля тем же краем, что и дошедшая до низа.
+    const band = open({ player: { x: 0, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 5, y: 1 }] });
+    const first = move(band, 0, -1);
+    const rook = first.enemies.find((e) => e.id === 'r');
+    expect(rook).toBeTruthy();
+    expect(rook!.y).toBe(1);
+    expect(rook!.stall).toBe(1);
+    const second = move(first, 1, 0);
+    expect(second.enemies.some((e) => e.id === 'r')).toBe(false);
+    expect(second.lastEvent).toBe('escaped');
+    expect(second.status).toBe('playing');
+  });
+
   it('фигура, дошедшая до нижнего ряда, уходит с поля', () => {
     // Раз лента не уносит, фигуры сходят сами: нижний ряд для них это край.
     const edge = open({ player: { x: 4, y: 1 }, enemies: [{ id: 'r', type: 'rook', x: 1, y: 0 }] });

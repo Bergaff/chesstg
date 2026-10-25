@@ -381,12 +381,14 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
         moved.push({ id: enemy.id, from: { x: old.x, y: old.y }, to: { x: enemy.x, y: enemy.y } });
       }
     }
-    // Фигура, которой больше нет на поле и которую снял не король, сошла с края:
+    // Фигура, которой больше нет на поле и которую снял не король, сошла с поля:
     // её дорисовываем уезжающим призраком, иначе исчезновение выглядит багом.
+    // Ряд призрака больше не привязан к краю - в «Гонках» в сброс уходит и фигура
+    // из полосы короля, - поэтому уезжают все снятые фигуры, а не только нижний ряд.
     const swept: SweptPiece[] = [];
     const alive = new Set(state.enemies.map((e) => e.id));
     for (const [id, old] of before) {
-      if (alive.has(id) || old.y !== 0) continue;
+      if (alive.has(id)) continue;
       // Фигуру на клетке короля снял он сам, это взятие, а не сход с поля.
       if (state.player.x === old.x && state.player.y === old.y) continue;
       // Выпад снимает фигуру через линию, и король при этом не сходит с места:

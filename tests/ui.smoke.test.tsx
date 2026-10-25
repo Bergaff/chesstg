@@ -319,7 +319,7 @@ describe('UI smoke', () => {
     await screen.findByText('Board');
     // Заголовок складывается из двух подписей: на английском порядок тот же.
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Board Edge');
-    expect(screen.getByText('Four modes on one board', { exact: false })).toBeTruthy();
+    expect(screen.getByText('four ways to survive', { exact: false })).toBeTruthy();
     expect(screen.getByText('Sections')).toBeTruthy();
     expect(screen.getByText('Coin bonuses, skins and star purchases')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Play|Continue/ })).toBeTruthy();
@@ -344,7 +344,7 @@ describe('UI smoke', () => {
     const title = screen.getByRole('heading', { level: 1 });
     expect(title.textContent).toBe('Край доски');
     // Подпись рассказывает про режимы, а не пересказывает правила ходов.
-    expect(screen.getByText('Четыре режима - одна доска', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Одна доска и четыре способа на ней выжить', { exact: false })).toBeTruthy();
     // Заводская тема = обычные цвета экрана: палитра выводится из темы, и на
     // «Латуни» она обязана остаться той же, что в стилях.
     await waitFor(() => expect(document.documentElement.style.getPropertyValue('--bg')).toBe('#17160f'));
