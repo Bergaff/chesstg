@@ -6,6 +6,7 @@ import { hapticNotify } from '../lib/telegram';
 import type { AdRewardResponse, AppConfig, Profile } from '../lib/types';
 import { HeartsRow } from './Hud';
 import { Modal } from './Modal';
+import { tr } from '../lib/i18n';
 
 interface NoLivesModalProps {
   profile: Profile;
@@ -39,7 +40,7 @@ export function NoLivesModal({
     if (loading) return;
     setLoading(true);
     try {
-      const rewarded = await showAd('+1 жизнь');
+      const rewarded = await showAd(tr('+1 жизнь'));
       if (!rewarded) return;
       const response = await api<AdRewardResponse>('/api/ads/reward', { method: 'POST', body: { kind: 'life' } });
       onProfile(response.profile);
@@ -56,42 +57,42 @@ export function NoLivesModal({
 
   return (
     <Modal onClose={onClose} showClose labelledBy="no-lives-title">
-      <span className="label">Передышка</span>
+      <span className="label">{tr('Передышка')}</span>
       <h2 className="modal-title" id="no-lives-title">
-        Жизни закончились
+        {tr('Жизни закончились')}
       </h2>
       <p className="modal-text">
-        Следующая жизнь появится через <b>{formatDuration(remaining)}</b>. Можно подождать или
-        восстановить силы сейчас.
+        {tr('Следующая жизнь появится через')} <b>{formatDuration(remaining)}</b>
+        {tr('. Можно подождать или восстановить силы сейчас.')}
       </p>
 
       <div className="lives-line">
-        <span>В запасе</span>
+        <span>{tr('В запасе')}</span>
         <HeartsRow lives={profile.lives} maxLives={profile.maxLives} />
       </div>
 
       <div className="modal-actions">
         {config.adsEnabled && !profile.adFree && (
           <button type="button" className="btn btn-primary" onClick={watchAd} disabled={loading}>
-            {loading ? 'Загрузка' : 'Смотреть рекламу за жизнь'}
+            {loading ? tr('Загрузка') : tr('Смотреть рекламу за жизнь')}
           </button>
         )}
-        {profile.adFree && <p className="modal-note">Реклама отключена, ждать придётся естественным путём.</p>}
+        {profile.adFree && <p className="modal-note">{tr('Реклама отключена, ждать придётся естественным путём.')}</p>}
         {!config.adsEnabled && (
-          <p className="modal-note">Реклама ещё не включена, поэтому жизнь только за ждани или за звёзды.</p>
+          <p className="modal-note">{tr('Реклама ещё не включена, поэтому жизнь только за ждани или за звёзды.')}</p>
         )}
         <button type="button" className="btn btn-outline" onClick={onShop}>
-          Магазин: пять жизней за 25 звёзд
+          {tr('Магазин: пять жизней за 25 звёзд')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onClose}>
-          Подождать
+          {tr('Подождать')}
         </button>
       </div>
 
       <div className="legal-link-row">
-        <button type="button" onClick={onTerms}>Условия использования</button>
-        <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
-        {!config.paymentsEnabled && <span>Оплата звёздами станет доступна после подключения бота.</span>}
+        <button type="button" onClick={onTerms}>{tr('Условия использования')}</button>
+        <button type="button" onClick={onPrivacy}>{tr('Конфиденциальность')}</button>
+        {!config.paymentsEnabled && <span>{tr('Оплата звёздами станет доступна после подключения бота.')}</span>}
       </div>
     </Modal>
   );

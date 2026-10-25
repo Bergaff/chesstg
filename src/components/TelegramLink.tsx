@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiError, clearSessionToken, isLinked, setLinkCode, setSessionToken, storedLinkCode, takeLinkFromUrl } from '../lib/api';
 import { cn } from '../lib/format';
+import { tr, trf } from '../lib/i18n';
 
 /**
  * Привязка прогресса на сайте через бота.
@@ -31,8 +32,6 @@ interface TelegramLinkProps {
   onLinked?: (info: { merged: boolean }) => void;
 }
 
-
-
 export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactNode {
   const [code, setCode] = useState(() => takeLinkFromUrl() || storedLinkCode());
   const [busy, setBusy] = useState(false);
@@ -55,7 +54,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
           return;
         }
         if (response.status === 'pending') {
-          setHint('Ждём подтверждения в чате бота');
+          setHint(tr('Ждём подтверждения в чате бота'));
           return;
         }
         if (isLinked()) {
@@ -71,14 +70,14 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
         setHint('');
         setError(
           response.status === 'expired'
-            ? 'Ссылка устарела, она живёт пять минут. Попробуй ещё раз.'
+            ? tr('Ссылка устарела, она живёт пять минут. Попробуй ещё раз.')
             : response.status === 'rejected'
-              ? 'Ты отклонил привязку в чате бота.'
-              : 'Подтверждение не найдено. Запусти привязку заново.',
+              ? tr('Ты отклонил привязку в чате бота.')
+              : tr('Подтверждение не найдено. Запусти привязку заново.'),
         );
       } catch (caught) {
         if (caught instanceof ApiError && caught.code === 'auth_not_ready') {
-          setError('На сервере ещё нет таблицы привязки, попроси разработчика применить миграцию.');
+          setError(tr('На сервере ещё нет таблицы привязки, попроси разработчика применить миграцию.'));
           setLinkCode('');
           setCode('');
           return;
@@ -97,7 +96,7 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
     void check(code);
     const deadline = window.setTimeout(() => {
       setHint('');
-      setError('Подтверждение не дошло. Открой чат бота и нажми «Да, привязать», потом повтори.');
+      setError(tr('Подтверждение не дошло. Открой чат бота и нажми «Да, привязать», потом повтори.'));
       setLinkCode('');
       setCode('');
     }, MAX_WAIT_MS);
@@ -125,12 +124,12 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
       const response = await api<LinkResponse>('/api/auth/link', { method: 'POST' });
       setLinkCode(response.code);
       setCode(response.code);
-      setHint(`Открылся чат ${response.botUsername}, нажми «Да, привязать»`);
+      setHint(trf('Открылся чат {0}, нажми «Да, привязать»', [response.botUsername]));
       const opened = window.open(response.link, '_blank', 'noopener');
       if (!opened) window.location.href = response.link;
     } catch (caught) {
       setHint('');
-      setError(caught instanceof Error ? caught.message : 'Не удалось начать привязку');
+      setError(caught instanceof Error ? caught.message : tr('Не удалось начать привязку'));
     } finally {
       setBusy(false);
       startedRef.current = true;
@@ -150,15 +149,15 @@ export function TelegramLink({ className, onLinked }: TelegramLinkProps): ReactN
         {code ? (
           <>
             <button type="button" className="btn btn-quiet" onClick={() => void check(code)} disabled={busy}>
-              Проверить сейчас
+              {tr('Проверить сейчас')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={cancel}>
-              Отменить
+              {tr('Отменить')}
             </button>
           </>
         ) : (
           <button type="button" className="btn btn-primary" onClick={() => void start()} disabled={busy}>
-            {busy ? 'Открываем бота' : 'Привязать Telegram'}
+            {busy ? tr('Открываем бота') : tr('Привязать Telegram')}
           </button>
         )}
       </div>

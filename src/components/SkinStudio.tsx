@@ -35,6 +35,7 @@ import { appBaseUrl, cn, formatNumber } from '../lib/format';
 import { hapticNotify, shareContent } from '../lib/telegram';
 import { Modal } from './Modal';
 import { SkinPreview } from './SkinPreview';
+import { tr, trf } from '../lib/i18n';
 
 /**
  * Студия темы: цвета доски, глиф или свой контур.
@@ -61,7 +62,7 @@ interface SkinStudioProps {
 export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): ReactNode {
   const { profile, config, setProfile, toast } = useApp();
   const base = profile.customSkin ?? null;
-  const [name, setName] = useState(base?.name ?? 'Своя тема');
+  const [name, setName] = useState(base?.name ?? tr('Своя тема'));
   const [tokens, setTokens] = useState<Record<TokenKey, string>>(
     () => ({ ...skinTokens(SKINS.classic), ...(base?.tokens ?? {}) }),
   );
@@ -156,22 +157,22 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
     const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const coverage = maskCoverage(inkMask({ data: frame.data, size: canvas.width }, 'alpha'));
     if (coverage < 0.02) {
-      setNotice('Слишком мало линий: нарисуй фигуру крупнее, на всю клетку.');
+      setNotice(tr('Слишком мало линий: нарисуй фигуру крупнее, на всю клетку.'));
       return;
     }
     if (coverage > 0.92) {
-      setNotice('Залитый квадрат фигурой не читается: оставь между линиями пустое.');
+      setNotice(tr('Залитый квадрат фигурой не читается: оставь между линиями пустое.'));
       return;
     }
     // Штрихов может и не быть - например, если код темы вставили, а рисование
     // начали поверх: тогда остаётся старый добрый силуэт.
     const path = strokes.current.length > 0 ? strokesPath(strokes.current, canvas.width) : pathFromFrame({ data: frame.data, size: canvas.width }, 'alpha').path;
     if (!path) {
-      setNotice('Контур не получился: проведи несколько длинных линий.');
+      setNotice(tr('Контур не получился: проведи несколько длинных линий.'));
       return;
     }
     setPath(path);
-    setNotice(`Контур готов: линии занимают ${Math.round(coverage * 100)}% клетки, ${path.length} знаков.`);
+    setNotice(trf('Контур готов: линии занимают {0}% клетки, {1} знаков.', [Math.round(coverage * 100), path.length]));
   }
 
   // Льгота `QA_LIVES_IDS` открывает мастерскую без счёта - как с темами полки.
@@ -181,7 +182,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
     if (busy) return;
     const check = checkSkin({ name, tokens, glyph, path });
     if (!check.ok) {
-      toast(check.error ?? 'Тему не видно на доске', 'error');
+      toast(check.error ?? tr('Тему не видно на доске'), 'error');
       return;
     }
     if (!unlocked) {
@@ -191,7 +192,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       const granted = await onUnlock().catch(() => false);
       setBusy(null);
       if (!granted) return;
-      toast('Мастерская открыта, надеваем тему', 'success');
+      toast(tr('Мастерская открыта, надеваем тему'), 'success');
     }
     setBusy('save');
     try {
@@ -201,10 +202,10 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       });
       setProfile(response.profile);
       hapticNotify('success');
-      toast(unlocked ? 'Своя тема надета' : 'Своя тема надета - мастерская открыта навсегда', 'success');
+      toast(unlocked ? tr('Своя тема надета') : tr('Своя тема надета - мастерская открыта навсегда'), 'success');
       onClose();
     } catch (error) {
-      toast(error instanceof ApiError ? error.message : 'Сохранить не удалось', 'error');
+      toast(error instanceof ApiError ? error.message : tr('Сохранить не удалось'), 'error');
     } finally {
       setBusy(null);
     }
@@ -217,10 +218,10 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
    * не работает, подсказываем, как скопировать руками.
    */
   async function copyCode() {
-    const text = `Код темы «${name}» для «Край доски»:\n${encoded}`;
+    const text = trf('Код темы «{0}» для «Край доски»:\n{1}', [name, encoded]);
     try {
       await navigator.clipboard.writeText(text);
-      toast('Код скопирован', 'success');
+      toast(tr('Код скопирован'), 'success');
       return;
     } catch {
       /* старый WebView без clipboard - пробуем через выделение */
@@ -239,7 +240,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       copied = false;
     }
     area.remove();
-    toast(copied ? 'Код скопирован' : 'Скопируйте код из поля вручную', copied ? 'success' : 'info');
+    toast(copied ? tr('Код скопирован') : tr('Скопируйте код из поля вручную'), copied ? 'success' : 'info');
   }
 
   /**
@@ -248,23 +249,26 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
    * тема встанет в поле «Вставить код» целиком.
    */
   async function shareCode() {
-    const status = await shareContent(`Код темы «${name}» для «Край доски» - вставь в студии:\n${encoded}`, appBaseUrl(config.webappUrl));
-    if (status === 'copied') toast('Код скопирован - вставь в чат сам', 'success');
-    if (status === 'failed') toast('Не удалось открыть чат', 'error');
+    const status = await shareContent(
+      trf('Код темы «{0}» для «Край доски» - вставь в студии:\n{1}', [name, encoded]),
+      appBaseUrl(config.webappUrl),
+    );
+    if (status === 'copied') toast(tr('Код скопирован - вставь в чат сам'), 'success');
+    if (status === 'failed') toast(tr('Не удалось открыть чат'), 'error');
   }
 
   async function share() {
     if (busy) return;
     const check = checkSkin({ name, tokens, glyph, path });
     if (!check.ok) {
-      toast(check.error ?? 'Тему не видно на доске', 'error');
+      toast(check.error ?? tr('Тему не видно на доске'), 'error');
       return;
     }
     setBusy('share');
     try {
       const paid = await onShare(check.skin);
       // Для льготного аккаунта взноса не было - не о чём и благодарить.
-      if (paid) toast(profile.qa ? 'Тема в очереди на проверку' : 'Взнос принят, тема в очереди на проверку', 'success');
+      if (paid) toast(profile.qa ? tr('Тема в очереди на проверку') : tr('Взнос принят, тема в очереди на проверку'), 'success');
     } finally {
       setBusy(null);
     }
@@ -273,7 +277,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
   function applyCode() {
     const decoded = decodeSkinCode(code);
     if (!decoded) {
-      toast('Код не читается: проверь, что скопировал целиком, с «kd1:»', 'error');
+      toast(tr('Код не читается: проверь, что скопировал целиком, с «kd1:»'), 'error');
       return;
     }
     setName(decoded.name);
@@ -281,42 +285,49 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
     setGlyph(decoded.glyph);
     setPath(decoded.path);
     setCode('');
-    setNotice('Тема из кода надета на превью - не забудь сохранить.');
+    setNotice(tr('Тема из кода надета на превью - не забудь сохранить.'));
   }
 
   return (
     <Modal onClose={onClose} showClose>
-      <span className="label">Студия</span>
-      <h2 className="modal-title">Своя тема поля</h2>
+      <span className="label">{tr('Студия')}</span>
+      <h2 className="modal-title">{tr('Своя тема поля')}</h2>
       <p className="modal-text">
-        Рисовать, красить превью и передавать код - бесплатно и без границ. Платит тот, кто надевает:
-        {unlocked ? 'ваша мастерская уже открыта, правки ничего не стоят' : `мастерская ${SKIN_CUSTOM_STARS} звёзд или ${formatNumber(SKIN_CUSTOM_COINS)} монет, один раз на аккаунт`} -
-        а показать тему чужим стоит {PRODUCTS.share.stars} звёзд: взнос оплачивает проверку заявки и
-        отсекает поток «накидал за минуту».
+        {tr('Рисовать, красить превью и передавать код - бесплатно и без границ. Платит тот, кто надевает:')}{' '}
+        {unlocked
+          ? tr('ваша мастерская уже открыта, правки ничего не стоят.')
+          : trf(
+              'мастерская стоит {0} звёзд или {1} монет, один раз на аккаунт.',
+              [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS)],
+            )}{' '}
+        {trf(
+          'Показать тему чужим стоит ещё {0} звёзд: взнос оплачивает проверку заявки и отсекает поток «накидал за минуту».',
+          [PRODUCTS.share.stars],
+        )}
       </p>
 
       <div className="studio-head">
         <SkinPreview skin={skin} cell={34} />
         <div className="studio-head-side">
           <label className="studio-field">
-            <span className="label">Название</span>
+            <span className="label">{tr('Название')}</span>
             <input
               type="text"
               value={name}
               maxLength={24}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Своя тема"
+              placeholder={tr('Своя тема')}
             />
           </label>
           <p className={cn('studio-read', read.ok ? 'is-ok' : 'is-bad')}>
             {read.ok
-              ? `Видно на доске: фигура ${read.glyph.toFixed(1)}:1, отделка ${read.board.toFixed(1)}:1`
-              : `Не видно на доске: ${read.why}`}
+              ? trf('Видно на доске: фигура {0}:1, отделка {1}:1', [read.glyph.toFixed(1), read.board.toFixed(1)])
+              : trf('Не видно на доске: {0}', [read.why])}
           </p>
         </div>
       </div>
 
-      <span className="label section-label">Цвета</span>
+      <span className="label section-label">{tr('Цвета')}</span>
       <div className="studio-colors">
         {TOKEN_KEYS.map((key) => (
           <label className="studio-color" key={key}>
@@ -332,16 +343,16 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       </div>
       {tokens.plate ? (
         <button type="button" className="studio-quiet" onClick={() => setTokens((prev) => ({ ...prev, plate: '' }))}>
-          Убрать плашку фигуры
+          {tr('Убрать плашку фигуры')}
         </button>
       ) : (
         <button type="button" className="studio-quiet" onClick={() => setTokens((prev) => ({ ...prev, plate: '#ded4bd' }))}>
-          Добавить плашку фигуры
+          {tr('Добавить плашку фигуры')}
         </button>
       )}
 
-      <span className="label section-label">Фигура</span>
-      <div className="studio-glyphs" role="group" aria-label="Глиф фигуры">
+      <span className="label section-label">{tr('Фигура')}</span>
+      <div className="studio-glyphs" role="group" aria-label={tr('Глиф фигуры')}>
         {GLYPH_CHOICES.map((choice) => (
           <button
             type="button"
@@ -368,75 +379,72 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
         />
         <div className="studio-draw-side">
           <p className="modal-note">
-            Нарисуй фигуру пальцем и нажми «В контур»: каждый штрих станет ровной линией, а не
-            заливкой - замкнёшь круг, и внутри останется пусто. Мыло на клетке в 36 пикселей не
-            читается вовсе, поэтому контур, а не картинка.
+            {tr('Нарисуй фигуру пальцем и нажми «В контур»: каждый штрих станет ровной линией, а не заливкой - замкнёшь круг, и внутри останется пусто. Мыло на клетке в 36 пикселей не читается вовсе, поэтому контур, а не картинка.')}
           </p>
           <div className="studio-draw-actions">
             <button type="button" className="btn btn-outline" onClick={trace}>
-              В контур
+              {tr('В контур')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={clearCanvas}>
-              Стереть
+              {tr('Стереть')}
             </button>
           </div>
           {path && (
             <button type="button" className="studio-quiet" onClick={() => setPath(undefined)}>
-              Вернуть глиф ({formatNumber(path.length)} знаков контура)
+              {trf('Вернуть глиф ({0} знаков контура)', [formatNumber(path.length)])}
             </button>
           )}
           {notice && <p className="studio-note">{notice}</p>}
         </div>
       </div>
 
-      <span className="label section-label">Код темы</span>
+      <span className="label section-label">{tr('Код темы')}</span>
       <p className="modal-note">
-        Этим текстом делятся в чате бесплатно: чужая доска от него не меняется, а вставивший получает
-        тему к себе. Надеть её он сможет со своей мастерской.
+        {tr('Этим текстом делятся в чате бесплатно: чужая доска от него не меняется, а вставивший получает тему к себе. Надеть её он сможет со своей мастерской.')}
       </p>
       <textarea className="studio-code" readOnly value={encoded} rows={3} onFocus={(e) => e.currentTarget.select()} />
       <div className="studio-code-actions">
         <button type="button" className="btn btn-quiet" onClick={() => void copyCode()}>
-          Скопировать код
+          {tr('Скопировать код')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={() => void shareCode()}>
-          Поделиться в Telegram
+          {tr('Поделиться в Telegram')}
         </button>
-        <span className="studio-code-size">{formatNumber(encoded.length)} знаков</span>
+        <span className="studio-code-size">{formatNumber(encoded.length)} {tr('знаков')}</span>
       </div>
       <div className="studio-code-row">
         <input
           type="text"
           value={code}
           onChange={(event) => setCode(event.target.value)}
-          placeholder="Вставить код: kd1:..."
+          placeholder={tr('Вставить код: kd1:...')}
         />
         <button type="button" className="btn btn-quiet" onClick={applyCode} disabled={!code.trim()}>
-          Применить
+          {tr('Применить')}
         </button>
       </div>
 
       <div className="modal-actions">
         <button type="button" className="btn btn-primary" onClick={() => void save()} disabled={busy !== null || !read.ok}>
           {busy === 'save'
-            ? 'Надеваем'
+            ? tr('Надеваем')
             : busy === 'unlock'
-              ? 'Открываем мастерскую'
+              ? tr('Открываем мастерскую')
               : unlocked
-                ? 'Надеть'
-                : `Открыть мастерскую: ${SKIN_CUSTOM_STARS}`}
+                ? tr('Надеть')
+                : trf('Открыть мастерскую: {0}', [SKIN_CUSTOM_STARS])}
         </button>
         <button type="button" className="btn btn-outline" onClick={() => void share()} disabled={busy !== null || !read.ok}>
           {busy === 'share'
             ? profile.qa
-              ? 'Отправляем'
-              : 'Выставляем счёт'
+              ? tr('Отправляем')
+              : tr('Выставляем счёт')
             : profile.qa
-              ? 'Показать всем'
-              : `Показать всем: ${PRODUCTS.share.stars}`}
+              ? tr('Показать всем')
+              : trf('Показать всем: {0}', [PRODUCTS.share.stars])}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onClose}>
-          Позже
+          {tr('Позже')}
         </button>
       </div>
     </Modal>

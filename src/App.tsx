@@ -16,6 +16,7 @@ import { JamScreen } from './screens/JamScreen';
 import { ShopScreen } from './screens/ShopScreen';
 import { RecordsScreen } from './screens/RecordsScreen';
 import { LegalScreen } from './screens/LegalScreen';
+import { tr, trf } from './lib/i18n';
 
 type Screen = 'menu' | 'game' | 'shop' | 'records' | 'terms' | 'privacy';
 
@@ -57,7 +58,6 @@ export default function App(): ReactNode {
     // подтверждения.
     takeLinkFromUrl();
   }, []);
-
 
   const toast = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = ++toastId.current;
@@ -103,7 +103,7 @@ export default function App(): ReactNode {
       if (linked === linkedAtBoot) return;
       linkedAtBoot = linked;
       void refresh();
-      toast(linked ? 'Прогресс привязан к Telegram' : 'Сеанс закрыт, играешь как гость');
+      toast(linked ? tr('Прогресс привязан к Telegram') : tr('Сеанс закрыт, играешь как гость'));
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
@@ -119,15 +119,15 @@ export default function App(): ReactNode {
         });
       }
       if (!config.adsgram.blockId) {
-        toast('Реклама ещё не настроена', 'info');
+        toast(tr('Реклама ещё не настроена'), 'info');
         return false;
       }
       try {
         const rewarded = await showAdsgram(config.adsgram.blockId, config.adsgram.src);
-        if (!rewarded) toast('Ролик закрыт, награда не начислена', 'info');
+        if (!rewarded) toast(tr('Ролик закрыт, награда не начислена'), 'info');
         return rewarded;
       } catch {
-        toast('Реклама временно недоступна', 'error');
+        toast(tr('Реклама временно недоступна'), 'error');
         return false;
       }
     },
@@ -148,7 +148,7 @@ export default function App(): ReactNode {
         setSession(response);
         setBootError(null);
         if (response.referral?.rewarded) {
-          toast(`Приглашение сработало: +${response.referral.bonus} монет`, 'success');
+          toast(trf('Приглашение сработало: +{0} монет', [response.referral.bonus]), 'success');
         }
       } catch (error) {
         if (cancelled) return;
@@ -160,31 +160,31 @@ export default function App(): ReactNode {
             setBootError({
               message: error.message,
               hint: raw
-                ? 'Ниже блок «Диагностика»: выдели его, скопируй и пришли владельцу игры.'
-                : 'Закрой игру и открой заново кнопкой в чате бота. Если не поможет, причина в BOT_TOKEN: владельцу видно код в логах воркера.',
+                ? tr('Ниже блок «Диагностика»: выдели его, скопируй и пришли владельцу игры.')
+                : tr('Закрой игру и открой заново кнопкой в чате бота. Если не поможет, причина в BOT_TOKEN: владельцу видно код в логах воркера.'),
               diag: raw,
             });
           } else if (error.status === 401) {
             setBootError({
               message: error.message,
-              hint: 'Открой игру через кнопку в Telegram-боте. В браузере прогресс доступен только в гостевом режиме.',
+              hint: tr('Открой игру через кнопку в Telegram-боте. В браузере прогресс доступен только в гостевом режиме.'),
             });
           } else if (error.code === 'network') {
             setBootError({
-              message: 'Сервер не отвечает',
-              hint: 'Попробовали несколько раз подряд. Обычно это сеть: проверьте интернет и обновите экран.',
+              message: tr('Сервер не отвечает'),
+              hint: tr('Попробовали несколько раз подряд. Обычно это сеть: проверьте интернет и обновите экран.'),
             });
           } else if (error.code === 'db_not_ready' || error.code === 'db_unavailable') {
             setBootError({
-              message: 'Сервер не видит базу игры',
+              message: tr('Сервер не видит базу игры'),
               hint:
-                'База не инициализирована. Владельцу: примените миграции - локально `npm run db:local`, на проде `npm run db:remote`.',
+                tr('База не инициализирована. Владельцу: примените миграции - локально `npm run db:local`, на проде `npm run db:remote`.'),
             });
           } else {
-            setBootError({ message: error.message, hint: 'Попробуй обновить экран.' });
+            setBootError({ message: error.message, hint: tr('Попробуй обновить экран.') });
           }
         } else {
-          setBootError({ message: 'Не удалось открыть игру', hint: 'Попробуй ещё раз.' });
+          setBootError({ message: tr('Не удалось открыть игру'), hint: tr('Попробуй ещё раз.') });
         }
       }
     })();
@@ -265,7 +265,7 @@ export default function App(): ReactNode {
       if (!session) return;
       const progress = session.profile.modes?.[mode];
       if (progress && !progress.unlocked) {
-        toast(`${modeDef(mode).name}: режим откроется на ${progress.unlockAtLevel} уровне кампании`, 'info');
+        toast(trf('{0}: режим откроется на {1} уровне кампании', [tr(modeDef(mode).name), progress.unlockAtLevel]), 'info');
         return;
       }
       if (session.profile.lives <= 0 && !session.active[mode]) {
@@ -314,7 +314,7 @@ export default function App(): ReactNode {
       <div className="boot-screen">
         <span className="boot-mark" aria-hidden="true">♟</span>
         <h1 className="boot-title">
-          Край <em>доски</em>
+          {tr('Край')} <em>{tr('доски')}</em>
         </h1>
         {bootError ? (
           <div className="boot-error">
@@ -322,7 +322,7 @@ export default function App(): ReactNode {
             <p className="boot-text" style={{ marginTop: 0 }}>{bootError.hint}</p>
             {bootError.diag ? (
               <>
-                <p className="boot-label">Диагностика</p>
+                <p className="boot-label">{tr('Диагностика')}</p>
                 <p className="boot-diag">{bootError.diag}</p>
               </>
             ) : null}
@@ -335,14 +335,14 @@ export default function App(): ReactNode {
                 setReloadKey((key) => key + 1);
               }}
             >
-              Повторить
+              {tr('Повторить')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => window.location.reload()}>
-              Перезагрузить
+              {tr('Перезагрузить')}
             </button>
           </div>
         ) : (
-          <p className="boot-text">Расставляем фигуры</p>
+          <p className="boot-text">{tr('Расставляем фигуры')}</p>
         )}
         <footer className="boot-foot">Telegram Mini App, 2026</footer>
       </div>
@@ -444,9 +444,9 @@ export function BootFallback(): ReactNode {
       <div className="boot-screen">
         <span className="boot-mark" aria-hidden="true">♟</span>
         <h1 className="boot-title">
-          Край <em>доски</em>
+          {tr('Край')} <em>{tr('доски')}</em>
         </h1>
-        <p className="boot-text">Загружаем игру</p>
+        <p className="boot-text">{tr('Загружаем игру')}</p>
       </div>
     </div>
   );

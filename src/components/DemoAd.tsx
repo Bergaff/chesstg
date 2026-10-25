@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { tr, trf } from '../lib/i18n';
 
 export function DemoAd({ label, onFinish }: { label: string; onFinish: (rewarded: boolean) => void }): ReactNode {
   const [seconds, setSeconds] = useState(5);
@@ -24,17 +25,16 @@ export function DemoAd({ label, onFinish }: { label: string; onFinish: (rewarded
   }, []);
 
   return createPortal(
-    <div className="demo-ad" role="dialog" aria-modal="true" aria-label="Демонстрационная реклама">
+    <div className="demo-ad" role="dialog" aria-modal="true" aria-label={tr('Демонстрационная реклама')}>
       <div className="demo-card">
-        <span className="demo-tag">Демонстрационный показ</span>
-        <h2 className="demo-title">Здесь будет реклама</h2>
+        <span className="demo-tag">{tr('Демонстрационный показ')}</span>
+        <h2 className="demo-title">{tr('Здесь будет реклама')}</h2>
         <p className="demo-text">
-          В Telegram на этом месте открывается ролик Adsgram. Сейчас включён демонстрационный режим,
-          поэтому показывается заглушка с таймером.
+          {tr('В Telegram на этом месте открывается ролик Adsgram. Сейчас включён демонстрационный режим, поэтому показывается заглушка с таймером.')}
         </p>
 
         <div className="demo-reward">
-          <span className="label">Награда</span>
+          <span className="label">{tr('Награда')}</span>
           <b>{label}</b>
         </div>
         <div className="demo-progress" aria-hidden="true">
@@ -47,10 +47,10 @@ export function DemoAd({ label, onFinish }: { label: string; onFinish: (rewarded
             disabled={seconds > 0}
             onClick={() => finish(true)}
           >
-            {seconds > 0 ? `Забрать через ${seconds} с` : 'Забрать награду'}
+            {seconds > 0 ? trf('Забрать через {0} с', [seconds]) : tr('Забрать награду')}
           </button>
           <button type="button" className="btn btn-quiet btn-block" onClick={() => finish(false)}>
-            Закрыть без награды
+            {tr('Закрыть без награды')}
           </button>
         </div>
       </div>

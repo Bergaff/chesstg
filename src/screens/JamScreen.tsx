@@ -25,6 +25,7 @@ import type {
 import { JamBoard } from '../components/JamBoard';
 import { Modal } from '../components/Modal';
 import { RulesModal } from '../components/RulesModal';
+import { tr, trf } from '../lib/i18n';
 
 type Phase = 'loading' | 'pre' | 'playing' | 'finishing' | 'won' | 'lost';
 
@@ -135,7 +136,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
         void refresh();
       } catch (error) {
         finishingRef.current = false;
-        setFinishError(error instanceof ApiError ? error.message : 'Не удалось сохранить результат');
+        setFinishError(error instanceof ApiError ? error.message : tr('Не удалось сохранить результат'));
       }
     },
     [changePhase, refresh, setProfile],
@@ -175,7 +176,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       });
       const nextRun = response.run;
       if (!isJamState(nextRun.initial)) {
-        setStartError('Сервер прислал поле прежнего забега, этот режим его не принимает. «Начать заново» закроет старый забег, и поле сгенерируется заново.');
+        setStartError(tr('Сервер прислал поле прежнего забега, этот режим его не принимает. «Начать заново» закроет старый забег, и поле сгенерируется заново.'));
         changePhase('loading');
         return;
       }
@@ -188,7 +189,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
           current = applyJamAction(current, action, Error);
         }
       } catch {
-        setStartError('Не удалось восстановить партию: её ходы не подходят текущим правилам. «Начать заново» закроет её и выдаст новое поле.');
+        setStartError(tr('Не удалось восстановить партию: её ходы не подходят текущим правилам. «Начать заново» закроет её и выдаст новое поле.'));
         changePhase('loading');
         return;
       }
@@ -209,7 +210,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
         changePhase('pre');
       } else {
         changePhase('playing');
-        if (response.resumed) toast('Партия восстановлена', 'info');
+        if (response.resumed) toast(tr('Партия восстановлена'), 'info');
       }
     } catch (error) {
       if (error instanceof ApiError) {
@@ -225,7 +226,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
         }
         setStartError(error.message);
       } else {
-        setStartError('Не удалось загрузить поле. Проверьте связь.');
+        setStartError(tr('Не удалось загрузить поле. Проверьте связь.'));
       }
       changePhase('loading');
     }
@@ -315,7 +316,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       scheduleSave(nextActions);
       endOfLine(next);
     } catch (error) {
-      toast(error instanceof Error ? 'Так фигура не ходит' : 'Ход не прошёл', 'info');
+      toast(error instanceof Error ? tr('Так фигура не ходит') : tr('Ход не прошёл'), 'info');
       setSelected(null);
     }
   }
@@ -350,7 +351,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       setSelected(null);
       setHint(null);
       scheduleSave(targetActions);
-      toast('Ход отменён', 'success');
+      toast(tr('Ход отменён'), 'success');
     } catch (error) {
       handleBonusError(error);
     } finally {
@@ -367,7 +368,7 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       toast(error.message, 'error');
       return;
     }
-    toast('Бонус не сработал', 'error');
+    toast(tr('Бонус не сработал'), 'error');
   }
 
   async function useHint() {
@@ -388,10 +389,10 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       });
       setHint({ id: response.move.id, to: response.move.to });
       setSelected(response.move.id);
-      toast('Показали полезный ход', 'success');
+      toast(tr('Показали полезный ход'), 'success');
     } catch (error) {
       if (error instanceof ApiError && error.code === 'no_hint') {
-        toast('Полезного хода не видно: пробуйте разобрать пробку с другого края', 'info');
+        toast(tr('Полезного хода не видно: пробуйте разобрать пробку с другого края'), 'info');
       } else {
         handleBonusError(error);
       }
@@ -404,15 +405,15 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     if (adBusy || adLifeClaimed) return;
     setAdBusy(true);
     try {
-      const rewarded = await showAd('+1 жизнь');
+      const rewarded = await showAd(tr('+1 жизнь'));
       if (!rewarded) return;
       const response = await api<AdRewardResponse>('/api/ads/reward', { method: 'POST', body: { kind: 'life' } });
       setProfile(response.profile);
       setAdLifeClaimed(true);
       hapticNotify('success');
-      toast('+1 жизнь', 'success');
+      toast(tr('+1 жизнь'), 'success');
     } catch (error) {
-      toast(error instanceof ApiError ? error.message : 'Не удалось получить жизнь', 'error');
+      toast(error instanceof ApiError ? error.message : tr('Не удалось получить жизнь'), 'error');
     } finally {
       setAdBusy(false);
     }
@@ -455,17 +456,16 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
     const bot = config.botUsername;
     const level = result?.level ?? run?.level ?? profile.modes?.jam?.level ?? 1;
     const url = bot ? `https://t.me/${bot}?startapp=play` : '';
-    const text = `Собрал «Парковку» уровня ${level} в «Крае доски». За ${movesUsed} перестановок.`;
+    const text = trf('Собрал «Парковку» уровня {0} в «Крае доски». За {1} перестановок.', [level, movesUsed]);
     const status = await shareContent(text, url);
-    if (status === 'copied') toast('Текст скопирован', 'success');
-    if (status === 'failed') toast('Не удалось поделиться', 'error');
+    if (status === 'copied') toast(tr('Текст скопирован'), 'success');
+    if (status === 'failed') toast(tr('Не удалось поделиться'), 'error');
   }
 
   const movablePieces = useMemo(() => {
     if (!jam || !canPlay) return new Set<string>();
     return new Set(jamLegalActions(jam).map((action) => action.id));
   }, [canPlay, jam]);
-
 
   if (!jam || !run) {
     return (
@@ -477,15 +477,15 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
                 ♜
               </span>
               <h2 className="modal-title" style={{ margin: '0 auto 8px' }}>
-                Поле не загрузилось
+                {tr('Поле не загрузилось')}
               </h2>
               <p className="modal-text">{startError}</p>
               <div className="modal-actions" style={{ width: '100%' }}>
                 <button type="button" className="btn btn-primary" onClick={restartFresh}>
-                  Начать заново
+                  {tr('Начать заново')}
                 </button>
                 <button type="button" className="btn btn-quiet" onClick={onExit}>
-                  В меню
+                  {tr('В меню')}
                 </button>
               </div>
             </>
@@ -494,13 +494,13 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
               <span className="loading-mark serif" aria-hidden="true">
                 ♜
               </span>
-              <span className="label">Расставляем пробку</span>
-              <p className="loading-text">Готовим поле</p>
+              <span className="label">{tr('Расставляем пробку')}</span>
+              <p className="loading-text">{tr('Готовим поле')}</p>
             </>
           )}
           {!startError && (
             <button type="button" className="btn btn-quiet" onClick={onExit}>
-              В меню
+              {tr('В меню')}
             </button>
           )}
         </div>
@@ -511,33 +511,33 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
   return (
     <div className="screen game-screen jam-screen">
       <header className="game-top">
-        <button type="button" className="back-btn" onClick={requestExit} aria-label="Назад">
+        <button type="button" className="back-btn" onClick={requestExit} aria-label={tr('Назад')}>
           ←
         </button>
         <div className="game-heading">
-          <span className="label">{modeDef('jam').name}</span>
-          <b className="game-title">Уровень {run.level}</b>
+          <span className="label">{tr(modeDef('jam').name)}</span>
+          <b className="game-title">{tr('Уровень')} {run.level}</b>
         </div>
         <div className="game-hud">
           <span className="hud-item">
-            <span className="label">Жизни</span>
+            <span className="label">{tr('Жизни')}</span>
             <b>{profile.lives}</b>
           </span>
           <span className="hud-item">
-            <span className="label">Монеты</span>
+            <span className="label">{tr('Монеты')}</span>
             <b>{formatNumber(profile.coins)}</b>
           </span>
         </div>
       </header>
 
       <div className="game-status">
-        <span className={cn('status-item', movesLeft <= 3 && 'warn')}>ходов {movesLeft}</span>
+        <span className={cn('status-item', movesLeft <= 3 && 'warn')}>{tr('ходов')} {movesLeft}</span>
         <span className="status-sep" aria-hidden="true">/</span>
         <span className="status-item">
-          уведено {removed} из {total}
+          {trf('уведено {0} из {1}', [removed, total])}
         </span>
         <span className="status-sep" aria-hidden="true">/</span>
-        <span className="status-item">поле {jam.width}×{jam.height}</span>
+        <span className="status-item">{tr('поле')} {jam.width}×{jam.height}</span>
       </div>
 
       <div className="jam-progress" role="progressbar" aria-valuenow={removed} aria-valuemin={0} aria-valuemax={total}>
@@ -546,8 +546,8 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       <div className="board-area">
         <div className="goal-line">
-          <span>белые на нижний ряд, чёрные на верхний</span>
-          <span className="num">{selected ? 'выберите клетку' : 'троньте фигуру'}</span>
+          <span>{tr('белые на нижний ряд, чёрные на верхний')}</span>
+          <span className="num">{selected ? tr('выберите клетку') : tr('троньте фигуру')}</span>
         </div>
         <JamBoard
           state={jam}
@@ -562,9 +562,9 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
       <div className="game-controls">
         <div className="buff-row">
           <button type="button" className="buff-btn" onClick={() => void useHint()} disabled={!canPlay || bonusBusy}>
-            <span className="buff-name">Подсказка</span>
+            <span className="buff-name">{tr('Подсказка')}</span>
             <span className="buff-meta">
-              {profile.inventory.hint > 0 ? `в запасе ${profile.inventory.hint}` : `${BONUSES.hint.price} монет`}
+              {profile.inventory.hint > 0 ? trf('в запасе {0}', [profile.inventory.hint]) : trf('{0} монет', [BONUSES.hint.price])}
             </span>
           </button>
           <button
@@ -573,31 +573,31 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
             onClick={() => void useUndo()}
             disabled={!canPlay || bonusBusy || actions.length === 0}
           >
-            <span className="buff-name">Отмена</span>
+            <span className="buff-name">{tr('Отмена')}</span>
             <span className="buff-meta">
               {actions.length === 0
-                ? 'ходить нечем'
+                ? tr('ходить нечем')
                 : profile.inventory.undo > 0
-                  ? `в запасе ${profile.inventory.undo}`
-                  : `${BONUSES.undo.price} монет`}
+                  ? trf('в запасе {0}', [profile.inventory.undo])
+                  : trf('{0} монет', [BONUSES.undo.price])}
             </span>
           </button>
           <button type="button" className="buff-btn" onClick={() => setRulesOpen(true)}>
-            <span className="buff-name">Правила</span>
-            <span className="buff-meta">как переставлять</span>
+            <span className="buff-name">{tr('Правила')}</span>
+            <span className="buff-meta">{tr('как переставлять')}</span>
           </button>
         </div>
 
         <p className="control-hint">
           {jam.status === 'won'
-            ? 'Поле собрано.'
+            ? tr('Поле собрано.')
             : jam.status === 'lost'
-              ? 'Перестановки кончились, пробка не разошлась.'
+              ? tr('Перестановки кончились, пробка не разошлась.')
               : selected
-                ? 'Клетки с меткой - куда фигура доедет.'
+                ? tr('Клетки с меткой - куда фигура доедет.')
                 : movablePieces.size === 0
-                  ? 'Ни одна фигура не может сдвинуться: отмените ход.'
-                  : 'Ладья ездит прямо, слон по диагонали, конь перепрыгивает. Бить нельзя.'}
+                  ? tr('Ни одна фигура не может сдвинуться: отмените ход.')
+                  : tr('Ладья ездит прямо, слон по диагонали, конь перепрыгивает. Бить нельзя.')}
         </p>
       </div>
 
@@ -607,26 +607,24 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       {phase === 'pre' && (
         <Modal dismissible={false} onClose={() => undefined} labelledBy="jam-pre-title">
-          <span className="label">Поле {jam.width}×{jam.height}, фигур увести {total}</span>
+          <span className="label">{tr('Поле')} {jam.width}×{jam.height}{tr(', фигур увести')} {total}</span>
           <h2 className="modal-title" id="jam-pre-title">
-            {modeDef('jam').name}, уровень {run.level}
+            {tr(modeDef('jam').name)}{tr(', уровень')} {run.level}
           </h2>
           <p className="modal-text">
-            Все фигуры ваши - ходите любой по её шахматному правилу. Довели до её края - она ушла с
-            поля: белым нужен нижний ряд, чёрным верхний. Бить нельзя. Уведите всех за данный запас
-            ходов.
+            {tr('Все фигуры ваши - ходите любой по её шахматному правилу. Довели до её края - она ушла с поля: белым нужен нижний ряд, чёрным верхний. Бить нельзя. Уведите всех за данный запас ходов.')}
           </p>
           <div className="pre-meta">
             <div>
-              <span>Перестановок дано</span>
+              <span>{tr('Перестановок дано')}</span>
               <b>{budget}</b>
             </div>
             <div>
-              <span>Фигур на поле</span>
+              <span>{tr('Фигур на поле')}</span>
               <b>{jam.total}</b>
             </div>
             <div>
-              <span>Жизней в запасе</span>
+              <span>{tr('Жизней в запасе')}</span>
               <b>{profile.lives}</b>
             </div>
           </div>
@@ -639,10 +637,10 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
                 hapticImpact('medium');
               }}
             >
-              Начать
+              {tr('Начать')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onExit}>
-              В меню
+              {tr('В меню')}
             </button>
           </div>
         </Modal>
@@ -654,33 +652,33 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
             <div className="result-mark" aria-hidden="true">
               ♔
             </div>
-            <span className="label label-accent">Парковка, уровень {result.level}</span>
+            <span className="label label-accent">{tr('Парковка, уровень')} {result.level}</span>
             <h2 className="modal-title" id="jam-win-title">
-              Пробка разведена
+              {tr('Пробка разведена')}
             </h2>
             <p className="modal-text">
-              Все фигуры на чужой половине за {result.moves} перестановок.
+              {trf('Все фигуры на чужой половине за {0} перестановок.', [result.moves])}
             </p>
           </div>
           <div className="reward-list">
             <div className="reward-item">
-              <span>Монеты за уровень</span>
+              <span>{tr('Монеты за уровень')}</span>
               <b>+{result.coinsEarned}</b>
             </div>
             <div className="reward-item">
-              <span>Следующий уровень</span>
+              <span>{tr('Следующий уровень')}</span>
               <b>{result.nextLevel}</b>
             </div>
           </div>
           <div className="modal-actions">
             <button type="button" className="btn btn-primary" onClick={() => restart(false)}>
-              Дальше
+              {tr('Дальше')}
             </button>
             <button type="button" className="btn btn-outline" onClick={() => void shareResult()}>
-              Поделиться
+              {tr('Поделиться')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onExit}>
-              В меню
+              {tr('В меню')}
             </button>
           </div>
         </Modal>
@@ -692,44 +690,46 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
             <div className="result-mark danger" aria-hidden="true">
               <span className="result-glyph">♜</span>
             </div>
-            <span className="label">Парковка, уровень {result.level}</span>
+            <span className="label">{trf('Парковка, уровень {0}', [result.level])}</span>
             <h2 className="modal-title" id="jam-lose-title">
-              Ходы кончились
+              {tr('Ходы кончились')}
             </h2>
             <p className="modal-text">
-              Уведено {removed} из {total}. Жизнь списана, уровень тот же: попробуйте другой порядок
-              перестановок или получите то же поле ещё раз.
+              {trf(
+                'Уведено {0} из {1}. Жизнь списана, уровень тот же: попробуйте другой порядок перестановок или получите то же поле ещё раз.',
+                [removed, total],
+              )}
             </p>
           </div>
           {profile.lives === 0 && !profile.adFree && (
             <p className="modal-text">
-              Жизней нет: посмотрите видео и играйте дальше, либо купите жизни за звёзды.
+              {tr('Жизней нет: посмотрите видео и играйте дальше, либо купите жизни за звёзды.')}
             </p>
           )}
           <div className="modal-actions">
             {profile.lives > 0 ? (
               <button type="button" className="btn btn-primary" onClick={() => restart(true)}>
-                Переиграть поле
+                {tr('Переиграть поле')}
               </button>
             ) : profile.adFree ? (
               <button type="button" className="btn btn-primary" onClick={() => restart(true)} disabled>
-                Нет жизней
+                {tr('Нет жизней')}
               </button>
             ) : (
               <button type="button" className="btn btn-primary" onClick={() => void watchLifeAd()} disabled={adBusy || adLifeClaimed}>
-                {adLifeClaimed ? 'Жизнь получена' : adBusy ? 'Смотрим видео' : 'Видео за жизнь'}
+                {adLifeClaimed ? tr('Жизнь получена') : adBusy ? tr('Смотрим видео') : tr('Видео за жизнь')}
               </button>
             )}
             <button type="button" className="btn btn-outline" onClick={() => restart(false)}>
-              Новое поле
+              {tr('Новое поле')}
             </button>
             {profile.lives === 0 && (
               <button type="button" className="btn btn-outline" onClick={goShopStars}>
-                Жизни за звёзды
+                {tr('Жизни за звёзды')}
               </button>
             )}
             <button type="button" className="btn btn-quiet" onClick={onExit}>
-              В меню
+              {tr('В меню')}
             </button>
           </div>
         </Modal>
@@ -737,15 +737,15 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       {quitOpen && (
         <Modal onClose={() => setQuitOpen(false)}>
-          <span className="label">Пауза</span>
-          <h2 className="modal-title">Выйти в меню</h2>
-          <p className="modal-text">Позиция сохранится, можно вернуться к этой пробке позже.</p>
+          <span className="label">{tr('Пауза')}</span>
+          <h2 className="modal-title">{tr('Выйти в меню')}</h2>
+          <p className="modal-text">{tr('Позиция сохранится, можно вернуться к этой пробке позже.')}</p>
           <div className="modal-actions">
             <button type="button" className="btn btn-primary" onClick={confirmExit}>
-              Выйти
+              {tr('Выйти')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => setQuitOpen(false)}>
-              Остаться
+              {tr('Остаться')}
             </button>
           </div>
         </Modal>
@@ -753,9 +753,9 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       {finishError && (
         <Modal dismissible={false} onClose={() => undefined}>
-          <span className="label">Сбой</span>
-          <h2 className="modal-title">Результат не сохранился</h2>
-          <p className="modal-text">{finishError}. Партия осталась на сервере, можно повторить отправку.</p>
+          <span className="label">{tr('Сбой')}</span>
+          <h2 className="modal-title">{tr('Результат не сохранился')}</h2>
+          <p className="modal-text">{finishError}{tr('. Партия осталась на сервере, можно повторить отправку.')}</p>
           <div className="modal-actions">
             <button
               type="button"
@@ -767,10 +767,10 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
                 }
               }}
             >
-              Повторить
+              {tr('Повторить')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={onExit}>
-              В меню
+              {tr('В меню')}
             </button>
           </div>
         </Modal>
@@ -778,11 +778,11 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
 
       {noCoins && (
         <Modal onClose={() => setNoCoins(false)} showClose>
-          <span className="label">Магазин</span>
-          <h2 className="modal-title">Монет не хватает</h2>
+          <span className="label">{tr('Магазин')}</span>
+          <h2 className="modal-title">{tr('Монет не хватает')}</h2>
           <p className="modal-text">
-            Монеты падают за победы в кампании и режимах с уровнем, за рекорды и за видео. Награда за
-            этот уровень: {formatNumber(profile.coins)} монет в запасе.
+            {tr('Монеты падают за победы в кампании и режимах с уровнем, за рекорды и за видео.')}{' '}
+            {trf('Награда за этот уровень: {0} монет в запасе.', [formatNumber(profile.coins)])}
           </p>
           <div className="modal-actions">
             <button
@@ -793,10 +793,10 @@ export function JamScreen({ onExit, onNoLives, onTerms, onPrivacy }: JamScreenPr
                 goShopStars();
               }}
             >
-              Открыть магазин
+              {tr('Открыть магазин')}
             </button>
             <button type="button" className="btn btn-quiet" onClick={() => setNoCoins(false)}>
-              Позже
+              {tr('Позже')}
             </button>
           </div>
         </Modal>

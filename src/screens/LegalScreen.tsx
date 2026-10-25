@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { PRIVACY, TERMS, type LegalDocument } from '../legal/content';
+import { tr } from '../lib/i18n';
 
 interface LegalScreenProps {
   kind: 'terms' | 'privacy';
@@ -14,30 +15,30 @@ export function LegalScreen({ kind, onBack, onSwitch }: LegalScreenProps): React
   return (
     <div className="screen legal-screen">
       <div className="page-top">
-        <button type="button" className="back-btn" onClick={onBack} aria-label="Назад">
+        <button type="button" className="back-btn" onClick={onBack} aria-label={tr('Назад')}>
           ←
         </button>
         <div className="page-heading">
-          <span className="label">{doc.kicker}</span>
-          <h1 className="page-title">Правовая информация</h1>
+          <span className="label">{tr(doc.kicker)}</span>
+          <h1 className="page-title">{tr('Правовая информация')}</h1>
         </div>
       </div>
 
-      <h2 className="legal-title">{doc.title}</h2>
-      <p className="legal-updated">{doc.updated}</p>
-      <p className="lede" style={{ marginTop: 12 }}>{doc.intro}</p>
+      <h2 className="legal-title">{tr(doc.title)}</h2>
+      <p className="legal-updated">{tr(doc.updated)}</p>
+      <p className="lede" style={{ marginTop: 12 }}>{tr(doc.intro)}</p>
 
       <div className="legal-body">
         {doc.sections.map((section) => (
           <section className="legal-section" key={section.title}>
-            <h2>{section.title}</h2>
+            <h2>{tr(section.title)}</h2>
             {section.paragraphs?.map((text) => (
-              <p key={text.slice(0, 40)}>{text}</p>
+              <p key={text.slice(0, 40)}>{tr(text)}</p>
             ))}
             {section.items && (
               <ul>
                 {section.items.map((item) => (
-                  <li key={item.slice(0, 40)}>{item}</li>
+                  <li key={item.slice(0, 40)}>{tr(item)}</li>
                 ))}
               </ul>
             )}
@@ -47,9 +48,9 @@ export function LegalScreen({ kind, onBack, onSwitch }: LegalScreenProps): React
 
       <div className="legal-foot">
         <button type="button" onClick={() => onSwitch(other)}>
-          {other === 'terms' ? 'Условия использования' : 'Политика конфиденциальности'}
+          {other === 'terms' ? tr('Условия использования') : tr('Политика конфиденциальности')}
         </button>
-        <span>Край доски, 2026</span>
+        <span>{tr('Край доски, 2026')}</span>
       </div>
     </div>
   );

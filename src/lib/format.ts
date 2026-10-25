@@ -1,3 +1,4 @@
+import { tr, trf } from '../lib/i18n';
 export function formatNumber(value: number): string {
   return Math.max(0, Math.round(value))
     .toString()
@@ -15,11 +16,11 @@ export function formatDuration(ms: number): string {
 
 export function formatCompactDuration(ms: number): string {
   const totalMinutes = Math.ceil(Math.max(0, ms) / 60000);
-  if (totalMinutes < 1) return 'меньше минуты';
-  if (totalMinutes < 60) return `${totalMinutes} мин`;
+  if (totalMinutes < 1) return tr('меньше минуты');
+  if (totalMinutes < 60) return trf('{0} мин', [totalMinutes]);
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return minutes > 0 ? `${hours} ч ${minutes} мин` : `${hours} ч`;
+  return minutes > 0 ? trf('{0} ч {1} мин', [hours, minutes]) : trf('{0} ч', [hours]);
 }
 
 export function plural(n: number, one: string, few: string, many: string): string {

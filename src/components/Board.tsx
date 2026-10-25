@@ -16,6 +16,7 @@ import {
   type ResolvedSkin,
 } from '../engine';
 import { cn } from '../lib/format';
+import { tr, trf } from '../lib/i18n';
 
 /**
  * Размер клетки держится с гистерезисом. Строка статуса и подпись цели
@@ -200,7 +201,7 @@ export function Board({
             gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
           }}
           role="grid"
-          aria-label="Игровое поле"
+          aria-label={tr('Игровое поле')}
         >
           {Array.from({ length: rows }).map((_, rowIndex) =>
             Array.from({ length: cols }).map((__, colIndex) => {
@@ -252,15 +253,15 @@ export function Board({
                   aria-label={
                     enemy
                       ? move?.strike
-                        ? `Клетка ${x + 1}, ${y + 1}: выпад через линию, взять фигуру и остаться на месте`
+                        ? trf('Клетка {0}, {1}: выпад через линию, взять фигуру и остаться на месте', [x + 1, y + 1])
                         : move?.takes
-                          ? `Клетка ${x + 1}, ${y + 1}: взять вражескую фигуру`
-                          : `Клетка ${x + 1}, ${y + 1}: вражеская фигура`
+                          ? trf('Клетка {0}, {1}: взять вражескую фигуру', [x + 1, y + 1])
+                          : trf('Клетка {0}, {1}: вражеская фигура', [x + 1, y + 1])
                       : isPlayer
-                        ? `Клетка ${x + 1}, ${y + 1}: ваш король`
+                        ? trf('Клетка {0}, {1}: ваш король', [x + 1, y + 1])
                         : move
-                          ? `Клетка ${x + 1}, ${y + 1}: ход${risk ? ', под боем' : ''}`
-                          : `Клетка ${x + 1}, ${y + 1}`
+                          ? trf('Клетка {0}, {1}: ход{2}', [x + 1, y + 1, risk ? tr(', под боем') : ''])
+                          : trf('Клетка {0}, {1}', [x + 1, y + 1])
                   }
                 >
                   {hintIndex >= 0 && <span className="hint-no">{hintIndex + 1}</span>}
@@ -291,7 +292,7 @@ export function Board({
                       <span className="piece-glyph">{PIECE_GLYPH[enemy.type]}</span>
                       {state.freeze > 0 && (
                         <span className="enemy-status" aria-hidden="true">
-                          лёд
+                          {tr('лёд')}
                         </span>
                       )}
                     </span>
@@ -320,7 +321,7 @@ export function Board({
                       </span>
                       {state.shield > 0 && (
                         <span className="player-badge" aria-hidden="true">
-                          щ{state.shield}
+                          {tr('щ')}{state.shield}
                         </span>
                       )}
                     </span>
@@ -362,7 +363,7 @@ export function Board({
             </div>
           )}
       </div>
-      {settling && <div className="board-turn-flag">{king ? 'фигуры идут' : 'ход фигур'}</div>}
+      {settling && <div className="board-turn-flag">{king ? tr('фигуры идут') : tr('ход фигур')}</div>}
       {cell === 0 && <div className="board-placeholder" />}
     </div>
   );

@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, type Plugin } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 /** В разработке /admin отдаёт admin.html, в сборке это отдельная страница. */
@@ -30,6 +30,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  test: {
+    setupFiles: ['tests/setup.lang.ts'],
   },
   build: {
     outDir: 'dist',

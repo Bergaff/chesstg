@@ -10,6 +10,7 @@ import {
   type JamState,
 } from '../engine';
 import { cn } from '../lib/format';
+import { tr, trf } from '../lib/i18n';
 
 interface JamBoardProps {
   state: JamState;
@@ -88,7 +89,7 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
             gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
           }}
           role="grid"
-          aria-label="Поле парковки"
+          aria-label={tr('Поле парковки')}
         >
           {Array.from({ length: rows }).map((_, rowIndex) =>
             Array.from({ length: cols }).map((__, colIndex) => {
@@ -126,16 +127,23 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                   disabled={!interactive || (!piece && !target)}
                   aria-label={
                     piece
-                      ? `${piece.side === 'white' ? 'белая' : 'чёрная'} ${JAM_PIECE_NAME[
-                          piece.type
-                        ].toLowerCase()}, клетка ${x + 1}, ${y + 1}${canExit ? ', может уйти с поля' : ''}`
+                      ? trf(
+                          tr('{0} {1}, клетка {2}, {3}{4}'),
+                          [
+                            piece.side === 'white' ? tr('белая') : tr('чёрная'),
+                            JAM_PIECE_NAME[piece.type].toLowerCase(),
+                            x + 1,
+                            y + 1,
+                            canExit ? tr(', может уйти с поля') : '',
+                          ],
+                        )
                       : exitHere
-                        ? `клетка ${x + 1}, ${y + 1}: сюда встанет край, фигура уйдёт с поля`
+                        ? trf('клетка {0}, {1}: сюда встанет край, фигура уйдёт с поля', [x + 1, y + 1])
                         : target
-                          ? `клетка ${x + 1}, ${y + 1}: сюда можно поставить фигуру`
+                          ? trf('клетка {0}, {1}: сюда можно поставить фигуру', [x + 1, y + 1])
                           : leftHere
-                            ? `клетка ${x + 1}, ${y + 1}: отсюда фигура ушла`
-                            : `клетка ${x + 1}, ${y + 1}`
+                            ? trf('клетка {0}, {1}: отсюда фигура ушла', [x + 1, y + 1])
+                            : trf('клетка {0}, {1}', [x + 1, y + 1])
                   }
                   onClick={() => {
                     if (!interactive) return;

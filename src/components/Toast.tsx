@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '../lib/format';
+import { tr } from '../lib/i18n';
 
 export type ToastKind = 'success' | 'error' | 'info';
 
@@ -10,9 +11,9 @@ export interface ToastItem {
 }
 
 const LABELS: Record<ToastKind, string> = {
-  success: 'Готово',
-  error: 'Ошибка',
-  info: 'Заметка',
+  success: tr('Готово'),
+  error: tr('Ошибка'),
+  info: tr('Заметка'),
 };
 
 export function ToastStack({ items, onDismiss }: { items: ToastItem[]; onDismiss: (id: number) => void }): ReactNode {

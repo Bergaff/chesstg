@@ -1,3 +1,5 @@
+import { getLang, LANG_HEADER, tr } from './i18n';
+
 const GUEST_KEY = 'pva.guest.v1';
 export const SESSION_KEY = 'pva.session.v1';
 const LINK_KEY = 'pva.link.v1';
@@ -123,7 +125,7 @@ interface ApiOptions {
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { ...authHeaders() };
+  const headers: Record<string, string> = { ...authHeaders(), [LANG_HEADER]: getLang() };
   let body: string | undefined;
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -135,7 +137,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     response = await fetch(path, { method: options.method ?? (body ? 'POST' : 'GET'), headers, body, signal: options.signal });
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error;
-    throw new ApiError(0, 'network', 'Нет связи с сервером. Проверь интернет и попробуй ещё раз.');
+    throw new ApiError(0, 'network', tr('Нет связи с сервером. Проверь интернет и попробуй ещё раз.'));
   }
 
   let data: Record<string, unknown> = {};
@@ -148,12 +150,16 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
 
   if (!response.ok) {
     const code = typeof data.error === 'string' ? data.error : `http_${response.status}`;
-    const message =
+    // Сообщения воркера приходят по-русски: коды ошибок стабильны, а текст клиент
+    // прогоняет через тот же словарь, что и свои подписи. Числа в сумме ищутся как
+    // {0}, поэтому «Не хватает монет: нужно 1200» переводится одной строкой словаря.
+    const raw =
       typeof data.message === 'string' && data.message
         ? data.message
         : response.status === 401
           ? 'Открой игру через Telegram'
           : 'Что-то пошло не так';
+    const message = tr(raw);
     // Протухший или подделанный сеанс не должен блокировать игру: сбрасываем его,
     // дальше клиент снова работает как гость и сможет войти заново.
     if (code === 'session_expired' || code === 'session_unknown' || code === 'session_secret_missing') {

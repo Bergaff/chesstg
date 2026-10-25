@@ -13,6 +13,7 @@ import {
   type JamState,
 } from '../src/engine';
 import type { AppConfig, FinishResult, Profile, SessionResponse } from '../src/lib/types';
+import { resetLang, setLang } from '../src/lib/i18n';
 
 const SEED = 20261019;
 
@@ -289,6 +290,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetLang();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -306,6 +308,25 @@ describe('UI smoke', () => {
     expect(screen.getByText(/Сохранение прогресса/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Привязать Telegram' })).toBeTruthy();
     expect(screen.getByText(/Без входа прогресс живёт в этом браузере/)).toBeTruthy();
+  });
+
+  // Язык выбирает клиент Telegram, поэтому английская витрина - не отдельный
+  // экран с переключателем, а тот же самый меню-рид с другим словарём.
+  it('английский клиент видит меню по-английски', async () => {
+    setLang('en');
+    const { default: App } = await import('../src/App');
+    render(createElement(App));
+    await screen.findByText('Board');
+    // Заголовок складывается из двух подписей: на английском порядок тот же.
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Board Edge');
+    expect(screen.getByText('Four modes on one board', { exact: false })).toBeTruthy();
+    expect(screen.getByText('Sections')).toBeTruthy();
+    expect(screen.getByText('Coin bonuses, skins and star purchases')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Play|Continue/ })).toBeTruthy();
+    expect(screen.getByText('Campaign')).toBeTruthy();
+    // Русского в разметке не остаётся: ни в подписи ресурса, ни в футере.
+    expect(screen.getByText('Rules')).toBeTruthy();
+    expect(screen.getByText('Terms')).toBeTruthy();
   });
 
   it('загружает меню и показывает ключевые блоки', async () => {

@@ -300,28 +300,25 @@ a {
 /* ─────────────── меню ─────────────── */
 
 .masthead {
-  padding: 26px 0 22px;
-  // Фигура темы стоит справа от текста: на широком экране описание жалось в
-  // 330 пикселей, а половина шапки пустовала. Теперь строка использует ширину
-  // колонки целиком, и заодно видно, что надето.
-  display: flex;
-  align-items: flex-end;
-  gap: 18px;
+  // Воздуха сверху было 26px - вместе с перенесённой в строку заголовка
+  // фигурой шапка съедала экран, и режимы уползали за сгиб.
+  padding: 6px 0 16px;
 }
 
-.masthead-text {
-  flex: 1 1 auto;
+.masthead-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
 .masthead-figure {
   flex: 0 0 auto;
-  margin-bottom: 4px;
 }
 
 .masthead-kicker {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .masthead-title {
@@ -341,7 +338,7 @@ a {
 }
 
 .masthead-sub {
-  margin-top: 12px;
+  margin-top: 10px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--muted);
@@ -406,7 +403,7 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .menu-modes .cta-block {
@@ -2816,8 +2813,10 @@ a {
 /* ─────────────── адаптив ─────────────── */
 
 @media (max-height: 720px) {
+  // На низких экранах шапка поднимается ещё сильнее: цифра сверху держится
+  // меньше базовой, иначе фигура в строке заголовка не даёт режимам влезть.
   .masthead {
-    padding: 18px 0 16px;
+    padding: 4px 0 12px;
   }
 
   .masthead-title {
@@ -2857,7 +2856,7 @@ a {
 
 @media (max-height: 620px) {
   .masthead {
-    padding: 12px 0 12px;
+    padding: 2px 0 10px;
   }
 
   .masthead-title {

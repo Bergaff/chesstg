@@ -5,6 +5,7 @@ import { api, ApiError } from '../lib/api';
 import { appBaseUrl, cn, formatNumber } from '../lib/format';
 import { shareContent } from '../lib/telegram';
 import type { LeaderboardResponse, LeaderboardRow } from '../lib/types';
+import { tr, trf } from '../lib/i18n';
 
 interface RecordsScreenProps {
   onBack: () => void;
@@ -31,7 +32,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
       if (requestId === requestRef.current) setData(response);
     } catch (err) {
       if (requestId === requestRef.current) {
-        setError(err instanceof ApiError ? err.message : 'Не удалось загрузить рекорды');
+        setError(err instanceof ApiError ? err.message : tr('Не удалось загрузить рекорды'));
       }
     } finally {
       if (requestId === requestRef.current) setLoading(false);
@@ -44,10 +45,10 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
   async function shareInvite() {
     const link = data?.inviteLink ?? appBaseUrl(config.webappUrl);
-    const text = 'Загляните в «Край доски»: там три режима на одной доске и фигуры, которые охотятся. У меня уже есть рекорд, попробуйте побить.';
+    const text = tr('Загляните в «Край доски»: там три режима на одной доске и фигуры, которые охотятся. У меня уже есть рекорд, попробуйте побить.');
     const status = await shareContent(text, link);
-    if (status === 'copied') toast('Ссылка скопирована', 'success');
-    if (status === 'failed') toast('Не удалось поделиться', 'error');
+    if (status === 'copied') toast(tr('Ссылка скопирована'), 'success');
+    if (status === 'failed') toast(tr('Не удалось поделиться'), 'error');
   }
 
   async function shareRecord() {
@@ -63,102 +64,102 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
     const level = metric === 'campaign' ? profile.maxLevel : profile.modes?.[metric]?.level ?? 1;
     const text =
       metric === 'endless'
-        ? `Мой рекорд в «Крае доски», ${profile.endlessBest} клеток. Слабо выше?`
+        ? trf('Мой рекорд в «Крае доски», {0} клеток. Слабо выше?', [profile.endlessBest])
         : metric === 'campaign'
-          ? `Я дошёл до ${profile.maxLevel} уровня в «Крае доски». Сможешь лучше?`
-          : `В режиме «${modeDef(metric).name}» я на ${level} уровне ${levelMetric ? ', дойдите и вы' : ''}.`;
+          ? trf('Я дошёл до {0} уровня в «Крае доски». Сможешь лучше?', [profile.maxLevel])
+          : trf('В режиме «{0}» я на {1} уровне {2}.', [tr(modeDef(metric).name), level, levelMetric ? tr(', дойдите и вы') : '']);
     const status = await shareContent(text, url);
-    if (status === 'copied') toast('Ссылка скопирована', 'success');
-    if (status === 'failed') toast('Не удалось поделиться', 'error');
+    if (status === 'copied') toast(tr('Ссылка скопирована'), 'success');
+    if (status === 'failed') toast(tr('Не удалось поделиться'), 'error');
   }
 
   const rows = data?.rows ?? [];
   const myRank = data?.myRank ?? 0;
   const valueFor = (row: LeaderboardRow) =>
     metric === 'endless'
-      ? `${formatNumber(row.endlessBest)} клеток`
+      ? trf('{0} клеток', [formatNumber(row.endlessBest)])
       : metric === 'campaign'
-        ? `уровень ${row.maxLevel}`
+        ? trf('уровень {0}', [row.maxLevel])
         : metric === 'race'
-          ? `${row.modeBest ?? 0} ходов, уровень ${row.modeLevel}`
-          : `уровень ${row.modeLevel}`;
+          ? trf('{0} ходов, уровень {1}', [row.modeBest ?? 0, row.modeLevel])
+          : trf('уровень {0}', [row.modeLevel]);
 
   return (
     <div className="screen records-screen">
       <header className="page-top">
-        <button type="button" className="back-btn" onClick={onBack} aria-label="Назад">
+        <button type="button" className="back-btn" onClick={onBack} aria-label={tr('Назад')}>
           ←
         </button>
         <div className="page-heading" style={{ flex: 1 }}>
-          <span className="label">Таблица лидеров</span>
-          <h1 className="page-title">Рекорды</h1>
+          <span className="label">{tr('Таблица лидеров')}</span>
+          <h1 className="page-title">{tr('Рекорды')}</h1>
         </div>
         <button type="button" className="btn btn-quiet" style={{ minHeight: 30, padding: '0 4px', fontSize: 11 }} onClick={() => void shareRecord()}>
-          Поделиться
+          {tr('Поделиться')}
         </button>
       </header>
 
       <div className="metric-row">
-        <span className="metric-key">Рекорд высоты</span>
+        <span className="metric-key">{tr('Рекорд высоты')}</span>
         <span className="metric-val">{formatNumber(profile.endlessBest)}</span>
       </div>
       <div className="metric-row">
-        <span className="metric-key">Достигнутый уровень</span>
+        <span className="metric-key">{tr('Достигнутый уровень')}</span>
         <span className="metric-val">{profile.maxLevel}</span>
       </div>
       <div className="metric-row">
-        <span className="metric-key">Приглашено друзей</span>
+        <span className="metric-key">{tr('Приглашено друзей')}</span>
         <span className="metric-val">{invitedCount}</span>
       </div>
 
       <div className="tabs" role="tablist" style={{ marginTop: 20 }}>
         <button type="button" role="tab" aria-selected={metric === 'endless'} className={cn('tab', metric === 'endless' && 'active')} onClick={() => setMetric('endless')}>
-          Бесконечный
+          {tr('Бесконечный')}
         </button>
         <button type="button" role="tab" aria-selected={metric === 'campaign'} className={cn('tab', metric === 'campaign' && 'active')} onClick={() => setMetric('campaign')}>
-          Кампания
+          {tr('Кампания')}
         </button>
         <button type="button" role="tab" aria-selected={metric === 'jam'} className={cn('tab', metric === 'jam' && 'active')} onClick={() => setMetric('jam')}>
-          Парковка
+          {tr('Парковка')}
         </button>
         <button type="button" role="tab" aria-selected={metric === 'race'} className={cn('tab', metric === 'race' && 'active')} onClick={() => setMetric('race')}>
-          Гонки
+          {tr('Гонки')}
         </button>
       </div>
 
       <div className="filter-row">
         <button type="button" className={cn('filter', scope === 'global' && 'active')} onClick={() => setScope('global')}>
-          Мировая таблица
+          {tr('Мировая таблица')}
         </button>
         <button type="button" className={cn('filter', scope === 'friends' && 'active')} onClick={() => setScope('friends')}>
-          Друзья
+          {tr('Друзья')}
         </button>
-        {myRank > 0 && <span className="my-rank">ваше место: {myRank}</span>}
+        {myRank > 0 && <span className="my-rank">{tr('ваше место:')} {myRank}</span>}
       </div>
 
-      {loading && <p className="loading-line">Загружаем таблицу.</p>}
+      {loading && <p className="loading-line">{tr('Загружаем таблицу.')}</p>}
 
       {!loading && error && (
         <div className="empty-state">
-          <h3>Рекорды не загрузились</h3>
+          <h3>{tr('Рекорды не загрузились')}</h3>
           <p>{error}</p>
           <button type="button" className="btn btn-outline" onClick={() => void load()}>
-            Повторить
+            {tr('Повторить')}
           </button>
         </div>
       )}
 
       {!loading && !error && rows.length === 0 && (
         <div className="empty-state">
-          <h3>{scope === 'friends' ? 'Пока только вы' : 'Рекордов ещё нет'}</h3>
+          <h3>{scope === 'friends' ? tr('Пока только вы') : tr('Рекордов ещё нет')}</h3>
           <p>
             {scope === 'friends'
-              ? 'Пригласите друга, и он появится в этом списке. Telegram не отдаёт контакты без разрешения, поэтому друзья считаются по вашей ссылке.'
-              : 'Пройдите первый уровень или завершите забег, и имя появится в таблице.'}
+              ? tr('Пригласите друга, и он появится в этом списке. Telegram не отдаёт контакты без разрешения, поэтому друзья считаются по вашей ссылке.')
+              : tr('Пройдите первый уровень или завершите забег, и имя появится в таблице.')}
           </p>
           {scope === 'friends' && (
             <button type="button" className="btn btn-primary" onClick={() => void shareInvite()}>
-              Пригласить друга
+              {tr('Пригласить друга')}
             </button>
           )}
         </div>
@@ -167,8 +168,8 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
       {!loading && !error && rows.length > 0 && (
         <>
           <div className="rank-head">
-            <span className="label">{metric === 'endless' ? 'Клеток' : 'Уровень'}</span>
-            <span className="label">{scope === 'friends' ? 'Друзья' : 'Все игроки'}</span>
+            <span className="label">{metric === 'endless' ? tr('Клеток') : tr('Уровень')}</span>
+            <span className="label">{scope === 'friends' ? tr('Друзья') : tr('Все игроки')}</span>
           </div>
           <div className="rank-list">
             {rows.map((row) => (
@@ -176,7 +177,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
                 <span className="rank-no">{row.rank}</span>
                 <span className="rank-name">
                   {row.name}
-                  {row.isMe && <em>вы</em>}
+                  {row.isMe && <em>{tr('вы')}</em>}
                 </span>
                 <span className="rank-value">{valueFor(row)}</span>
               </div>
@@ -185,7 +186,7 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
           {myRank > 0 && (
             <div className="rank-head">
-              <span className="label">Ваше место</span>
+              <span className="label">{tr('Ваше место')}</span>
               <span className="rank-value">{myRank}</span>
             </div>
           )}
@@ -194,22 +195,22 @@ export function RecordsScreen({ onBack }: RecordsScreenProps): ReactNode {
 
       {scope === 'friends' && rows.length > 0 && (
         <div className="invite-block">
-          <b>Позвать друга</b>
-          <p>Он появится в таблице друзей, а вы оба получите по 25 монет.</p>
+          <b>{tr('Позвать друга')}</b>
+          <p>{tr('Он появится в таблице друзей, а вы оба получите по 25 монет.')}</p>
           <button type="button" className="btn btn-outline" onClick={() => void shareInvite()}>
-            Отправить ссылку
+            {tr('Отправить ссылку')}
           </button>
         </div>
       )}
 
       <p className="records-footnote">
         {scope === 'friends'
-          ? 'Друзья это те, кто пришёл по вашей ссылке. Контакты Telegram игра не запрашивает.'
-          : 'Рекорд фиксируется после завершения забега. Гости в мировой таблице не участвуют.'}
+          ? tr('Друзья это те, кто пришёл по вашей ссылке. Контакты Telegram игра не запрашивает.')
+          : tr('Рекорд фиксируется после завершения забега. Гости в мировой таблице не участвуют.')}
       </p>
 
       <button type="button" className="records-shop-link" onClick={goShop}>
-        Заглянуть в магазин
+        {tr('Заглянуть в магазин')}
       </button>
     </div>
   );

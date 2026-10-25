@@ -10,6 +10,7 @@ import type { AdRewardResponse } from '../lib/types';
 import { HeartsRow, Hud, ProfileChip } from '../components/Hud';
 import { ChallengeBanner } from '../components/ChallengeBanner';
 import { SkinMark } from '../components/SkinMark';
+import { tr, trf } from '../lib/i18n';
 
 interface MenuScreenProps {
   onPlay: (mode: GameMode) => void;
@@ -38,14 +39,14 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
     if (adLoading || cooldownLeft > 0 || profile.adFree) return;
     setAdLoading(true);
     try {
-      const rewarded = await showAd(`+${AD_COINS_REWARD} монет`);
+      const rewarded = await showAd(trf('+{0} монет', [AD_COINS_REWARD]));
       if (!rewarded) return;
       const response = await api<AdRewardResponse>('/api/ads/reward', {
         method: 'POST',
         body: { kind: 'coins' },
       });
       setProfile(response.profile);
-      toast(`+${AD_COINS_REWARD} монет`, 'success');
+      toast(trf('+{0} монет', [AD_COINS_REWARD]), 'success');
     } catch (error) {
       if (error instanceof ApiError) {
         if (error.status === 429) {
@@ -54,7 +55,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         }
         toast(error.message, 'error');
       } else {
-        toast('Не удалось получить награду', 'error');
+        toast(tr('Не удалось получить награду'), 'error');
       }
     } finally {
       setAdLoading(false);
@@ -84,21 +85,22 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
     const numbers =
       mode === 'endless'
         ? profile.endlessBest > 0
-          ? `Рекорд ${formatNumber(profile.endlessBest)} клеток`
-          : 'Рекорда ещё нет'
-        : `Уровень ${progress?.level ?? 1}, ${
+          ? trf('Рекорд {0} клеток', [formatNumber(profile.endlessBest)])
+          : tr('Рекорда ещё нет')
+        : trf('Уровень {0}, {1}', [
+            progress?.level ?? 1,
             mode === 'race'
               ? best
-                ? `рекорд ${formatNumber(best)} ходов`
-                : 'считается длина забега'
-              : `пройдено ${formatNumber(cleared)}`
-          }`;
+                ? trf('рекорд {0} ходов', [formatNumber(best)])
+                : tr('считается длина забега')
+              : trf('пройдено {0}', [formatNumber(cleared)]),
+          ]);
     const status = !unlocked
-      ? `Откроется на ${progress?.unlockAtLevel ?? 3} уровне кампании`
+      ? trf('Откроется на {0} уровне кампании', [progress?.unlockAtLevel ?? 3])
       : run
         ? mode === 'endless'
-          ? `Незаконченный забег: высота ${run.score}, ход ${run.moves + 1}`
-          : `Незаконченная партия: уровень ${run.level}, ход ${run.moves + 1}`
+          ? trf('Незаконченный забег: высота {0}, ход {1}', [run.score, run.moves + 1])
+          : trf('Незаконченная партия: уровень {0}, ход {1}', [run.level, run.moves + 1])
         : description;
     return (
       <button
@@ -109,7 +111,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       >
         <span className="cta-body">
           <span className="label">{title}</span>
-          <span className="cta-title serif">{unlocked ? (run ? 'Продолжить' : 'Играть') : 'Закрыт'}</span>
+          <span className="cta-title serif">{unlocked ? (run ? tr('Продолжить') : tr('Играть')) : tr('Закрыт')}</span>
           <span className="cta-meta">{unlocked ? `${status} ${numbers}` : status}</span>
         </span>
         <span className="cta-arrow" aria-hidden="true">→</span>
@@ -123,7 +125,7 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         <ProfileChip profile={profile} />
         <div className="topbar-actions">
           <Hud profile={profile} onCoins={goShop} onLives={goShopStars} />
-          <button type="button" className="help-btn" onClick={onOpenRules} aria-label="Правила игры">
+          <button type="button" className="help-btn" onClick={onOpenRules} aria-label={tr('Правила игры')}>
             ?
           </button>
         </div>
@@ -134,20 +136,23 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       )}
 
       <section className="masthead">
-        <div className="masthead-text">
-          <span className="label masthead-kicker">Шахматные головоломки в Telegram</span>
+        <span className="label masthead-kicker">{tr('Шахматные головоломки в Telegram')}</span>
+        <div className="masthead-line">
           <h1 className="masthead-title serif">
-            <span>Край</span> <em>доски</em>
+            <span>{tr('Край')}</span> <em>{tr('доски')}</em>
           </h1>
-          <p className="masthead-sub">
-            Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю,
-            «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои,
-            жизни - общие.
-          </p>
+          {/*
+            Фигура надетой темы стоит в одной строке с названием: ниже она
+            сползала к концу подзаголовка и читалась как картинка при описании,
+            а не как то, чем ты играешь.
+          */}
+          <span className="masthead-figure">
+            <SkinMark skin={skin} size={38} plate />
+          </span>
         </div>
-        <span className="masthead-figure">
-          <SkinMark skin={skin} size={40} plate />
-        </span>
+        <p className="masthead-sub">
+          {tr('Четыре режима - одна доска: кампания с уровнями, «Парковка» - пробка фигур к своему краю, «Гонки» - король в полосе, и бесконечный подъём без финиша. Правила у каждого свои, жизни - общие.')}
+        </p>
       </section>
 
       {/*
@@ -157,42 +162,42 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       <div className="menu-modes">
         <button type="button" className="cta-block cta-primary" onClick={() => onPlay('campaign')}>
           <span className="cta-body">
-            <span className="label">Кампания</span>
-            <span className="cta-title serif">{campaignRun ? 'Продолжить' : 'Играть'}</span>
+            <span className="label">{tr('Кампания')}</span>
+            <span className="cta-title serif">{campaignRun ? tr('Продолжить') : tr('Играть')}</span>
             <span className="cta-meta">
               {campaignRun
-                ? `Незаконченная партия: уровень ${campaignRun.level}, ход ${campaignRun.moves + 1}`
+                ? trf('Незаконченная партия: уровень {0}, ход {1}', [campaignRun.level, campaignRun.moves + 1])
                 : profile.levelsCleared > 0
-                  ? `Уровень ${profile.level}, пройдено ${formatNumber(profile.levelsCleared)}`
-                  : 'Уровень 1, путь начинается'}
+                  ? trf('Уровень {0}, пройдено {1}', [profile.level, formatNumber(profile.levelsCleared)])
+                  : tr('Уровень 1, путь начинается')}
             </span>
           </span>
           <span className="cta-arrow" aria-hidden="true">→</span>
         </button>
 
-        {modeCard('jam', 'Парковка', 'Пробка фигур: белых за нижний край, чёрных за верхний.')}
-        {modeCard('race', 'Гонки', 'Король в полосе против фигур сверху.')}
-        {modeCard('endless', 'Бесконечный режим', 'Пешка идёт всё выше, сложность растёт каждые пять ходов.')}
+        {modeCard('jam', tr('Парковка'), tr('Пробка фигур: белых за нижний край, чёрных за верхний.'))}
+        {modeCard('race', tr('Гонки'), tr('Король в полосе против фигур сверху.'))}
+        {modeCard('endless', tr('Бесконечный режим'), tr('Пешка идёт всё выше, сложность растёт каждые пять ходов.'))}
       </div>
 
       <div className="section-head">
-        <span className="label">Разделы</span>
-        <span className="label">{profile.lives < profile.maxLives ? 'жизни восстанавливаются' : 'все жизни в запасе'}</span>
+        <span className="label">{tr('Разделы')}</span>
+        <span className="label">{profile.lives < profile.maxLives ? tr('жизни восстанавливаются') : tr('все жизни в запасе')}</span>
       </div>
 
       <div className="menu-list">
         <button type="button" className="menu-row" onClick={goShop}>
           <span className="menu-row-main">
-            <span className="menu-row-title">Магазин</span>
-            <span className="menu-row-desc">Бонусы за монеты, скины и покупки за звёзды</span>
+            <span className="menu-row-title">{tr('Магазин')}</span>
+            <span className="menu-row-desc">{tr('Бонусы за монеты, скины и покупки за звёзды')}</span>
           </span>
           <span className="menu-row-end">→</span>
         </button>
 
         <button type="button" className="menu-row" onClick={goRecords}>
           <span className="menu-row-main">
-            <span className="menu-row-title">Рекорды</span>
-            <span className="menu-row-desc">Мировая таблица и друзья, пришедшие по ссылке</span>
+            <span className="menu-row-title">{tr('Рекорды')}</span>
+            <span className="menu-row-desc">{tr('Мировая таблица и друзья, пришедшие по ссылке')}</span>
           </span>
           <span className="menu-row-end">→</span>
         </button>
@@ -206,8 +211,8 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
         {profile.qa && (
           <a className="menu-row" href="/admin">
             <span className="menu-row-main">
-              <span className="menu-row-title">Лаборатория</span>
-              <span className="menu-row-desc">Разбор расстановок и статистика, вход по паролю</span>
+              <span className="menu-row-title">{tr('Лаборатория')}</span>
+              <span className="menu-row-desc">{tr('Разбор расстановок и статистика, вход по паролю')}</span>
             </span>
             <span className="menu-row-end">→</span>
           </a>
@@ -216,14 +221,14 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
       </div>
 
       <div className="account">
-        <span className="label">Сохранение прогресса</span>
+        <span className="label">{tr('Сохранение прогресса')}</span>
         {inTelegram ? (
           <p className="account-text">
-            Игра открыта из Telegram, прогресс привязан к твоему аккаунту и не потеряется при перезапуске.
+            {tr('Игра открыта из Telegram, прогресс привязан к твоему аккаунту и не потеряется при перезапуске.')}
           </p>
         ) : linked ? (
           <>
-            <p className="account-text">Аккаунт Telegram подключён, прогресс переживёт закрытие браузера.</p>
+            <p className="account-text">{tr('Аккаунт Telegram подключён, прогресс переживёт закрытие браузера.')}</p>
             <div className="account-actions">
               <button
                 type="button"
@@ -232,31 +237,28 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
                   clearSessionToken();
                   setLinked(false);
                   void refresh();
-                  toast('Сеанс сброшен, играешь как гость на этом устройстве');
+                  toast(tr('Сеанс сброшен, играешь как гость на этом устройстве'));
                 }}
               >
-                Выйти из аккаунта
+                {tr('Выйти из аккаунта')}
               </button>
             </div>
           </>
         ) : (
           <>
             <p className="account-text">
-              Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Привяжи Telegram: уровень,
-              монеты и рекорды останутся с аккаунтом на любом устройстве, а текущий прогресс переедет следом.
-              Откроется чат бота, там нужно нажать «Да».
+              {tr('Без входа прогресс живёт в этом браузере и может пропасть вместе с ним. Привяжи Telegram: уровень, монеты и рекорды останутся с аккаунтом на любом устройстве, а текущий прогресс переедет следом. Откроется чат бота, там нужно нажать «Да».')}
             </p>
             <TelegramLink
               onLinked={({ merged }) => {
                 setLinked(true);
                 void refresh();
-                toast(merged ? 'Прогресс привязан к Telegram' : 'Вошли через Telegram');
+                toast(merged ? tr('Прогресс привязан к Telegram') : tr('Вошли через Telegram'));
               }}
             />
           </>
         )}
       </div>
-
 
       {profile.lives < profile.maxLives && <LivesPool onShop={goShopStars} onRefresh={refresh} />}
 
@@ -270,12 +272,12 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
           <span className="ad-row-main">
             <span className="ad-row-title">
               {adLoading
-                ? 'Загружаем ролик'
+                ? tr('Загружаем ролик')
                 : cooldownLeft > 0
-                  ? `Следующая награда через ${formatDuration(cooldownLeft)}`
-                  : 'Реклама за монеты'}
+                  ? trf('Следующая награда через {0}', [formatDuration(cooldownLeft)])
+                  : tr('Реклама за монеты')}
             </span>
-            <span className="ad-row-desc">Добровольный просмотр, не чаще одного раза в минуту</span>
+            <span className="ad-row-desc">{tr('Добровольный просмотр, не чаще одного раза в минуту')}</span>
           </span>
           <span className="ad-row-reward">+{AD_COINS_REWARD}</span>
         </button>
@@ -283,21 +285,20 @@ export function MenuScreen({ onPlay, onOpenRules, onTerms, onPrivacy }: MenuScre
 
       {profile.isGuest && (
         <p className="guest-note">
-          Гостевой режим: прогресс хранится только в этом браузере. Чтобы сохранить его в Telegram,
-          откройте игру через бота.
+          {tr('Гостевой режим: прогресс хранится только в этом браузере. Чтобы сохранить его в Telegram, откройте игру через бота.')}
         </p>
       )}
 
       <footer className="menu-footer">
-        <button type="button" onClick={onOpenRules}>Правила</button>
+        <button type="button" onClick={onOpenRules}>{tr('Правила')}</button>
         <span className="sep">/</span>
-        <button type="button" onClick={onTerms}>Условия</button>
+        <button type="button" onClick={onTerms}>{tr('Условия')}</button>
         <span className="sep">/</span>
-        <button type="button" onClick={onPrivacy}>Конфиденциальность</button>
+        <button type="button" onClick={onPrivacy}>{tr('Конфиденциальность')}</button>
         <span className="sep">/</span>
         <span>2026</span>
         {profile.adFree && <span className="sep">/</span>}
-        {profile.adFree && <span>без рекламы</span>}
+        {profile.adFree && <span>{tr('без рекламы')}</span>}
         <span className="footer-mode">{config.devMode ? 'dev' : 'v1.0'}</span>
       </footer>
     </div>
@@ -320,14 +321,14 @@ function LivesPool({ onShop, onRefresh }: { onShop: () => void; onRefresh: () =>
           eternal={profile.eternalLives}
         />
         <span className="resource-caption">
-          Следующая жизнь через <b>{formatDuration(remaining)}</b>
+          {tr('Следующая жизнь через')} <b>{formatDuration(remaining)}</b>
         </span>
         <span className="resource-note">
-          {progress > 0 ? 'Отсчёт идёт' : 'Отсчёт начнётся после потери жизни'}
+          {progress > 0 ? tr('Отсчёт идёт') : tr('Отсчёт начнётся после потери жизни')}
         </span>
       </span>
       <button type="button" className="btn btn-outline" style={{ minHeight: 32, padding: '0 10px', fontSize: 11 }} onClick={onShop}>
-        Пополнить
+        {tr('Пополнить')}
       </button>
     </div>
   );

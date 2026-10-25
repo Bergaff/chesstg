@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { tr } from '../lib/i18n';
 
 export function Modal({
   children,
@@ -38,7 +39,7 @@ export function Modal({
     >
       <div className={className ? `modal ${className}` : 'modal'} role="dialog" aria-modal="true" aria-labelledby={labelledBy}>
         {showClose && (
-          <button type="button" className="modal-close" aria-label="Закрыть" onClick={onClose}>
+          <button type="button" className="modal-close" aria-label={tr('Закрыть')} onClick={onClose}>
             ×
           </button>
         )}

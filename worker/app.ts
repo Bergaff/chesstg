@@ -110,6 +110,7 @@ import {
   sendWelcome,
   notifyReferrer,
 } from './telegram';
+import { botLang, pick } from './i18n';
 import type { AppEnv, RunRow, UserRow, WorkerEnv } from './types';
 
 const app = new Hono<AppEnv>();
@@ -1660,6 +1661,9 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
   const data = typeof callback.data === 'string' ? callback.data : '';
   const parsed = parseAuthCallback(data);
   const from = record(callback.from);
+  // Язык ответа диктует клиент того, кто нажал кнопку: бот отвечает ему, а не
+  // тому, кто заводил бота.
+  const lang = botLang(from?.language_code);
   const message = record(callback.message);
   const chatId = typeof record(message?.chat)?.id === 'number' ? (record(message?.chat)?.id as number) : null;
   const messageId = typeof message?.message_id === 'number' ? message.message_id : null;
@@ -1672,8 +1676,17 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
 
   if (parsed.action === 'no') {
     await rejectAuthLink(env, parsed.code);
-    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Отменили' });
-    if (chatId && messageId) await editAuthMessage(env, chatId, messageId, 'Привязка отменена. Ничего не изменилось.');
+    if (queryId) await answerCallbackQuery(env, queryId, { text: pick(lang, 'Отменили', 'Cancelled') });
+    if (chatId && messageId) {
+      await editAuthMessage(
+        env,
+        chatId,
+        messageId,
+        pick(lang, 'Привязка отменена. Ничего не изменилось.', 'Linking cancelled. Nothing changed.'),
+        undefined,
+        lang,
+      );
+    }
     return;
   }
 
@@ -1681,7 +1694,12 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
   const firstName = typeof from?.first_name === 'string' ? from.first_name : 'Игрок';
   const username = typeof from?.username === 'string' ? from.username : undefined;
   if (!Number.isInteger(tgId) || tgId <= 0) {
-    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Telegram не передал профиль, попробуй ещё раз', alert: true });
+    if (queryId) {
+      await answerCallbackQuery(env, queryId, {
+        text: pick(lang, 'Telegram не передал профиль, попробуй ещё раз', 'Telegram did not pass a profile, try again'),
+        alert: true,
+      });
+    }
     return;
   }
 
@@ -1689,29 +1707,52 @@ async function handleAuthCallback(env: WorkerEnv, callback: Record<string, unkno
   if (result.ok) {
     // url в ответе на callback заставляет клиента Telegram открыть сайт:
     // игроку не нужно искать вкладку с игрой руками.
-    if (queryId) await answerCallbackQuery(env, queryId, { text: 'Готово, возвращаем в игру', url: returnUrl || undefined });
+    if (queryId) {
+      await answerCallbackQuery(env, queryId, {
+        text: pick(lang, 'Готово, возвращаем в игру', 'Done, taking you back to the game'),
+        url: returnUrl || undefined,
+      });
+    }
     if (chatId && messageId) {
       await editAuthMessage(
         env,
         chatId,
         messageId,
         returnUrl
-          ? 'Привязал. Открыл игру, если вкладка не появилась нажми кнопку ниже. Прогресс теперь хранится в этом аккаунте Telegram.'
-          : 'Привязал. Открой вкладку с игрой в браузере: прогресс подтянется сам. Дальше он хранится в этом аккаунте Telegram.',
+          ? pick(
+              lang,
+              'Привязал. Открыл игру, если вкладка не появилась нажми кнопку ниже. Прогресс теперь хранится в этом аккаунте Telegram.',
+              'Linked. I opened the game - if the tab did not appear, press the button below. Progress now lives in this Telegram account.',
+            )
+          : pick(
+              lang,
+              'Привязал. Открой вкладку с игрой в браузере: прогресс подтянется сам. Дальше он хранится в этом аккаунте Telegram.',
+              'Linked. Open the game tab in your browser and progress will catch up. From now on it is stored in this Telegram account.',
+            ),
         returnUrl || undefined,
+        lang,
       );
     }
     return;
   }
 
-  const reasonText: Record<string, string> = {
-    expired: 'Ссылка устарела, она живёт пять минут. Нажми «Привязать Telegram» в игре ещё раз.',
-    rejected: 'Этот запрос уже отменили.',
-    used: 'Этот запрос уже использован.',
-    unknown: 'Не нашёл такой запрос: возможно, его выдали с другого браузера.',
-    already: 'Запрос уже подтверждён. Открой вкладку с игрой.',
-  };
-  const text = reasonText[result.reason ?? 'unknown'] ?? 'Не получилось подтвердить запрос.';
+  const reasonText: Record<string, string> =
+    lang === 'en'
+      ? {
+          expired: 'The link expired - it lives for five minutes. Press "Link Telegram" in the game again.',
+          rejected: 'That request was already cancelled.',
+          used: 'That request was already used.',
+          unknown: 'No such request: it may have been issued from another browser.',
+          already: 'The request is already confirmed. Open the game tab.',
+        }
+      : {
+          expired: 'Ссылка устарела, она живёт пять минут. Нажми «Привязать Telegram» в игре ещё раз.',
+          rejected: 'Этот запрос уже отменили.',
+          used: 'Этот запрос уже использован.',
+          unknown: 'Не нашёл такой запрос: возможно, его выдали с другого браузера.',
+          already: 'Запрос уже подтверждён. Открой вкладку с игрой.',
+        };
+  const text = reasonText[result.reason ?? 'unknown'] ?? pick(lang, 'Could not confirm the request.', 'Не получилось подтвердить запрос.');
   if (queryId) await answerCallbackQuery(env, queryId, { text, alert: true });
 }
 
@@ -1721,6 +1762,7 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
     const chat = record(message.chat);
     const chatId = typeof chat?.id === 'number' ? chat.id : null;
     const text = typeof message.text === 'string' ? message.text : '';
+    const lang = botLang(record(message.from)?.language_code);
     const firstName = typeof record(message.from)?.first_name === 'string'
       ? (record(message.from)?.first_name as string)
       : 'друг';
@@ -1735,22 +1777,26 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
           await sendPlain(
             env,
             chatId,
-            'Такая ссылка уже не действует: они живут пять минут. Открой игру в браузере и нажми «Привязать Telegram» ещё раз.',
+            pick(
+              lang,
+              'Такая ссылка уже не действует: они живут пять минут. Открой игру в браузере и нажми «Привязать Telegram» ещё раз.',
+              'That link no longer works - they live for five minutes. Open the game in a browser and press "Link Telegram" again.',
+            ),
           );
           return;
         }
-        await sendAuthPrompt(env, chatId, firstName, authCode);
+        await sendAuthPrompt(env, chatId, firstName, authCode, lang);
         return;
       }
-      await sendWelcome(env, chatId, firstName, payload);
+      await sendWelcome(env, chatId, firstName, payload, lang);
       return;
     }
     if (chatId && text.startsWith('/play')) {
-      await sendWelcome(env, chatId, firstName);
+      await sendWelcome(env, chatId, firstName, undefined, lang);
       return;
     }
     if (chatId && text.startsWith('/help')) {
-      await sendHelp(env, chatId);
+      await sendHelp(env, chatId, lang);
       return;
     }
 
@@ -1787,13 +1833,19 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
   const preCheckout = record(update.pre_checkout_query);
   if (preCheckout) {
     const id = typeof preCheckout.id === 'string' ? preCheckout.id : '';
+    const lang = botLang(record(preCheckout.from)?.language_code);
     const payload = typeof preCheckout.invoice_payload === 'string' ? preCheckout.invoice_payload : '';
     const currency = preCheckout.currency;
     const amount = preCheckout.total_amount;
     const row = payload ? await getPayment(env, payload) : null;
     const ok = Boolean(row && row.status === 'pending' && currency === 'XTR' && amount === row.stars);
     if (!id) return;
-    await answerPreCheckout(env, id, ok, ok ? undefined : 'Счёт устарел. Открой магазин и попробуй снова.');
+    await answerPreCheckout(
+      env,
+      id,
+      ok,
+      ok ? undefined : pick(lang, 'Счёт устарел. Открой магазин и попробуй снова.', 'The bill expired. Open the shop and try again.'),
+    );
     return;
   }
 }
