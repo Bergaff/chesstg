@@ -311,7 +311,7 @@ export function Board({
                       <span className={cn('player-mark', playerPath && 'player-mark-shape')}>
                         {playerPath ? (
                           <svg className="player-shape" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                            <path d={playerPath} strokeWidth={PATH_STROKE_WIDTH} />
+                            <path d={playerPath} fill="none" strokeWidth={PATH_STROKE_WIDTH} />
                           </svg>
                         ) : (
                           <span className="player-glyph">{playerGlyph}</span>

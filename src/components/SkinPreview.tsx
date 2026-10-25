@@ -33,7 +33,7 @@ export function SkinPreview({
         <span className={cn('sp-player', full.path && 'sp-player-shape')}>
           {full.path ? (
             <svg viewBox="0 0 32 32" focusable="false">
-              <path d={full.path} strokeWidth={PATH_STROKE_WIDTH} />
+              <path d={full.path} fill="none" strokeWidth={PATH_STROKE_WIDTH} />
             </svg>
           ) : (
             full.glyph
