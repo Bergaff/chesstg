@@ -58,6 +58,20 @@ export interface Profile {
    * `skinUnlocked` решает не про рисование, а про то, надел ты результат или нет.
    */
   customPaid: boolean;
+  /**
+   * Свои темы живут слотами: `customSlots` - сколько мест куплено,
+   * `customActive` - какой надет, `customSkins` - содержимое всех купленных
+   * мест (пустой слот = `null`). Цена одна на все слоты, а правки бесплатны.
+   * Поля опциональны не для красоты: профиль старой сборки воркера их не
+   * присылает, и клиент обязан вывести одно место из `customPaid`, а не
+   * рисовать `NaN` в заголовке списка.
+   */
+  customSlots?: number;
+  customMaxSlots?: number;
+  customActive?: number;
+  /** Темы игрока заморожены модератором: не надеваются, не публикуются. */
+  customBlocked?: boolean;
+  customSkins?: (CustomSkin | null)[];
   skins: SkinId[];
   /** Надетая тема. `'custom'` - своя, её цвета лежат в `customSkin`. */
   skin: SkinId;

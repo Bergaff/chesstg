@@ -62,7 +62,9 @@ describe('health', () => {
     expect(body.ok).toBe(false);
     expect(body.error).toBe('db_not_ready');
     expect(body.missing).toEqual([...GAME_TABLES]);
-    expect(body.schemaVersion).toBe(6);
+        // 0007 раздала свои темы по слотам: код ждёт седьмую схему, и health обязан
+    // это показать, пока админ не применил миграции.
+    expect(body.schemaVersion).toBe(7);
   });
 
   it('отличает недоступную базу от пустой', async () => {

@@ -4,7 +4,6 @@ import {
   COINS_PRICE_STEP,
   DEFAULT_ECON,
   PAID_SKINS,
-  SHARE_FEE_STARS,
   SKIN_COINS,
   SKIN_CUSTOM_COINS,
   SKIN_CUSTOM_STARS,
@@ -141,8 +140,10 @@ describe('прогноз магазина', () => {
     expect(skinCoinPrice(0)).toBe(0);
     // Набор монетами выгоднее трёх одиночных тем - как и в звёздах.
     expect(SKIN_SET_COINS).toBeLessThan(SKIN_COINS * PAID_SKINS.length);
-    // Взнос за публикацию за монеты не отдаём: он оплачивает чужую работу.
-    expect(skinCoinPrice(SHARE_FEE_STARS)).toBeGreaterThan(0);
+    // Взноса за публикацию больше нет - и монетной цены у него тоже. Слот своей
+    // темы, наоборот, продаётся и за монеты: курс выводит ровно те 4 800, что
+    // стоят на витрине, иначе вторая валюта честнила бы цену.
+    expect(skinCoinPrice(SKIN_CUSTOM_STARS)).toBe(SKIN_CUSTOM_COINS);
   });
 
   it('бесплатный откат капается в два и не трогает покупные', () => {

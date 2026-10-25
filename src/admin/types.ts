@@ -394,6 +394,33 @@ export interface SkinsResponse {
   counts: Array<{ status: string; n: number; installs: number }>;
 }
 
+/**
+ * Своя тема одного игрока в одном слоте. Строкой, а не деревом: таблица умеет
+ * показывать плоские строки, и «три темы у одного человека» читаются как три
+ * строки с одинаковым автором лучше, чем как вложенный список.
+ */
+export interface OwnedSkinItem {
+  userId: string;
+  tgId: number | null;
+  author: string;
+  slot: number;
+  active: boolean;
+  worn: boolean;
+  blocked: boolean;
+  name: string;
+  skin: CustomSkin | null;
+  readability: { glyph: number; board: number; ok: boolean } | null;
+  published: number;
+  queued: number;
+  updatedAt: number;
+}
+
+export interface OwnedSkinsResponse {
+  items: OwnedSkinItem[];
+  query: string;
+  summary: { players: number; owners: number; blocked: number; shown: number };
+}
+
 /** Измеряемое для модели магазина: открытия витрины, платежи, очередь публикаций. */
 export interface ShopEconResponse {
   days: number;

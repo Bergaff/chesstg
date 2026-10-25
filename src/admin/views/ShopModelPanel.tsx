@@ -124,7 +124,10 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
   const coinRows = coinEconomy();
   const single = PRODUCTS['skin:gold'].stars;
   const set = PRODUCTS.skins.stars;
-  const fee = PRODUCTS.share.stars;
+  // Взнос за публикацию из продажи убран: галерея бесплатна. Число остаётся
+  // допущением модели - панель считает «что было бы, если бы витрину продавали»,
+  // и берёт его из своих допущений, а не из витрины игры.
+  const fee = DEFAULT_ECON.shareFee;
 
   return (
     <div className="adm-stack">

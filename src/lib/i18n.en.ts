@@ -533,8 +533,46 @@ export const EN: Record<string, string> = {
   'Открыть мастерскую: {0}': 'Open the workshop: {0}',
   'Отправляем': 'Sending',
   'Выставляем счёт': 'Setting the price',
-  'Показать всем': 'List for everyone',
-  'Показать всем: {0}': 'List for everyone: {0}',
+  'Показать в галерее': 'Show in the gallery',
+  'Показать тему в галерее можно бесплатно: очередь на проверку ничего не стоит.':
+    'Listing a skin in the gallery is free: the review queue costs nothing.',
+  'Тема отправлена в очередь на проверку': 'The skin is in the review queue',
+  'Своя тема из слота {0} надета': 'Your skin from slot {0} is on',
+  'Слот {0} освобождён': 'Slot {0} is now empty',
+  'Слот {0}': 'Slot {0}',
+  'Слот': 'Slot',
+  'нужен слот {0}': 'slot {0} required',
+  'слот не куплен': 'slot not bought',
+  'Свои темы: {0} из {1}': 'Custom skins: {0} of {1}',
+  'править': 'edit',
+  'рисовать': 'draw',
+  'стереть': 'clear',
+  'пусто': 'empty',
+  'Надеть не удалось': 'Could not wear it',
+  'Стереть не удалось': 'Could not clear it',
+  'Место не куплено: его докупают ниже, правки бесплатны.': 'Not bought yet - take the slot below, edits stay free.',
+  '«{0}». Правится бесплатно в любой момент.': '"{0}". Free to edit any time.',
+  'Пустой слот: нарисуйте сюда вторую тему, первая останется на месте.':
+    'Empty slot: draw your second skin here, the first one stays put.',
+  'Темы этого аккаунта заморожены: их нельзя надеть и править, разбирательство - у поддержки.':
+    'Skins of this account are frozen: they cannot be worn or edited, support handles the review.',
+  'Чужую тему ставят с открытой мастерской: она встанет в первый свободный слот и не затрёт ваш рисунок.':
+    'Installing a skin needs the workshop: it lands in the first free slot and never overwrites your drawing.',
+  'Цвета доски, фон и фигура. Своя тема повторяет любую из полки, поэтому место под неё стоит {0} звёзд или {1} монет. Правки, код и показ чужим - бесплатно.':
+    'Board colours, backdrop and the piece. A custom skin can copy any shelf skin, so a slot for it costs {0} stars or {1} coins. Edits, codes and showing it to others are free.',
+  'Рисовать, красить превью и передавать код - бесплатно и без границ. Платят за место под тему:':
+    'Drawing, recolouring the preview and passing codes around stay free and unlimited. You pay for the slot:',
+  'мастерская открыта, этот слот правится сколько угодно раз - {0} слот(а) из {1} заняты.':
+    'the workshop is open, this slot is edited as many times as you like - {0} of {1} slots used.',
+  'первый слот стоит {0} звёзд или {1} монет, дальше по той же цене, до {2} мест.':
+    'the first slot costs {0} stars or {1} coins, later ones cost the same, up to {2} slots.',
+  'Своя тема проходит проверку, только если вы несёте её в общую галерею: для себя правят без модератора.':
+    'A custom skin gets reviewed only when you bring it to the shared gallery: editing it for yourself needs no moderator.',
+  'Платят за место - {0} звёзд или {1} монет за слот: иначе полка из готовых тем не продаётся, а те же восемь цветов доступны в студии.':
+    'You pay for the slot - {0} stars or {1} coins each: otherwise the shelf of ready skins would never sell, while the same eight colours sit free in the studio.',
+  'Второе и третье место докупаются по той же цене, правки в них ничего не стоят.':
+    'The second and third slots are bought at the same price, and editing them costs nothing.',
+  'Слот своей темы': 'Custom skin slot',
   'Игровое поле': 'Game board',
   'Клетка {0}, {1}: выпад через линию, взять фигуру и остаться на месте': 'Square {0}, {1}: a strike across the line - take the piece and stay put',
   'Клетка {0}, {1}: взять вражескую фигуру': 'Square {0}, {1}: capture the enemy piece',

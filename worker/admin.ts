@@ -900,6 +900,124 @@ adminApp.post('/skins/review', async (c) => {
 });
 
 /**
+ * Темы игроков по слотам: ревизия того, что носят, а не того, что стоит в
+ * очереди. Заявки в галерее - верхушка; заморозить чаще нужно рисунок, который
+ * человек надел себе и показывает только друзьям через код. Поэтому здесь все
+ * купленные места всех аккаунтов, а не только отправленные на проверку.
+ *
+ * `?q=` ищет по имени, @username и числовому tg_id: жалоба приходит из чата
+ * строчкой «вот этот, id 123...», и искать её глазами - терять минуту на
+ * каждую.
+ */
+adminApp.get('/skins/owned', async (c) => {
+  const query = String(c.req.query('q') ?? '').trim();
+  const like = `%${query}%`;
+  // `mode_levels` и `custom_blocked` живут в разных выпусках миграций: если
+  // база старая, запрос с этими колонками упадёт, и админ увидит db_not_ready
+  // вместо списка. Колонки слотов из 0007 - те же грабли, поэтому читать их
+  // приходится так, чтобы отсутствие колонки не ломало выдачу.
+  const where = query ? "WHERE u.username LIKE ? OR u.first_name LIKE ? OR CAST(u.tg_id AS TEXT) LIKE ?" : '';
+  const bind = query ? [like, like, like] : [];
+  const rows = await c.env.DB.prepare(
+    `SELECT u.id AS userId, u.tg_id AS tgId, u.first_name AS firstName, u.username AS username,
+            u.skin AS worn, u.custom_slots AS slots, u.custom_paid AS legacyPaid,
+            u.custom_active AS activeSlot, u.custom_blocked AS blocked,
+            u.skin_custom AS slot1, u.skin_custom_2 AS slot2, u.skin_custom_3 AS slot3,
+            u.updated_at AS updatedAt,
+            (SELECT COUNT(*) FROM skin_shares ss WHERE ss.user_id = u.id AND ss.status = 'approved') AS published,
+            (SELECT COUNT(*) FROM skin_shares ss WHERE ss.user_id = u.id AND ss.status = 'pending') AS queued
+     FROM users u ${where}
+     ORDER BY u.updated_at DESC
+     LIMIT 300`,
+  )
+    .bind(...bind)
+    .all<Record<string, unknown>>();
+
+  const items: Record<string, unknown>[] = [];
+  let blockedUsers = 0;
+  for (const row of rows.results ?? []) {
+    const bought = Math.min(3, Math.max(Number(row.slots ?? 0), Number(row.legacyPaid ?? 0) === 1 ? 1 : 0));
+    if (Number(row.blocked ?? 0) === 1) blockedUsers += 1;
+    for (let slot = 1; slot <= bought; slot += 1) {
+      const raw = String(row[`slot${slot}`] ?? '').trim();
+      if (!raw) continue;
+      let skin: ReturnType<typeof checkSkin> | null = null;
+      try {
+        skin = checkSkin(JSON.parse(raw) as unknown);
+      } catch {
+        skin = null;
+      }
+      items.push({
+        userId: String(row.userId ?? ''),
+        tgId: row.tgId === null || row.tgId === undefined ? null : Number(row.tgId),
+        author: row.username ? `@${String(row.username)}` : String(row.firstName ?? row.userId ?? ''),
+        slot,
+        active: Number(row.activeSlot ?? 1) === slot,
+        worn: String(row.worn ?? '') === 'custom' && Number(row.activeSlot ?? 1) === slot,
+        blocked: Number(row.blocked ?? 0) === 1,
+        name: skin?.ok ? skin.skin.name : 'не читается',
+        skin: skin?.ok ? skin.skin : null,
+        readability: skin?.ok ? { glyph: skin.readability.glyph, board: skin.readability.board, ok: skin.readability.ok } : null,
+        published: Number(row.published ?? 0),
+        queued: Number(row.queued ?? 0),
+        updatedAt: Number(row.updatedAt ?? 0),
+      });
+    }
+  }
+
+  const totals = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS players,
+            COALESCE(SUM(CASE WHEN custom_blocked = 1 THEN 1 ELSE 0 END), 0) AS blocked,
+            COALESCE(SUM(CASE WHEN custom_slots > 0 OR custom_paid = 1 THEN 1 ELSE 0 END), 0) AS owners
+     FROM users`,
+  ).first<{ players: number; blocked: number; owners: number }>();
+
+  return c.json({
+    items,
+    query,
+    summary: {
+      players: Number(totals?.players ?? 0),
+      owners: Number(totals?.owners ?? 0),
+      blocked: Number(totals?.blocked ?? 0),
+      shown: items.length,
+    },
+  });
+});
+
+/**
+ * Заморозка тем игрока. Право рисовать у него не отнимаем - `custom_slots`
+ * остаётся купленным, - но надеть, сохранить и показать чужим нельзя, пока
+ * модератор не снимет флаг. Отдельная колонка для этого нужна потому, что
+ * «отказали в публикации» и «заморозили аккаунт» - разные решения: первое
+ * касается одной заявки, второе - всех тем сразу, включая те, что уже надеты.
+ */
+adminApp.post('/skins/block', async (c) => {
+  const body = await readJson(c);
+  const userId = String(body.userId ?? '').trim();
+  if (!userId) fail(400, 'bad_request');
+  const blocked = body.blocked === true ? 1 : 0;
+  const now = Date.now();
+  const note = typeof body.note === 'string' ? body.note.slice(0, 160) : '';
+  const result = await c.env.DB.prepare('UPDATE users SET custom_blocked = ?, updated_at = ? WHERE id = ?')
+    .bind(blocked, now, userId)
+    .run();
+  if (Number(result.meta?.changes ?? 0) === 0) fail(404, 'user_missing', 'Игрока с таким id нет');
+  if (blocked) {
+    // Витрина не держит то, что модератор счёл неприемлемым: темы автора уходят
+    // из «одобренных» в отклонённые. Обратно их никто не возвращает молча -
+    // разблокировка аккаунта не перевыставляет заявку, её несут заново.
+    await c.env.DB.prepare(
+      `UPDATE skin_shares SET status = 'rejected', note = ?, reviewed_at = ?
+       WHERE user_id = ? AND status = 'approved'`,
+    )
+      .bind(note || 'blocked', now, userId)
+      .run();
+  }
+  return c.json({ ok: true, blocked: blocked === 1, userId });
+});
+
+
+/**
  * Цифры для модели магазина: измеряемое против допущений.
  *
  * Долю покупателей считают от открытий витрины, а не от игроков: тот, кто

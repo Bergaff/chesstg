@@ -10,7 +10,6 @@ import {
 import {
   GLYPH_CHOICES,
   GRID,
-  PRODUCTS,
   SKINS,
   SKIN_CUSTOM_COINS,
   SKIN_CUSTOM_STARS,
@@ -48,20 +47,31 @@ import { tr, trf } from '../lib/i18n';
  * за минуту. Второе правило - заливки нет: холст помнит штрихи, и в контур
  * уходит линия, а не залитая область (иначе круг с щелью становился диском).
  *
- * «Показать всем» - отдельный счёт на взнос: он оплачивает чужую работу,
- * проверку заявки, и к праву носить своё отношения не имеет.
+ * Слоты - второе правило: тема живёт в купленном месте, и правки в нём
+ * бесплатны. Второй рисунок стоит ещё один слот (та же цена), а не второй счёт
+ * за то же самое. «Показать в галерее» бесплатно всегда: за чужой взгляд платят
+ * слотом, а не звёздами, иначе код темы было бы стыдно нести другу.
  */
 interface SkinStudioProps {
   onClose: () => void;
-  /** Счёт на публикацию выставляет магазин: у него уже есть цикл оплаты. */
-  onShare: (skin: CustomSkin) => Promise<boolean>;
-  /** Открыть мастерскую: тот же цикл оплаты, что у звёздных товаров. */
+  /** Какой слот правим: 1..3. Магазин держит его в своём состоянии. */
+  slot: number;
+  /** Публикация в галерее: счёт больше не выставляется, только очередь. */
+  onShare: (skin: CustomSkin, slot?: number) => Promise<boolean>;
+  /** Перейти к другому слоту: магазин держит выбор и перезапускает студию. */
+  onPickSlot?: (slot: number) => void;
+  /** Открыть мастерскую (первый слот): тот же цикл оплаты, что у звёздных товаров. */
   onUnlock: () => Promise<boolean>;
 }
 
-export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): ReactNode {
+export function SkinStudio({ onClose, slot, onShare, onPickSlot = () => {}, onUnlock }: SkinStudioProps): ReactNode {
   const { profile, config, setProfile, toast } = useApp();
-  const base = profile.customSkin ?? null;
+  // Профиль старой сборки сервера слотов не присылает: тогда тема одна, и она
+  // лежит в `customSkin`.
+  const slotCount = profile.customSlots ?? (profile.customPaid ? 1 : 0);
+  const maxSlots = profile.customMaxSlots ?? 3;
+  const skins = profile.customSkins ?? [profile.customSkin ?? null];
+  const base = skins[slot - 1] ?? null;
   const [name, setName] = useState(base?.name ?? tr('Своя тема'));
   const [tokens, setTokens] = useState<Record<TokenKey, string>>(
     () => ({ ...skinTokens(SKINS.classic), ...(base?.tokens ?? {}) }),
@@ -69,6 +79,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
   const [glyph, setGlyph] = useState(base?.glyph ?? SKINS.classic.glyph);
   const [path, setPath] = useState<string | undefined>(base?.path);
   const [code, setCode] = useState('');
+  const occupied = skins.filter((entry) => entry !== null).length;
   const [busy, setBusy] = useState<'save' | 'share' | 'unlock' | null>(null);
   const [notice, setNotice] = useState('');
 
@@ -204,15 +215,18 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       if (!granted) return;
       toast(tr('Мастерская открыта, надеваем тему'), 'success');
     }
+    // Покупка мастерской открывает ровно первый слот - поэтому после `onUnlock`
+    // пишем туда, даже если игрок тыкал в чип «3»: третьего места у него ещё нет.
+    const target = unlocked || slotCount >= 1 ? Math.min(slot, Math.max(1, slotCount)) : 1;
     setBusy('save');
     try {
       const response = await api<{ profile: typeof profile }>('/api/profile/skin-custom', {
         method: 'POST',
-        body: { skin: check.skin },
+        body: { skin: check.skin, slot: target },
       });
       setProfile(response.profile);
       hapticNotify('success');
-      toast(unlocked ? tr('Своя тема надета') : tr('Своя тема надета - мастерская открыта навсегда'), 'success');
+      toast(unlocked ? trf('Своя тема из слота {0} надета', [target]) : tr('Своя тема надета - мастерская открыта навсегда'), 'success');
       onClose();
     } catch (error) {
       toast(error instanceof ApiError ? error.message : tr('Сохранить не удалось'), 'error');
@@ -276,9 +290,8 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
     }
     setBusy('share');
     try {
-      const paid = await onShare(check.skin);
-      // Для льготного аккаунта взноса не было - не о чём и благодарить.
-      if (paid) toast(profile.qa ? tr('Тема в очереди на проверку') : tr('Взнос принят, тема в очереди на проверку'), 'success');
+      const sent = await onShare(check.skin, unlocked || slotCount >= 1 ? slot : 1);
+      if (sent) toast(tr('Тема отправлена в очередь на проверку'), 'success');
     } finally {
       setBusy(null);
     }
@@ -303,18 +316,39 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
       <span className="label">{tr('Студия')}</span>
       <h2 className="modal-title">{tr('Своя тема поля')}</h2>
       <p className="modal-text">
-        {tr('Рисовать, красить превью и передавать код - бесплатно и без границ. Платит тот, кто надевает:')}{' '}
+        {tr('Рисовать, красить превью и передавать код - бесплатно и без границ. Платят за место под тему:')}{' '}
         {unlocked
-          ? tr('ваша мастерская уже открыта, правки ничего не стоят.')
+          ? trf('мастерская открыта, этот слот правится сколько угодно раз - {0} слот(а) из {1} заняты.', [occupied, maxSlots])
           : trf(
-              'мастерская стоит {0} звёзд или {1} монет, один раз на аккаунт.',
-              [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS)],
+              'первый слот стоит {0} звёзд или {1} монет, дальше по той же цене, до {2} мест.',
+              [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS), maxSlots],
             )}{' '}
-        {trf(
-          'Показать тему чужим стоит ещё {0} звёзд: взнос оплачивает проверку заявки и отсекает поток «накидал за минуту».',
-          [PRODUCTS.share.stars],
-        )}
+        {tr('Показать тему в галерее можно бесплатно: очередь на проверку ничего не стоит.')}
       </p>
+
+      {/* Полоса слотов: правка идёт в одно место, а видно - все. Пустой купленный
+          слот подписан «пусто», чтобы «сохранить» не выглядело заменой первой темы. */}
+      {maxSlots > 1 && (
+        <div className="studio-slots">
+          <span className="label">{tr('Слот')}</span>
+          {Array.from({ length: maxSlots }, (_, index) => index + 1).map((number) => {
+            const bought = number <= slotCount;
+            const theme = skins[number - 1] ?? null;
+            return (
+              <button
+                type="button"
+                key={number}
+                className={cn('studio-slot', number === slot && 'active', !bought && 'locked')}
+                onClick={() => (bought ? onPickSlot(number) : onUnlock().catch(() => false))}
+                title={bought ? (theme ? theme.name : tr('пусто')) : tr('слот не куплен')}
+              >
+                {number}
+                {theme && <i className="studio-slot-dot" aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="studio-head">
         <SkinPreview skin={skin} cell={34} />
@@ -445,13 +479,7 @@ export function SkinStudio({ onClose, onShare, onUnlock }: SkinStudioProps): Rea
                 : trf('Открыть мастерскую: {0}', [SKIN_CUSTOM_STARS])}
         </button>
         <button type="button" className="btn btn-outline" onClick={() => void share()} disabled={busy !== null || !read.ok}>
-          {busy === 'share'
-            ? profile.qa
-              ? tr('Отправляем')
-              : tr('Выставляем счёт')
-            : profile.qa
-              ? tr('Показать всем')
-              : trf('Показать всем: {0}', [PRODUCTS.share.stars])}
+          {busy === 'share' ? tr('Отправляем') : tr('Показать в галерее')}
         </button>
         <button type="button" className="btn btn-quiet" onClick={onClose}>
           {tr('Позже')}

@@ -23,14 +23,17 @@ export const SKIN_TABLES = ['skin_shares'] as const;
 export const REQUIRED_TABLES = [...GAME_TABLES, ...ADMIN_TABLES, ...AUTH_TABLES, ...SKIN_TABLES] as const;
 
 /**
- * Номер последней миграции, на которую рассчитан код: 0006 добавила
+ * Номер последней миграции, на которую рассчитан код: 0007 раздала свои темы по
+ * слотам (`users.custom_slots`, `skin_custom_2`, `skin_custom_3`,
+ * `custom_active`, `custom_blocked`) - правка темы с тех пор бесплатна, а место
+ * под вторую тему докупается. 0006 добавила
  * `users.custom_paid` - право носить свою тему, купленное отдельно от тем
  * готовых. 0005 добавила `users.skin_custom` и очередь публикаций. Колонка
  * `users.mode_levels` из 0004 проверяется в диагностике админки
  * (`GET /api/admin/diag` раздел «Схема базы»): без неё игра работает, но
  * прогресс «Парковки» и «Гонок» не сохраняется.
  */
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export interface SchemaState {
   tables: Record<string, boolean>;

@@ -1,5 +1,6 @@
 import {
   MAX_LIVES,
+  SKIN_CUSTOM_SLOTS_MAX,
   PAID_SKINS,
   PRODUCTS,
   isProductSku as isKnownSku,
@@ -10,7 +11,7 @@ import {
   SKINS,
   type SkinId,
 } from '../src/engine';
-import { ownedSkins, workshopOwned } from './db';
+import { customSlotsOf, ownedSkins } from './db';
 import { logEvent } from './events';
 import { fail } from './http';
 import { callTelegram } from './telegram';
@@ -43,33 +44,30 @@ export function skuSkin(sku: ProductSku): SkinId | null {
   return id in SKINS ? id : null;
 }
 
-export interface ShareDraft {
-  skin: CustomSkin;
-}
-
 /**
- * Одна тема - одна заявка: иначе можно поставить в очередь десять копий и
- * смотреть, какая пройдёт.
+ * Своя тема становится заявкой в очереди. Взноса нет: платят за слот, а не за
+ * то, что чужие увидят рисунок, поэтому строка сразу едет в `pending` и без
+ * `payments` - статистика покупок остаётся статистикой покупок. Очередь при этом
+ * живая: поток «накидал за минуту» отсекает не цена, а руки модератора.
+ *
+ * `limit` - сколько открытых тем разрешено автору: по числу купленных слотов.
+ * Три слота - три темы в галерее; одна заявка на аккаунт означала бы, что
+ * купленное место простаивает.
  */
-export async function hasOpenShare(env: WorkerEnv, userId: string): Promise<boolean> {
-  const waiting = await env.DB.prepare(
+export async function publishSkinShare(
+  env: WorkerEnv,
+  user: UserRow,
+  skin: CustomSkin,
+  limit = 1,
+): Promise<void> {
+  const open = await env.DB.prepare(
     `SELECT COUNT(*) AS n FROM skin_shares WHERE user_id = ? AND status IN ('draft', 'pending', 'approved')`,
   )
-    .bind(userId)
+    .bind(user.id)
     .first<{ n: number }>();
-  return Number(waiting?.n ?? 0) > 0;
-}
-
-/**
- * Публикация без взноса - только для льготного аккаунта из `QA_LIVES_IDS`.
- * Обычному игроку заявка создаётся счётом на `sku = 'share'`: взнос и есть
- * фильтр потока «накидал за минуту». Проверяющему нужен сам механизм - очередь,
- * галерея, установки, - а не звёзды на тестовом кошельке, поэтому строка
- * едет в `pending` сразу и без `payments`: чужую статистику покупок льготы
- * портить не должны.
- */
-export async function publishSkinShare(env: WorkerEnv, user: UserRow, skin: CustomSkin): Promise<void> {
-  if (await hasOpenShare(env, user.id)) fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
+  if (Number(open?.n ?? 0) >= Math.max(1, limit)) {
+    fail(409, 'share_pending', 'Все ваши слоты уже стоят в очереди или в галерее');
+  }
   await env.DB.prepare(
     `INSERT INTO skin_shares (user_id, charge_id, name, payload, status, created_at)
      VALUES (?, NULL, ?, ?, 'pending', ?)`,
@@ -86,8 +84,6 @@ export async function createInvoice(
   env: WorkerEnv,
   user: UserRow,
   sku: ProductSku,
-  /** Тема, которую публикуют: для `sku = 'share'` без неё выставлять счёт не за что. */
-  share?: ShareDraft,
 ): Promise<{ url: string; chargeId: string }> {
   if (!env.BOT_TOKEN?.trim()) {
     fail(503, 'payments_not_configured', 'Платежи доступны после настройки бота');
@@ -102,28 +98,19 @@ export async function createInvoice(
   if (sku === 'noads' && user.ad_free) fail(409, 'already_owned', 'Реклама уже отключена');
   // Мастерскую покупают один раз на аккаунт: права «нарисовать ещё одну» за те
   // же звёзды не существует - вторая покупка была бы платой за ничто.
-  if (sku === 'custom' && workshopOwned(user)) fail(409, 'already_owned', 'Мастерская уже открыта');
+  // Мастерская продаётся слотами: первая покупка открывает её, вторая и третья
+  // докупают место по той же цене. Отказывать «уже открыто» значило бы запретить
+  // вторую тему - поэтому упираться можно только в потолок.
+  if (sku === 'custom' && customSlotsOf(user) >= SKIN_CUSTOM_SLOTS_MAX) {
+    fail(409, 'slots_full', `Больше ${SKIN_CUSTOM_SLOTS_MAX} своих тем на аккаунт нельзя`);
+  }
   if (sku === 'lives' && lives.lives >= MAX_LIVES) fail(409, 'lives_full', 'Жизни уже полны');
   if (skinProductOwned(sku, owned)) {
     fail(409, 'already_owned', sku === 'skins' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
   }
-  if (sku === 'share' && !share) fail(400, 'skin_missing', 'Нужна тема для публикации');
-  // Одной теме - одна заявка: иначе можно поставить в очередь десять копий и
-  // смотреть, какая пройдёт.
-  if (sku === 'share' && (await hasOpenShare(env, user.id))) {
-    fail(409, 'share_pending', 'У вас уже есть тема в очереди или в галерее');
-  }
 
   const chargeId = crypto.randomUUID();
 
-  if (sku === 'share' && share) {
-    await env.DB.prepare(
-      `INSERT INTO skin_shares (user_id, charge_id, name, payload, status, created_at)
-       VALUES (?, ?, ?, ?, 'draft', ?)`,
-    )
-      .bind(user.id, chargeId, share.skin.name, JSON.stringify(share.skin), now)
-      .run();
-  }
   await env.DB.prepare(
     `INSERT INTO payments (charge_id, user_id, sku, stars, status, created_at)
      VALUES (?, ?, ?, ?, 'pending', ?)`,
@@ -196,24 +183,18 @@ function entitlementStatements(env: WorkerEnv, payment: PaymentRow, user: UserRo
     ];
   }
   if (payment.sku === 'custom') {
-    // Товар - право, а не тема: `skin_custom` и надетая тема остаются как есть,
-    // платёж только поднимает флаг. Поэтому и возврат откатывает ровно его.
+    // Товар - место, а не тема: рисунки в слотах и надетая тема остаются как
+    // есть, платёж поднимает число слотов на единицу. `custom_paid` пишем и
+    // дальше: так строка, купленная до миграции 0007, читается одинаково с
+    // новой, а возврат откатывает ровно то, за что платили.
     return [
-      env.DB.prepare(`UPDATE users SET custom_paid = 1, updated_at = ? WHERE id = ? AND ${guard}`).bind(
-        now,
-        user.id,
-        payment.charge_id,
-        now,
-      ),
-    ];
-  }
-  if (payment.sku === 'share') {
-    // Оплаченный черновик становится заявкой в очереди. Сама выдача - не товар,
-    // а право встать в очередь: тему ещё должен одобрить тот, кто её проверяет.
-    return [
-      env.DB.prepare(`UPDATE skin_shares SET status = 'pending' WHERE charge_id = ? AND status = 'draft'`).bind(
-        payment.charge_id,
-      ),
+      env.DB.prepare(
+        `UPDATE users
+            SET custom_paid = 1,
+                custom_slots = MIN(?, MAX(custom_slots, ?) + 1),
+                updated_at = ?
+          WHERE id = ? AND ${guard}`,
+      ).bind(SKIN_CUSTOM_SLOTS_MAX, customSlotsOf(user), now, user.id, payment.charge_id, now),
     ];
   }
   return [];
@@ -276,14 +257,23 @@ export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<b
     );
   }
   if (payment.sku === 'custom') {
-    // Возврат закрывает мастерскую, но рисунок не стирает: игрок его делал сам,
-    // и при следующей покупке получит свою тему обратно. Надеть её он сможет
-    // снова с открытой мастерской - `selectedSkin` об этом знает.
+    // Возврат забирает последнее купленное место, но рисунки не стирает: их
+    // делал игрок, и при следующей покупке он получит свою тему обратно. Слот
+    // за пределами купленного числа невидим (`customSlotsOf`), поэтому тема
+    // лежит в колонке до тех пор, пока место не купят снова.
     statements.push(
       env.DB.prepare(
-        `UPDATE users SET custom_paid = 0, skin = CASE WHEN skin = 'custom' THEN 'classic' ELSE skin END,
+        `UPDATE users SET custom_slots = MAX(0, custom_slots - 1), custom_paid = 0,
+         skin = CASE WHEN skin = 'custom' THEN 'classic' ELSE skin END,
          updated_at = ? WHERE id = ?`,
       ).bind(now, user.id),
+    );
+    // Флаг `custom_paid` больше не обгоняет число слотов: он означает «мастерская
+    // открыта», и открыта она, пока хотя бы одно место оплачено.
+    statements.push(
+      env.DB.prepare(`UPDATE users SET custom_paid = CASE WHEN custom_slots >= 1 THEN 1 ELSE 0 END WHERE id = ?`).bind(
+        user.id,
+      ),
     );
   }
   const single = skuSkin(payment.sku);
@@ -300,16 +290,6 @@ export async function refundPayment(env: WorkerEnv, chargeId: string): Promise<b
         now,
         user.id,
       ),
-    );
-  }
-  if (payment.sku === 'share') {
-    // Вернули взнос - забираем и место в галерее: платная витрина не может
-    // остаться бесплатной.
-    statements.push(
-      env.DB.prepare(
-        `UPDATE skin_shares SET status = 'rejected', note = 'refund', reviewed_at = ?
-         WHERE charge_id = ? AND status IN ('draft', 'pending', 'approved')`,
-      ).bind(now, payment.charge_id),
     );
   }
   await env.DB.batch(statements);

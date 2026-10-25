@@ -51,12 +51,22 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
   const [coinBuying, setCoinBuying] = useState<PaidSkinId | 'set' | 'custom' | null>(null);
   const [purchaseDone, setPurchaseDone] = useState<ProductSku | null>(null);
   const [setModal, setSetModal] = useState(false);
-  const [studio, setStudio] = useState(false);
+  // Студию открывают под конкретный слот: «править первую» и «рисовать вторую»
+  // - разные намерения, а сохранение всегда в первый слот затирало бы рисунок.
+  const [studioSlot, setStudioSlot] = useState<number | null>(null);
+  const [slotBusy, setSlotBusy] = useState<number | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [installing, setInstalling] = useState<number | null>(null);
 
   const ownedSet = PAID_SKINS.every((skin) => profile.skins.includes(skin));
   const wearing = resolveSkin(profile.skin, profile.customSkin);
+
+  // Свои темы - слоты. Профиль старой сборки сервера их ещё не присылает,
+  // поэтому числа выводятся из того, что есть: `customPaid` = один слот.
+  const customSlots = profile.customSlots ?? (profile.customPaid ? 1 : 0);
+  const customMaxSlots = profile.customMaxSlots ?? 3;
+  const customActive = profile.customActive ?? 1;
+  const customSkins = profile.customSkins ?? [profile.customSkin ?? null];
 
   // Открытие витрины пишется в журнал: без этой метрики доля покупателей в
   // лаборатории считается от всех игроков сразу и выглядит вдвое лучше, чем есть.
@@ -98,7 +108,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
     if (skin === 'custom' && (!profile.customSkin || !profile.customPaid)) {
       // Студия открыта всем: без рисунка и без мастерской надевать нечего,
       // поэтому здесь просто показываем, где это собирается и сколько стоит.
-      setStudio(true);
+      setStudioSlot(Math.max(1, customActive));
       return;
     }
     if (!skinUnlocked(skin, profile.skins, Boolean(profile.customSkin))) {
@@ -201,9 +211,6 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
       const paid = await waitForPayment(invoice.chargeId);
       if (paid) {
         await refresh();
-        // Взнос за публикацию - не товар на витрине: модалка «зачислено» тут
-        // только сбила бы с толку, у игрока впереди очередь проверки.
-        if (sku !== 'share') setPurchaseDone(sku);
         hapticNotify('success');
         return true;
       }
@@ -218,20 +225,59 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
   }
 
   /**
-   * Публикация своей темы. Обычному игроку - счёт на взнос и ожидание webhook;
-   * аккаунт из льготного списка `QA_LIVES_IDS` попадает в очередь напрямую,
-   * иначе проверяющий не увидит ни модерацию, ни галерею без тестового кошелька.
+   * Публикация своей темы. Счёта нет с тех пор, как за свои темы платят слотом:
+   * показ чужого рисунка ничего не стоит, иначе код темы стыдно было бы нести
+   * другу. Проверка очереди остаётся - её видит модератор, а не кошелёк.
    */
-  async function shareSkin(skin: CustomSkin): Promise<boolean> {
-    if (!profile.qa) return buyProduct('share', { skin });
+  async function shareSkin(skin: CustomSkin, slot?: number): Promise<boolean> {
     try {
-      await api<{ ok: boolean }>('/api/skins/publish', { method: 'POST', body: { skin } });
+      await api<{ ok: boolean }>('/api/skins/publish', { method: 'POST', body: { skin, ...(slot ? { slot } : {}) } });
       await refresh();
       hapticNotify('success');
       return true;
     } catch (error) {
       toast(error instanceof ApiError ? error.message : tr('Публикация не прошла'), 'error');
       return false;
+    }
+  }
+
+  /**
+   * Надеть свою тему из конкретного слота. Отдельная ручка не нужна: `slot`
+   * приезжает в тот же выбор темы, и сервер решает, куплено ли место.
+   */
+  async function wearSlot(slot: number) {
+    if (slotBusy !== null) return;
+    setSlotBusy(slot);
+    try {
+      const response = await api<{ profile: Profile }>('/api/profile/skin', {
+        method: 'POST',
+        body: { skin: 'custom', slot },
+      });
+      setProfile(response.profile);
+      hapticNotify('success');
+      toast(trf('Своя тема из слота {0} надета', [slot]), 'success');
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : tr('Надеть не удалось'), 'error');
+    } finally {
+      setSlotBusy(null);
+    }
+  }
+
+  /** Стереть тему: купленное место остаётся, освобождается только рисунок. */
+  async function clearSlot(slot: number) {
+    if (slotBusy !== null) return;
+    setSlotBusy(slot);
+    try {
+      const response = await api<{ profile: Profile }>('/api/profile/skin-custom', {
+        method: 'POST',
+        body: { skin: null, slot },
+      });
+      setProfile(response.profile);
+      toast(trf('Слот {0} освобождён', [slot]), 'info');
+    } catch (error) {
+      toast(error instanceof ApiError ? error.message : tr('Стереть не удалось'), 'error');
+    } finally {
+      setSlotBusy(null);
     }
   }
 
@@ -367,7 +413,7 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
                     </button>
                   </>
                 )}
-                <button type="button" className="btn btn-outline" onClick={() => setStudio(true)}>
+                <button type="button" className="btn btn-outline" onClick={() => setStudioSlot(Math.max(1, customActive))}>
                   {profile.customSkin ? tr('Поправить свою тему') : tr('Собрать свою тему')}
                 </button>
               </div>
@@ -466,13 +512,13 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
                       ? tr('Льгота: мастерская открыта вашему аккаунту, правьте и надевайте без доплат.')
                       : profile.customPaid
                         ? tr('Мастерская открыта: правится в любой момент и надевается без доплат.')
-                        : trf('Цвета доски, фон и фигура. Своя тема повторяет любую из полки, поэтому носит её тот, кто заплатил: {0} звёзд или {1} монет. Рисовать, смотреть и передавать код - бесплатно.', [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS)])}
+                        : trf('Цвета доски, фон и фигура. Своя тема повторяет любую из полки, поэтому место под неё стоит {0} звёзд или {1} монет. Правки, код и показ чужим - бесплатно.', [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS)])}
                   </span>
                 </span>
               </button>
               <span className="skin-side">
                 {profile.customPaid || profile.qa ? (
-                  <button type="button" className="buy-btn buy-btn-quiet" onClick={() => setStudio(true)}>
+                  <button type="button" className="buy-btn buy-btn-quiet" onClick={() => setStudioSlot(Math.max(1, customActive))}>
                     {profile.customSkin ? tr('студия') : tr('собрать')}
                   </button>
                 ) : (
@@ -499,12 +545,108 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
             </div>
           </div>
 
+          {/* Свои темы по слотам. Список показываем и когда мест меньше трёх:
+              игрок должен видеть, что второе место продаётся, а не что его
+              нарисованная тема - потолок витрины. */}
+          {customSlots > 0 && (
+            <div className="skin-slots">
+              <span className="label section-label">{trf('Свои темы: {0} из {1}', [customSlots, customMaxSlots])}</span>
+              {profile.customBlocked && (
+                <p className="modal-note">{tr('Темы этого аккаунта заморожены: их нельзя надеть и править, разбирательство - у поддержки.')}</p>
+              )}
+              <div className="skin-list">
+                {Array.from({ length: customMaxSlots }, (_, index) => index + 1).map((slot) => {
+                  const skin = customSkins[slot - 1] ?? null;
+                  const bought = slot <= customSlots;
+                  const active = bought && profile.skin === 'custom' && slot === customActive;
+                  return (
+                    <div className={cn('skin-row', active && 'active')} key={slot}>
+                      <div className="skin-row-main">
+                        <SkinPreview
+                          skin={skin ? { ...skin.tokens, glyph: skin.glyph, path: skin.path } : SKINS.classic}
+                        />
+                        <span className="skin-text">
+                          <span className="skin-name">
+                            {trf('Слот {0}', [slot])}
+                            {active && <span className="owned-count">{tr('надета')}</span>}
+                          </span>
+                          <span className="skin-desc">
+                            {!bought
+                              ? tr('Место не куплено: его докупают ниже, правки бесплатны.')
+                              : skin
+                                ? trf('«{0}». Правится бесплатно в любой момент.', [skin.name])
+                                : tr('Пустой слот: нарисуйте сюда вторую тему, первая останется на месте.')}
+                          </span>
+                        </span>
+                      </div>
+                      <span className="skin-side">
+                        {bought ? (
+                          <>
+                            {skin && !active && (
+                              <button
+                                type="button"
+                                className="buy-btn buy-btn-quiet"
+                                onClick={() => void wearSlot(slot)}
+                                disabled={slotBusy !== null || profile.customBlocked}
+                              >
+                                {slotBusy === slot ? tr('Примерка') : tr('надеть')}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="buy-btn buy-btn-quiet"
+                              onClick={() => setStudioSlot(slot)}
+                              disabled={profile.customBlocked}
+                            >
+                              {skin ? tr('править') : tr('рисовать')}
+                            </button>
+                            {skin && (
+                              <button
+                                type="button"
+                                className="buy-btn buy-btn-quiet"
+                                onClick={() => void clearSlot(slot)}
+                                disabled={slotBusy !== null}
+                              >
+                                {tr('стереть')}
+                              </button>
+                            )}
+                          </>
+                        ) : slot === customSlots + 1 ? (
+                          <span className="skin-buy-pair">
+                            <button
+                              type="button"
+                              className="buy-btn"
+                              onClick={() => void buyProduct('custom')}
+                              disabled={paying !== null || coinBuying !== null}
+                            >
+                              {paying === 'custom' ? tr('Оплата') : trf('{0} звёзд', [SKIN_CUSTOM_STARS])}
+                            </button>
+                            <button
+                              type="button"
+                              className="buy-btn buy-btn-quiet"
+                              onClick={() => void buySkinWithCoins('custom')}
+                              disabled={paying !== null || coinBuying !== null}
+                            >
+                              {coinBuying === 'custom' ? tr('Ждём') : trf('{0} монет', [formatNumber(SKIN_CUSTOM_COINS)])}
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="skin-locked">{trf('нужен слот {0}', [slot])}</span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {gallery.length > 0 && (
             <>
               <span className="label section-label">{tr('Галерея игроков')}</span>
-              {!profile.customPaid && !profile.qa && (
+              {customSlots === 0 && !profile.qa && (
                 <p className="modal-note">
-                  {tr('Поставить чужую тему можно с открытой мастерской: она попадает в тот же слот, что и ваш собственный рисунок.')}
+                  {tr('Чужую тему ставят с открытой мастерской: она встанет в первый свободный слот и не затрёт ваш рисунок.')}
                 </p>
               )}
               <div className="skin-list">
@@ -541,15 +683,12 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
           )}
 
           <p className="ledger">
-            {tr('Своя тема не требует проверки: её видите только вы, и модератора для неё нет.')}{' '}
+            {tr('Своя тема проходит проверку, только если вы несёте её в общую галерею: для себя правят без модератора.')}{' '}
             {trf(
-              'Платят за право носить - {0} звёзд или {1} монет: иначе полка из готовых тем не продаётся, а те же восемь цветов доступны в студии.',
+              'Платят за место - {0} звёзд или {1} монет за слот: иначе полка из готовых тем не продаётся, а те же восемь цветов доступны в студии.',
               [SKIN_CUSTOM_STARS, formatNumber(SKIN_CUSTOM_COINS)],
             )}{' '}
-            {trf(
-              'Показать тему чужим стоит ещё {0} звёзд - это взнос за проверку, а не за право.',
-              [PRODUCTS.share.stars],
-            )}{' '}
+            {tr('Второе и третье место докупаются по той же цене, правки в них ничего не стоят.')}{' '}
             {tr('Код темы передаётся бесплатно: скопируйте его в студии или перешлите в чат, вставивший получит тему к себе, а у автора ничего не изменится.')}
           </p>
 
@@ -560,9 +699,15 @@ export function ShopScreen({ onBack, initialTab = 'bonuses', onTerms, onPrivacy 
         </div>
       )}
 
-      {studio && (
+      {studioSlot !== null && (
         <SkinStudio
-          onClose={() => setStudio(false)}
+          // Перезапуск по номеру слота: редактор инициализируется темой, и
+          // переключать её внутри той же модалки значило бы хранить два
+          // несогласованных состояния рисования.
+          key={studioSlot}
+          slot={studioSlot}
+          onPickSlot={(next) => setStudioSlot(next)}
+          onClose={() => setStudioSlot(null)}
           onShare={shareSkin}
           onUnlock={() => buyProduct('custom')}
         />

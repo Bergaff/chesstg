@@ -230,6 +230,30 @@ ALTER TABLE users ADD COLUMN custom_paid INTEGER NOT NULL DEFAULT 0;
 -- уже носит, не за что, и за смену правил он платить не должен.
 UPDATE users SET custom_paid = 1 WHERE skin_custom <> '';
 
+-- ── 0007_custom_slots.sql ───────────────────────────────────────
+-- Свои темы живут слотами (итерация 49).
+--
+-- Раньше была одна тема на аккаунт и отдельный взнос за то, чтобы её показали
+-- чужим. Модель поменялась: платят за место под свою тему, правки бесплатны,
+-- код темы и показ в галерее тоже бесплатны. Поэтому:
+--   `custom_slots`  - сколько мест куплено (1..3),
+--   `skin_custom_2` - второй слот, `skin_custom_3` - третий,
+--   `custom_active` - какой слот надет (1..3),
+--   `custom_blocked` - темы игрока заморожены модератором (см. админку).
+--
+-- `skin_custom` остаётся первым слотом: данные никто не переносит и не стирает.
+-- `custom_paid` (миграция 0006) не убираем: строки, купленные до этого выпуска,
+-- читаются как «один слот», и возврат платежа умеет откатывать ровно флаг.
+
+ALTER TABLE users ADD COLUMN custom_slots INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN skin_custom_2 TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN skin_custom_3 TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN custom_active INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users ADD COLUMN custom_blocked INTEGER NOT NULL DEFAULT 0;
+
+-- Купленная мастерская или уже нарисованная тема - один слот.
+UPDATE users SET custom_slots = 1 WHERE custom_paid = 1 OR skin_custom <> '';
+
 -- Служебная таблица, в которую wrangler записывает применённые миграции.
 -- Отметки ниже нужны, чтобы `npm run db:remote` позже ничего не повторял.
 CREATE TABLE IF NOT EXISTS d1_migrations (
@@ -244,6 +268,7 @@ INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0003_auth_link.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0004_mode_levels.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0005_skins.sql');
 INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0006_custom_workshop.sql');
+INSERT OR IGNORE INTO d1_migrations (name) VALUES ('0007_custom_slots.sql');
 
 -- Проверка: вернутся все таблицы базы, включая d1_migrations.
 -- Число таблиц руками не держим - оно меняется с каждой миграцией.

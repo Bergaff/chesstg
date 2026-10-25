@@ -9,6 +9,7 @@ import type {
   OverviewResponse,
   PaymentsResponse,
   ShopEconResponse,
+  OwnedSkinsResponse,
   SkinsResponse,
   UserDetailResponse,
   UsersResponse,
@@ -195,6 +196,27 @@ export function setupBot(payload: {
 /** Очередь публикаций тем: черновики, заявка, галерея, отклонённые. */
 export function fetchSkins(status: string): Promise<SkinsResponse> {
   return request<SkinsResponse>(`/skins?status=${encodeURIComponent(status)}`);
+}
+
+/**
+ * Свои темы игроков по слотам. Очередь показывает только то, что автор принёс
+ * на проверку, а жалоба чаще приходит на то, что человек надел себе и показал
+ * друзьям кодом - здесь все купленные места, включая пустые.
+ */
+export function fetchOwnedSkins(query = ''): Promise<OwnedSkinsResponse> {
+  const suffix = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
+  return request<OwnedSkinsResponse>(`/skins/owned${suffix}`);
+}
+
+/**
+ * Заморозить или разморозить темы игрока: права рисовать флаг не касается, но
+ * надеть, сохранить и отправить в галерею замороженная тема не может.
+ */
+export function blockSkinAuthor(userId: string, blocked: boolean, note = ''): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>('/skins/block', {
+    method: 'POST',
+    body: JSON.stringify({ userId, blocked, note }),
+  });
 }
 
 export function reviewSkin(id: number, decision: 'approve' | 'reject', note: string): Promise<{ ok: boolean }> {

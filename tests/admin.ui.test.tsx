@@ -256,6 +256,32 @@ const skinQueue = {
   ],
 };
 
+/**
+ * Темы игроков по слотам: у проверяющего здесь все купленные места, а не только
+ * те, что автор принёс в очередь.
+ */
+const ownedSkins = {
+  items: [
+    {
+      userId: 'u1',
+      tgId: 11,
+      author: '@sunset',
+      slot: 1,
+      active: true,
+      worn: true,
+      blocked: false,
+      name: 'Гроза',
+      skin: { name: 'Гроза', glyph: '♟', tokens: readableTokens },
+      readability: { glyph: 9.4, board: 7.1, ok: true },
+      published: 1,
+      queued: 0,
+      updatedAt: 1_760_000_300_000,
+    },
+  ],
+  query: '',
+  summary: { players: 40, owners: 6, blocked: 1, shown: 1 },
+};
+
 const shopEcon = {
   days: 30,
   shopOpens: 600,
@@ -297,6 +323,8 @@ beforeEach(() => {
       if (url.includes('/api/admin/users')) return jsonResponse(usersList);
       if (url.includes('/api/admin/bot')) return jsonResponse(botStatus);
       if (url.includes('/api/admin/skins/review')) return jsonResponse({ ok: true, updated: 1 });
+      if (url.includes('/api/admin/skins/block')) return jsonResponse({ ok: true, blocked: true });
+      if (url.includes('/api/admin/skins/owned')) return jsonResponse(ownedSkins);
       if (url.includes('/api/admin/skins')) return jsonResponse(skinQueue);
       if (url.includes('/api/admin/shop/econ')) return jsonResponse(shopEcon);
       return jsonResponse({ ok: true });
@@ -652,9 +680,32 @@ describe('админка', () => {
     expect(screen.getByText('запись повреждена - одобрить нельзя')).toBeTruthy();
     // Битые строки показывают заглушку доски, а не пустую клетку.
     expect(document.querySelectorAll('.skin-preview.is-broken')).toHaveLength(2);
-    // Превью живое: в каждой строке 2x2 клетки и чужая фигура рядом.
-    expect(document.querySelectorAll('.skin-preview .sp-cell')).toHaveLength(12);
-    expect(document.querySelectorAll('.skin-preview .sp-enemy')).toHaveLength(3);
+    // Превью живое: в каждой строке 2x2 клетки и чужая фигура рядом. Четвёртая
+    // пара - строка «Темы игроков по слотам»: свой блок тоже показывает образец,
+    // потому что оценивать нужно рисунок, а не имя.
+    expect(document.querySelectorAll('.skin-preview .sp-cell')).toHaveLength(16);
+    expect(document.querySelectorAll('.skin-preview .sp-enemy')).toHaveLength(4);
+
+    // Очередь ловит только то, что автор принёс сам. Жалоба же приходит и на
+    // тему, которую человек надел себе, - поэтому вторым блоком идут слоты.
+    expect(await screen.findByText('Темы игроков по слотам')).toBeTruthy();
+    expect(screen.getByText('Владельцы слотов')).toBeTruthy();
+    // Строка «номера слота + автор» - то, по чему модератор и находит аккаунт.
+    expect(screen.getByText('Гроза')).toBeTruthy();
+    expect(screen.getByText(/id 11/)).toBeTruthy();
+    expect(screen.getByText('Тем на полях')).toBeTruthy();
+    const block = screen.getByRole('button', { name: 'Заморозить' });
+    const blockCalls = () =>
+      (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([url, init]) => String(url).includes('/api/admin/skins/block') && (init as RequestInit)?.method === 'POST',
+      );
+    fireEvent.click(block);
+    await waitFor(() => expect(blockCalls()).toHaveLength(1));
+    expect(JSON.parse(String((blockCalls()[0] as [string, RequestInit])[1].body))).toEqual({
+      userId: 'u1',
+      blocked: true,
+      note: 'заморожено модератором',
+    });
 
     const reviewCalls = () =>
       (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(

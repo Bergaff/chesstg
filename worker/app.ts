@@ -46,6 +46,7 @@ import {
   PRODUCTS,
   AD_COINS_DAILY_LIMIT,
   SKIN_CUSTOM_COINS,
+  SKIN_CUSTOM_SLOTS_MAX,
   SKIN_CUSTOM_STARS,
   PAID_SKINS,
   SKIN_SET_COINS,
@@ -75,7 +76,11 @@ import { SCHEMA_VERSION, isDatabaseError, readSchema } from './schema';
 import { build as BUILD } from '../version.json';
 import {
   activeRuns,
+  customActiveSlot,
+  customBlocked,
+  customSkinInSlot,
   customSkinOf,
+  customSlotsOf,
   qaAccount,
   getOrCreateUser,
   getRun,
@@ -1131,8 +1136,27 @@ app.post('/api/profile/skin', async (c) => {
     fail(403, 'skin_locked', 'Тема не открыта');
   }
 
-  await c.env.DB.prepare('UPDATE users SET skin = ?, updated_at = ? WHERE id = ?')
-    .bind(skin, nowMs(), authCtx.user.id)
+  // «Своя тема» - не одна тема, а купленное место под неё. Переключить образ
+  // между своими рисунками дешевле, чем нарисовать заново, поэтому слот
+  // приезжает здесь же, одной ручкой: `slot` = какой слот надеть.
+  let active: number | null = null;
+  if (body.slot !== undefined) {
+    const slot = Math.trunc(Number(body.slot));
+    if (!Number.isInteger(slot) || slot < 1 || slot > SKIN_CUSTOM_SLOTS_MAX) fail(400, 'bad_slot', 'Слот своей темы - от 1 до 3');
+    if (slot > customSlotsOf(authCtx.user) && !qaAccount(c.env, authCtx.user)) {
+      fail(402, 'workshop_locked', `Слот ${slot} не куплен: он стоит ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`, {
+        stars: SKIN_CUSTOM_STARS,
+        coins: SKIN_CUSTOM_COINS,
+      });
+    }
+    if (!customSkinInSlot(authCtx.user, slot)) fail(409, 'slot_empty', `В слоте ${slot} пока ничего нет: нарисуйте тему в студии`);
+    active = slot;
+  }
+
+  await c.env.DB.prepare(
+    'UPDATE users SET skin = ?, custom_active = COALESCE(?, custom_active), updated_at = ? WHERE id = ?',
+  )
+    .bind(skin, active, nowMs(), authCtx.user.id)
     .run();
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
@@ -1140,23 +1164,38 @@ app.post('/api/profile/skin', async (c) => {
 });
 
 /**
- * Публикация своей темы без взноса. Путь один: аккаунт из `QA_LIVES_IDS`.
- * Остальным очередь открывает счёт на звёзды - взнос и есть фильтр, и платить
- * за чужую проверку из воздуха сервер не разрешает.
+ * Своя тема в общей галерее. Счёта нет: за слот игрок уже заплатил, а просить
+ * звёзды за то, что чужие увидят его рисунок, значило бы прятать витрину от
+ * тех, у кого нет кошелька. Очередь на проверку остаётся - цвета и контур
+ * рисует сам игрок, и «это видно на доске» должен подтвердить модератор.
  */
 app.post('/api/skins/publish', async (c) => {
   const authCtx = auth(c);
-  if (!qaAccount(c.env, authCtx.user)) {
-    fail(403, 'payment_required', 'Публикация темы стоит звёзд: счёт создаётся в магазине');
-  }
   const body = await readJson(c);
-  const check = checkSkin(body.skin);
+  const qa = qaAccount(c.env, authCtx.user);
+  // Публиковать есть что только владельцу слота: без него очередь наполняли бы
+  // аккаунты, которые ничего не рисовали, а просто подставили чужой код.
+  if (!workshopOwned(authCtx.user, qa)) {
+    fail(402, 'workshop_locked', `В галерею несут свою тему, а она живёт в слоте за ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`, {
+      stars: SKIN_CUSTOM_STARS,
+      coins: SKIN_CUSTOM_COINS,
+    });
+  }
+  if (customBlocked(authCtx.user) && !qa) {
+    fail(403, 'skin_blocked', 'Ваши темы заморожены: сначала разбор, потом галерея');
+  }
+  // Тема приезжает из студии (то, что сейчас на превью) или берётся из
+  // надетого слота: вторично собирать JSON ради кнопки «показать» - лишняя
+  // возможность разойтись с тем, что игрок видел.
+  const raw = body.skin === undefined ? customSkinOf(authCtx.user) : body.skin;
+  const check = checkSkin(raw);
   if (!check.ok) {
     fail(422, 'skin_unreadable', check.error ?? 'Тему не видно на доске', { readability: check.readability });
   }
-  await publishSkinShare(c.env, authCtx.user, check.skin);
+  const limit = qa ? SKIN_CUSTOM_SLOTS_MAX : Math.max(1, customSlotsOf(authCtx.user));
+  await publishSkinShare(c.env, authCtx.user, check.skin, limit);
   const fresh = await getUserById(c.env, authCtx.user.id);
-  return c.json({ ok: true, status: 'pending', profile: toProfile(fresh ?? authCtx.user, nowMs(), true) });
+  return c.json({ ok: true, status: 'pending', profile: toProfile(fresh ?? authCtx.user, nowMs(), qa) });
 });
 
 /**
@@ -1206,9 +1245,19 @@ app.post('/api/skins/buy-coins', async (c) => {
 
   const owned = ownedSkins(authCtx.user);
   const freshIds = ids.filter((id) => !owned.includes(id));
+  let nextSlots = 1;
   if (workshop) {
     if (qaAccount(c.env, authCtx.user)) fail(409, 'already_owned', 'Мастерская открыта вашему аккаунту');
-    if (workshopOwned(authCtx.user)) fail(409, 'already_owned', 'Мастерская уже открыта');
+    // Товар повторяемый: слоты докупаются по одному по той же цене, а на трёх
+    // место кончается. Раньше вторая покупка отвечала «уже открыто» и игрок,
+    // желающий ещё одну тему, упирался в отказ.
+    const slots = customSlotsOf(authCtx.user);
+    if (slots >= SKIN_CUSTOM_SLOTS_MAX) {
+      fail(409, 'slots_full', `Больше ${SKIN_CUSTOM_SLOTS_MAX} своих тем на аккаунт нельзя: сотрите одну, чтобы рисовать заново`, {
+        slots,
+      });
+    }
+    nextSlots = slots + 1;
   } else if (freshIds.length === 0) {
     fail(409, 'already_owned', target === 'set' ? 'Все темы уже куплены' : 'Эта тема уже ваша');
   }
@@ -1224,12 +1273,12 @@ app.post('/api/skins/buy-coins', async (c) => {
     // `custom_paid` открывает мастерскую, а не выдумывает тему.
     updated = await c.env.DB.prepare(
       `UPDATE users
-         SET coins = coins - ?, custom_paid = 1,
+         SET coins = coins - ?, custom_paid = 1, custom_slots = ?,
              skin = CASE WHEN skin_custom <> '' THEN 'custom' ELSE skin END,
              updated_at = ?
        WHERE id = ? AND coins >= ?`,
     )
-      .bind(price, now, authCtx.user.id, price)
+      .bind(price, nextSlots, now, authCtx.user.id, price)
       .run();
   } else {
     const all = [...new Set<SkinId>(['classic', ...owned, ...freshIds])].join(',');
@@ -1258,8 +1307,10 @@ app.post('/api/skins/buy-coins', async (c) => {
 
 /**
  * Своя тема: сохранить и надеть. Рисование бесплатное - счёт за него студия не
- * выставит никогда, иначе код темы нельзя было бы отправить другу. Платит тот,
- * кто надевает: право живёт в `custom_paid`, купленное за звёзды или за монеты.
+ * выставит никогда, иначе код темы нельзя было бы отправить другу. Правки тоже
+ * бесплатны: тема живёт в купленном слоте, и перекрашивать её второй раз за те
+ * же деньги - значит наказывать за аккуратность. Платят за место: слот стоит
+ * `SKIN_CUSTOM_STARS` звёзд (или `SKIN_CUSTOM_COINS` монет) и их до трёх.
  * Раньше своя тема для себя стоила ноль, и это убивало продажу готовых: те же
  * восемь цветов можно намалевать за минуту.
  */
@@ -1267,14 +1318,33 @@ app.post('/api/profile/skin-custom', async (c) => {
   const authCtx = auth(c);
   const body = await readJson(c);
   const now = nowMs();
+  const qa = qaAccount(c.env, authCtx.user);
+  const slots = customSlotsOf(authCtx.user);
+  const requested = body.slot === undefined ? customActiveSlot(authCtx.user) : Math.trunc(Number(body.slot));
 
+  if (!Number.isInteger(requested) || requested < 1 || requested > SKIN_CUSTOM_SLOTS_MAX) {
+    fail(400, 'bad_slot', `Слот своей темы - от 1 до ${SKIN_CUSTOM_SLOTS_MAX}`);
+  }
+  const slot = requested as number;
+  if (customBlocked(authCtx.user) && !qa) {
+    fail(403, 'skin_blocked', 'Ваши темы заморожены: правки и надевание недоступны');
+  }
+  const column = (['skin_custom', 'skin_custom_2', 'skin_custom_3'] as const)[slot - 1];
+
+  // Стереть тему: слот остаётся купленным, освобождается только рисунок. Права
+  // за возвращённые деньги не отымаем - вторая покупка не должна зависеть от
+  // того, стирал ли игрок старую тему. Отдаём ответ и без слота: строка могла
+  // остаться от старых правил, и отказывать в «очисти мусор» - значит не давать
+  // игроку убрать чужой рисунок с доски.
   if (body.skin === null) {
-    await c.env.DB.prepare(`UPDATE users SET skin_custom = '', skin = 'classic', updated_at = ? WHERE id = ?`)
+    await c.env.DB.prepare(
+      `UPDATE users SET ${column} = '', skin = CASE WHEN skin = 'custom' THEN 'classic' ELSE skin END, updated_at = ? WHERE id = ?`,
+    )
       .bind(now, authCtx.user.id)
       .run();
     const cleared = await getUserById(c.env, authCtx.user.id);
     if (!cleared) fail(500, 'user_missing');
-    return c.json({ ok: true, profile: toProfile(cleared, nowMs(), qaAccount(c.env, cleared)) });
+    return c.json({ ok: true, slot, profile: toProfile(cleared, nowMs(), qa) });
   }
 
   const check = checkSkin(body.skin);
@@ -1282,24 +1352,29 @@ app.post('/api/profile/skin-custom', async (c) => {
     fail(422, 'skin_unreadable', check.error ?? 'Тему не видно на доске', { readability: check.readability });
   }
 
-  // Мусор отбивается до цены: «не вижу тему» - дело первое, а счёт игроку
-  // выставляют только тогда, когда надевать есть что.
-  if (!workshopOwned(authCtx.user, qaAccount(c.env, authCtx.user))) {
-    fail(402, 'workshop_locked', `Свою тему надеют за ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`, {
-      stars: SKIN_CUSTOM_STARS,
-      coins: SKIN_CUSTOM_COINS,
-    });
+  // Продать право «положить тему в следующий слот» - тот же счёт, что и за
+  // первый: цена одна, и сервер её держит, а не подпись кнопки.
+  if (slot > slots && !qa) {
+    // Первый слот продаётся как мастерская, второй и третий - как место. Цена
+    // одна, и ответ сервера держит её в числах, а не в тексте: клиент по этим
+    // же числам рисует кнопку.
+    fail(402, slots === 0 ? 'workshop_locked' : 'slot_locked',
+      slots === 0
+        ? `Свою тему надеют за ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`
+        : `Слот ${slot} не куплен: ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`,
+      { stars: SKIN_CUSTOM_STARS, coins: SKIN_CUSTOM_COINS, slot });
   }
 
-  await c.env.DB.prepare(`UPDATE users SET skin_custom = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
-    .bind(JSON.stringify(check.skin), now, authCtx.user.id)
+  await c.env.DB.prepare(`UPDATE users SET ${column} = ?, custom_active = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
+    .bind(JSON.stringify(check.skin), slot, now, authCtx.user.id)
     .run();
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
   return c.json({
     ok: true,
+    slot,
     readability: check.readability,
-    profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)),
+    profile: toProfile(fresh, nowMs(), qa),
   });
 });
 
@@ -1343,7 +1418,7 @@ app.get('/api/skins/gallery', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT s.id, s.name, s.payload, s.created_at, s.installs, u.first_name AS author
      FROM skin_shares s LEFT JOIN users u ON u.id = s.user_id
-     WHERE s.status = 'approved'
+     WHERE s.status = 'approved' AND COALESCE(u.custom_blocked, 0) = 0
      ORDER BY s.installs DESC, s.created_at DESC
      LIMIT 40`,
   ).all<ShareRow>();
@@ -1366,7 +1441,7 @@ app.post('/api/skins/install', async (c) => {
   const row = await c.env.DB.prepare(
     `SELECT s.id, s.name, s.payload, s.created_at, s.installs, u.first_name AS author
      FROM skin_shares s LEFT JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.status = 'approved'`,
+     WHERE s.id = ? AND s.status = 'approved' AND COALESCE(u.custom_blocked, 0) = 0`,
   )
     .bind(id)
     .first<ShareRow>();
@@ -1385,14 +1460,33 @@ app.post('/api/skins/install', async (c) => {
 
   const skin = { ...item.skin, sharedBy: item.author };
   const now = nowMs();
+  // Куда её положить: в первый пустой купленный слот, а не поверх своего
+  // рисунка. Чужая тема, стёршая авторскую, - это потерянная работа, и игрок
+  // прав в том, что не захотел выбирать между «поставить» и «сохранить».
+  const slots = customSlotsOf(authCtx.user);
+  let target = 0;
+  for (let slot = 1; slot <= slots; slot += 1) {
+    if (!customSkinInSlot(authCtx.user, slot)) {
+      target = slot;
+      break;
+    }
+  }
+  // Слоты есть, но все заняты - значит дело не в праве, а в месте: его докупают.
+  if (target === 0) {
+    fail(409, 'slots_full', slots >= SKIN_CUSTOM_SLOTS_MAX
+      ? `Все ${SKIN_CUSTOM_SLOTS_MAX} слота заняты: сотрите свою тему, чтобы поставить чужую`
+      : `Свободных слотов нет: следующий слот стоит ${SKIN_CUSTOM_STARS} звёзд или ${SKIN_CUSTOM_COINS} монет`,
+      { stars: SKIN_CUSTOM_STARS, coins: SKIN_CUSTOM_COINS, slots });
+  }
+  const column = (['skin_custom', 'skin_custom_2', 'skin_custom_3'] as const)[target - 1];
   await c.env.DB.batch([
-    c.env.DB.prepare(`UPDATE users SET skin_custom = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
-      .bind(JSON.stringify(skin), now, authCtx.user.id),
+    c.env.DB.prepare(`UPDATE users SET ${column} = ?, custom_active = ?, skin = 'custom', updated_at = ? WHERE id = ?`)
+      .bind(JSON.stringify(skin), target, now, authCtx.user.id),
     c.env.DB.prepare('UPDATE skin_shares SET installs = installs + 1 WHERE id = ?').bind(row.id),
   ]);
   const fresh = await getUserById(c.env, authCtx.user.id);
   if (!fresh) fail(500, 'user_missing');
-  return c.json({ ok: true, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
+  return c.json({ ok: true, slot: target, profile: toProfile(fresh, nowMs(), qaAccount(c.env, fresh)) });
 });
 
 // ─────────────────────────────── Реклама ───────────────────────────────
@@ -1525,11 +1619,11 @@ app.post('/api/shop/invoice', async (c) => {
   const sku = body.sku;
   if (!isProductSku(sku)) fail(400, 'bad_sku', 'Неизвестный товар');
   const user = await refreshLives(c.env, authCtx.user);
-  // За публикацию своей темы платят звёздами, и тема прикладывается к счёту:
-  // черновик заявки создаётся до оплаты, чтобы платёж и очередь не разошлись.
-  const share = sku === 'share' ? checkSkin(body.skin) : null;
-  if (share && !share.ok) fail(422, 'skin_unreadable', share.error ?? 'Тему не видно на доске');
-  const invoice = await createInvoice(c.env, user, sku, share ? { skin: share.skin } : undefined);
+  // Темы в галерею публикуются без счёта, поэтому счёт здесь - только товар с
+  // полки. Тела запроса createInvoice не касается: тема приезжала бы в него, а
+  // её место теперь занимает номер слота.
+  void body;
+  const invoice = await createInvoice(c.env, user, sku);
   return c.json(invoice);
 });
 

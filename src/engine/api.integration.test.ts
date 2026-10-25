@@ -275,15 +275,17 @@ describe.runIf(apiReachable)('API integration', () => {
     expect([402, 404]).toContain(installLocked.status);
     if (installLocked.status === 402) expect(installLocked.data.error).toBe('workshop_locked');
 
-    // Публикация без взноса - путь льготного списка. Обычному аккаунту сервер
-    // отвечает 403 и отправляет в магазин: взнос и есть фильтр очереди.
+    // Показ в галерее больше ничего не стоит: несут туда своё, а своё живёт в
+    // купленном слоте. Гость без слота получает те же 402, что и за сохранение -
+    // фильтр очереди держит право, а не взнос.
     const freePublish = await api('/api/skins/publish', {
       method: 'POST',
       body: JSON.stringify({ skin: { name: 'Без взноса', glyph: '♟', tokens: readableTokens } }),
     });
-    expect(freePublish.status).toBe(403);
-    expect(freePublish.data.error).toBe('payment_required');
-    expect(freePublish.data.message).toContain('магаз');
+    expect(freePublish.status).toBe(402);
+    expect(freePublish.data.error).toBe('workshop_locked');
+    expect(freePublish.data.stars).toBe(SKIN_CUSTOM_STARS);
+    expect(freePublish.data.coins).toBe(SKIN_CUSTOM_COINS);
 
     // Тема, за которую не платили, не надевается: кроме наград её открывает
     // только покупка - звёздами или монетами.
@@ -293,6 +295,55 @@ describe.runIf(apiReachable)('API integration', () => {
 
     const unknown = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: '<script>' }) });
     expect(unknown.status).toBe(400);
+  });
+
+  /**
+   * Свои темы продаются слотами, и профиль обязан рассказывать о них сам:
+   * клиент рисует список мест по этим числам и не имеет права додумывать,
+   * сколько куплено. Денег у гостя нет, поэтому проверяется граница - сервер
+   * требует слот на любой чужой номер, а стереть позволяет всё, что лежит.
+   */
+  it('слоты своей темы: непрокупленное место не пишется, номер проверяется', async () => {
+    const api = makeClient();
+    const session = await api('/api/session', { method: 'POST', body: '{}' });
+    expect(session.status).toBe(200);
+    expect(session.data.profile.customSlots).toBe(0);
+    expect(session.data.profile.customMaxSlots).toBe(3);
+    expect(session.data.profile.customBlocked).toBe(false);
+    expect(Array.isArray(session.data.profile.customSkins)).toBe(true);
+    expect(session.data.profile.customSkins).toHaveLength(0);
+
+    const unbought = await api('/api/profile/skin-custom', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'Второе место', glyph: '❖', tokens: readableTokens }, slot: 2 }),
+    });
+    expect(unbought.status).toBe(402);
+    expect(unbought.data.error).toBe('workshop_locked');
+    expect(unbought.data.slot).toBe(2);
+
+    const junk = await api('/api/profile/skin-custom', {
+      method: 'POST',
+      body: JSON.stringify({ skin: { name: 'х', glyph: '❖', tokens: readableTokens }, slot: 9 }),
+    });
+    expect(junk.status).toBe(400);
+    expect(junk.data.error).toBe('bad_slot');
+
+    // Стирание не требует слота: строка могла остаться от старых правил, и
+    // отказывать «уберите чужой рисунок с доски» значило бы держать его.
+    const erase = await api('/api/profile/skin-custom', { method: 'POST', body: JSON.stringify({ skin: null, slot: 3 }) });
+    expect(erase.status).toBe(200);
+    expect(erase.data.profile.customSkin).toBeNull();
+
+    // Переключать надетую свою тему некуда: слотов нет, надевать нечего.
+    const wear = await api('/api/profile/skin', { method: 'POST', body: JSON.stringify({ skin: 'custom', slot: 3 }) });
+    expect(wear.status).toBe(403);
+    expect(wear.data.error).toBe('skin_locked');
+
+    // Монетная полка продаёт слоты тем же товаром: цена на месте, и у гостя её
+    // не хватит - списания не было.
+    const tooPoor = await api('/api/skins/buy-coins', { method: 'POST', body: JSON.stringify({ target: 'custom' }) });
+    expect(tooPoor.status).toBe(402);
+    expect(tooPoor.data.price).toBe(SKIN_CUSTOM_COINS);
   });
 
   /**

@@ -6,8 +6,9 @@ import {
   MIN_GLYPH_CONTRAST,
   PAID_SKINS,
   PRODUCTS,
-  SHARE_FEE_STARS,
+  PRODUCT_ORDER,
   SKINS,
+  SKIN_CUSTOM_SLOTS_MAX,
   SKIN_ORDER,
   SKIN_CUSTOM_STARS,
   SKIN_SET_STARS,
@@ -56,7 +57,12 @@ describe('темы поля', () => {
     expect(SKINS[PAID_SKINS[0]].stars).toBe(SKIN_STARS);
     expect(PRODUCTS.skins.stars).toBe(SKIN_SET_STARS);
     expect(PRODUCTS['skin:gold'].sku).toBe('skin:gold');
-    expect(PRODUCTS.share.kind).toBe('fee');
+    // Взнос за то, чтобы тему показали чужим, убран: в галерее платят слотом, а
+    // не очередью. Товар «место под свою тему» остаётся платным правом (kind
+    // 'fee'), и SKU публикации больше нет ни в словаре, ни в порядке полки.
+    expect(PRODUCTS.custom.kind).toBe('fee');
+    expect(PRODUCT_ORDER).not.toContain('share' as never);
+    expect((PRODUCTS as Record<string, unknown>).share).toBeUndefined();
   });
 
   /**
@@ -77,7 +83,11 @@ describe('темы поля', () => {
     // повторяет любую из трёх, а набор открывает их разом.
     expect(SKINS.custom.stars).toBe(SKIN_CUSTOM_STARS);
     expect(SKIN_CUSTOM_STARS).toBeGreaterThan(SKIN_SET_STARS);
-    expect(SKIN_CUSTOM_STARS).toBeLessThan(SHARE_FEE_STARS);
+    // Слот продаётся по одной цене все три раза: «докупить место» не должно
+    // стоить дороже, чем открыть мастерскую, иначе вторая тема выглядела бы
+    // штрафом за аккуратность. Мест ровно три - потолок витрины, а не склада.
+    expect(PRODUCTS.custom.stars).toBe(SKIN_CUSTOM_STARS);
+    expect(SKIN_CUSTOM_SLOTS_MAX).toBe(3);
     // Награда не продаётся: ни цены, ни пути «открыть покупкой» у неё нет.
     expect(skinUnlocked('ash', [])).toBe(false);
     expect(skinUnlocked('ash', ['ash'])).toBe(true);

@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { SkinPreview } from '../../components/SkinPreview';
-import { AdminError, fetchSkins, reviewSkin } from '../api';
-import type { SkinShareItem, SkinsResponse } from '../types';
+import { AdminError, blockSkinAuthor, fetchOwnedSkins, fetchSkins, reviewSkin } from '../api';
+import type { OwnedSkinsResponse, SkinShareItem, SkinsResponse } from '../types';
 import { Metric, Panel, StatusLine, Table, formatDateTime, formatNumber } from '../ui';
 
 /**
- * Очередь тем.
+ * Очередь тем и то, что игроки носят.
  *
- * Игрок делает тему для себя бесплатно, и в галерею она попадает только после
- * ручного «да»: автоматическая проверка подтверждает контраст, а не то, что
- * картинка не оскорбительная и не залитый квадрат. Здесь ровно то, что нужно
- * увидеть руками, - образец доски, цифры читаемости и кто автор.
+ * Место под свою тему куплено, править её бесплатно, и в галерею она попадает
+ * только после ручного «да»: автоматическая проверка подтверждает контраст, а не
+ * то, что картинка не оскорбительная и не залитый квадрат. Здесь ровно то, что
+ * нужно увидеть руками, - образец доски, цифры читаемости и кто автор.
+ *
+ * Вторым блоком идут слоты игроков: очередь ловит только тех, кто сам принёс
+ * тему на просмотр, а жалоба приходит и на рисунок, который человек надел себе
+ * и показал друзьям кодом. Заморозка гасит носку, правку и публикацию, но не
+ * отнимает купленное место - иначе модератор решал бы вопрос ценой работы.
  */
 
 const STATUSES = [
@@ -29,6 +34,10 @@ export function SkinsView({ onUnauthorized }: { onUnauthorized: (message: string
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<Record<number, string>>({});
+  const [owned, setOwned] = useState<OwnedSkinsResponse | null>(null);
+  const [ownedQuery, setOwnedQuery] = useState('');
+  const [ownedLoading, setOwnedLoading] = useState(false);
+  const [blockBusy, setBlockBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,9 +55,42 @@ export function SkinsView({ onUnauthorized }: { onUnauthorized: (message: string
     }
   }, [status, onUnauthorized]);
 
+  const loadOwned = useCallback(
+    async (query: string) => {
+      setOwnedLoading(true);
+      setError('');
+      try {
+        setOwned(await fetchOwnedSkins(query));
+      } catch (err) {
+        if (err instanceof AdminError && err.status === 401) {
+          onUnauthorized('Сеанс истёк, войдите снова');
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить темы игроков');
+      } finally {
+        setOwnedLoading(false);
+      }
+    },
+    [onUnauthorized],
+  );
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadOwned('');
+  }, [load, loadOwned]);
+
+  async function decideBlock(userId: string, blocked: boolean) {
+    setBlockBusy(userId);
+    setError('');
+    try {
+      await blockSkinAuthor(userId, blocked, blocked ? 'заморожено модератором' : '');
+      await loadOwned(ownedQuery);
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Решение не записано');
+    } finally {
+      setBlockBusy(null);
+    }
+  }
 
   async function decide(item: SkinShareItem, decision: 'approve' | 'reject') {
     setBusy(item.id);
@@ -92,7 +134,7 @@ export function SkinsView({ onUnauthorized }: { onUnauthorized: (message: string
 
       {error && <StatusLine kind="error">{error}</StatusLine>}
 
-      <Panel title="Публикации тем" note="Своя тема бесплатна, платит тот, кто хочет показать её другим">
+      <Panel title="Публикации тем" note="Место под тему куплено, показ в галерее бесплатный: очередь держит только то, что авторы принесли на проверку">
         <div className="adm-metrics">
           <Metric label="В очереди" value={formatNumber(countOf('pending'))} tone="accent" />
           <Metric label="В галерее" value={formatNumber(countOf('approved'))} />
@@ -107,11 +149,7 @@ export function SkinsView({ onUnauthorized }: { onUnauthorized: (message: string
       >
         <Table
           head={['Образец', 'Тема', 'Автор', 'Читаемость', 'Установок', 'Заявка', 'Решение']}
-          empty={
-            status === 'pending'
-              ? 'Очередь пуста: тем, за которые заплатили взнос, сейчас нет.'
-              : 'Строк нет.'
-          }
+          empty={status === 'pending' ? 'Очередь пуста: заявок на показ сейчас нет.' : 'Строк нет.'}
         >
           {(data?.items ?? []).map((item) => (
             <tr key={item.id}>
@@ -174,10 +212,92 @@ export function SkinsView({ onUnauthorized }: { onUnauthorized: (message: string
         </Table>
       </Panel>
 
+      <Panel
+        title="Темы игроков по слотам"
+        note="Что надето и что лежит в купленных местах. Здесь строк всегда больше, чем в очереди: свою тему можно не показывать никому"
+        actions={
+          <button
+            type="button"
+            className="adm-btn adm-btn-outline"
+            onClick={() => void loadOwned(ownedQuery)}
+            disabled={ownedLoading}
+          >
+            {ownedLoading ? 'Обновляем' : 'Обновить'}
+          </button>
+        }
+      >
+        <div className="adm-toolbar is-tight">
+          <label className="adm-field is-grow">
+            <span className="adm-label">Поиск</span>
+            <input
+              type="search"
+              value={ownedQuery}
+              placeholder="Имя, @username или tg_id"
+              onChange={(event) => setOwnedQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void loadOwned(ownedQuery);
+              }}
+            />
+          </label>
+        </div>
+        <div className="adm-metrics">
+          {/* `summary` может и не прийти: ответ старого воркера или ошибка
+              прокси не имеют права ронять вкладку, где сидит вся модерация тем. */}
+          <Metric label="Владельцы слотов" value={formatNumber(owned?.summary?.owners ?? 0)} hint="из всех игроков" />
+          <Metric label="Тем на полях" value={formatNumber(owned?.summary?.shown ?? 0)} />
+          <Metric
+            label="Заморожено"
+            value={formatNumber(owned?.summary?.blocked ?? 0)}
+            tone={(owned?.summary?.blocked ?? 0) > 0 ? 'danger' : undefined}
+            hint="темы не надеются, не правятся и не публикуются"
+          />
+        </div>
+        <Table
+          head={['Образец', 'Слот', 'Тема', 'Автор', 'Состояние', 'Галерея', 'Правка', 'Решение']}
+          empty="Ни у кого своей темы пока нет: слоты не куплены."
+        >
+          {(owned?.items ?? []).map((item) => (
+            <tr key={`${item.userId}:${item.slot}`}>
+              <td>
+                {item.skin ? <SkinPreview skin={item.skin} cell={20} /> : <SkinPreview cell={20} className="is-broken" />}
+              </td>
+              <td>
+                №{item.slot}
+                {item.active && <div className="adm-note">активный</div>}
+              </td>
+              <td>
+                <b>{item.name}</b>
+                {!item.skin && <div className="adm-note">запись не читается - сервер носит вместо неё «Кость»</div>}
+              </td>
+              <td>
+                {item.author}
+                {item.tgId !== null && <div className="adm-note">id {item.tgId}</div>}
+              </td>
+              <td>{item.worn ? 'надета' : item.blocked ? 'заморожена' : 'не надета'}</td>
+              <td>
+                {formatNumber(item.published)}
+                {item.queued > 0 && <div className="adm-note">в очереди: {item.queued}</div>}
+              </td>
+              <td>{formatDateTime(item.updatedAt)}</td>
+              <td>
+                <button
+                  type="button"
+                  className={item.blocked ? 'adm-btn adm-btn-primary' : 'adm-btn adm-btn-quiet'}
+                  onClick={() => void decideBlock(item.userId, !item.blocked)}
+                  disabled={blockBusy === item.userId}
+                >
+                  {item.blocked ? 'Разморозить' : 'Заморозить'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      </Panel>
+
       <p className="adm-note">
-        Тема в галерее устанавливается игроками бесплатно и навсегда: взнос платится один раз за то, что
-        её поставили в общий список, а не за каждую примерку. Отключение темы у тех, кто её уже надел,
-        не откатывается - поэтому в отказе стоит писать причину.
+        Публикация ничего не стоит: платят за слот, а не за то, что чужие увидели рисунок. Поэтому в
+        галерее тема живёт, пока её не отклонили, а заморозка аккаунта снимает показ и гасит носку у того,
+        кто её уже надел, - причину отказа стоит писать в заметку.
       </p>
     </div>
   );

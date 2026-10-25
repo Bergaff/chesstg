@@ -17,6 +17,7 @@ import {
   randomSeed,
   shortCode,
   SKINS,
+  SKIN_CUSTOM_SLOTS_MAX,
   type CustomSkin,
   type GameMode,
   type SkinId,
@@ -66,34 +67,94 @@ export function ownedSkins(user: UserRow, qa = false): SkinId[] {
 }
 
 /**
- * Своя тема игрока: собранная в студии или установленная из галереи. Разбор
- * намеренно молчаливый - кривой JSON из старой записи не должен ломать профиль,
- * он просто означает «своей темы нет», и доска надевает «Кость».
+ * Сколько слотов своей темы куплено. Один слот - одна тема: правки в ней
+ * бесплатны, код уходит в чат бесплатно, а второй рисунок стоит ещё один слот.
+ * `custom_paid` (миграция 0006) переживает этот выпуск как «мастерская открыта
+ * вообще»: строки, купленные до 0007, несут ровно этот флаг и ни одного
+ * `custom_slots`, поэтому берём максимум из двух - иначе игрок, заплативший
+ * вчера, проснулся бы без мастерской.
  */
-export function customSkinOf(user: UserRow): CustomSkin | null {
-  const raw = (user.skin_custom ?? '').trim();
-  if (!raw) return null;
+export function customSlotsOf(user: UserRow): number {
+  const bought = Number(user.custom_slots ?? 0);
+  const legacy = Number(user.custom_paid ?? 0) === 1 ? 1 : 0;
+  return Math.min(SKIN_CUSTOM_SLOTS_MAX, Math.max(bought, legacy));
+}
+
+/**
+ * Колонки слотов. `skin_custom` остаётся первым: переименовывать его значило бы
+ * писать миграцию переноса там, где достаточно порядка колонок.
+ */
+const CUSTOM_SLOT_COLUMNS = ['skin_custom', 'skin_custom_2', 'skin_custom_3'] as const;
+
+function readSkinJson(raw: unknown): CustomSkin | null {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    const check = checkSkin(parsed);
+    const check = checkSkin(JSON.parse(text) as unknown);
     return check.ok ? check.skin : null;
   } catch {
     return null;
   }
 }
 
+/** Тема в конкретном слоте (1..`SKIN_CUSTOM_SLOTS_MAX`); пустой слот - null. */
+export function customSkinInSlot(user: UserRow, slot: number): CustomSkin | null {
+  const index = Math.trunc(Number(slot)) - 1;
+  if (!Number.isInteger(index) || index < 0 || index >= CUSTOM_SLOT_COLUMNS.length) return null;
+  return readSkinJson(user[CUSTOM_SLOT_COLUMNS[index] as keyof UserRow]);
+}
+
 /**
- * Какая тема надета. Три отказа вместо одного: тема неизвестна, тема не открыта
- * и тема-«custom» без самой темы. Возврат денег и перенос аккаунта пишут в
- * `skin` что попало, и игра обязана реагировать доской, а не падением.
+ * Заморожены ли темы игрока: права рисовать у него не отбираем, но надеть,
+ * сохранить и показать чужим заблокированная тема не может.
  */
+export function customBlocked(user: UserRow): boolean {
+  return Number(user.custom_blocked ?? 0) === 1;
+}
+
 /**
- * Открыта ли мастерская: право носить свою тему куплено (звёздами или монетами)
- * либо выдано льготой из `QA_LIVES_IDS`. Студия при этом открыта всем - платят
+ * Все купленные слоты - список для магазина и для админской ревизии. Длина
+ * равна числу слотов намеренно: «места нет» и «место пустует» - разные
+ * состояния, и рисуются они по-разному.
+ */
+export function customSkinsOf(user: UserRow): (CustomSkin | null)[] {
+  const slots = customSlotsOf(user);
+  return Array.from({ length: slots }, (_, index) => customSkinInSlot(user, index + 1));
+}
+
+/**
+ * Какой слот надет. Если в выбранном слоте ничего нет - надеваем первую
+ * непустую тему: возврат платежа или чистка слота не должны оставлять игрока
+ * без скина при полном-то поле.
+ */
+export function customActiveSlot(user: UserRow): number {
+  const slots = Math.max(1, customSlotsOf(user));
+  const wanted = Math.trunc(Number(user.custom_active ?? 1));
+  const first = Number.isInteger(wanted) && wanted >= 1 && wanted <= slots ? wanted : 1;
+  if (customSkinInSlot(user, first)) return first;
+  for (let slot = 1; slot <= slots; slot += 1) {
+    if (customSkinInSlot(user, slot)) return slot;
+  }
+  return first;
+}
+
+/**
+ * Своя тема игрока: собранная в студии или установленная из галереи. Разбор
+ * намеренно молчаливый - кривой JSON из старой записи не должен ломать профиль,
+ * он просто означает «своей темы нет», и доска надевает «Кость».
+ */
+export function customSkinOf(user: UserRow): CustomSkin | null {
+  if (customBlocked(user)) return null;
+  return customSkinInSlot(user, customActiveSlot(user));
+}
+
+/**
+ * Открыта ли мастерская: куплен хотя бы один слот (звёздами или монетами) либо
+ * право выдано льготой из `QA_LIVES_IDS`. Студия при этом открыта всем - платят
  * не за рисование, а за то, что надели.
  */
 export function workshopOwned(user: UserRow, qa = false): boolean {
-  return qa || Number(user.custom_paid ?? 0) === 1;
+  return qa || customSlotsOf(user) >= 1;
 }
 
 export function selectedSkin(user: UserRow, qa = false): SkinId {
@@ -149,6 +210,13 @@ export function toProfile(user: UserRow, now = Date.now(), qa = false) {
     skins: ownedSkins(user, qa),
     skin: selectedSkin(user, qa),
     customSkin: customSkinOf(user),
+    // Слоты своей темы: активный слот - тот, что надет (`customSkin` выше),
+    // список - для магазина, где видна каждая купленная тема и пустое место.
+    customSlots: customSlotsOf(user),
+    customMaxSlots: SKIN_CUSTOM_SLOTS_MAX,
+    customActive: customActiveSlot(user),
+    customBlocked: customBlocked(user),
+    customSkins: customSkinsOf(user),
     ashRecordMoves: ASH_RECORD_MOVES,
     inventory: {
       hint: user.inv_hint,

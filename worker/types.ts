@@ -60,6 +60,15 @@ export interface UserRow {
   skin_custom: string;
   /** Мастерская куплена: без этого свою тему нельзя надеть (миграция 0006). */
   custom_paid?: number;
+  /** Купленное число мест под свою тему, 1..3 (миграция 0007). */
+  custom_slots?: number;
+  /** Второй и третий слоты своей темы; первый живёт в `skin_custom`. */
+  skin_custom_2?: string;
+  skin_custom_3?: string;
+  /** Какой слот надет (1..3). */
+  custom_active?: number;
+  /** Темы игрока заморожены модератором: не надеваются, не публикуются. */
+  custom_blocked?: number;
   inv_hint: number;
   inv_freeze: number;
   inv_undo: number;

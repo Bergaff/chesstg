@@ -1020,6 +1020,74 @@ a {
   gap: 6px;
 }
 
+/*
+ * Свои темы по слотам (магазин) и полоса их выбора (студия). Отступ здесь
+ * нужен потому, что список мест стоит сразу под строкой «своя тема», и без
+ * него две группы строк сливались в одну простыню.
+ */
+.skin-slots {
+  margin-top: 6px;
+}
+
+/*
+ * Строка слота отличается от строки полки: кнопок в ней три, и столбиком они
+ * поднимают строку в три роста; и весь левый блок - не кнопка, поэтому курсор на
+ * нём обещал бы клик, которого там нет.
+ */
+.skin-slots .skin-side {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.skin-slots .skin-row-main {
+  cursor: default;
+}
+
+.studio-slots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+}
+
+.studio-slot {
+  position: relative;
+  min-width: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.studio-slot.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Некупленное место не притворяется пустым: оно заблокировано, и цена за ним. */
+.studio-slot.locked {
+  border-style: dotted;
+  opacity: 0.55;
+}
+
+.studio-slot-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .skin-side {
   flex: 0 0 auto;
   display: flex;
