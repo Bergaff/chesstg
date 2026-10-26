@@ -1,9 +1,44 @@
 import type { WorkerEnv } from './types';
 import { authCallbackData } from './authLink';
 import { type BotLang, pick } from './i18n';
+import { legalChunks, legalDocument, paySupportText, supportText, type LegalKind } from './legal';
+import { LEGAL_CONTACT } from '../src/legal/content';
 import { botToken } from './token';
 
 const API_BASE = 'https://api.telegram.org';
+
+/**
+ * Команды бота одним списком: их печатает `setMyCommands` из админки, их же
+ * пересказывает /help. Розъезд означает меню, пункт из которого бот молчит, -
+ * и именно так выглядит бот, которого не пустили в каталог приложений.
+ *
+ * `paysupport`, `terms` и `support` - не украшение: продающий Telegram Stars bot
+ * обязан отвечать на них в чате, а не прятать условия за кнопкой.
+ */
+export const BOT_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
+  { command: 'start', description: 'Открыть игру' },
+  { command: 'play', description: 'Продолжить партию' },
+  { command: 'help', description: 'Правила и поддержка' },
+  { command: 'terms', description: 'Условия использования' },
+  { command: 'privacy', description: 'Политика данных' },
+  { command: 'paysupport', description: 'Оплата и возвраты' },
+  { command: 'support', description: 'Написать в поддержку' },
+];
+
+/**
+ * Английский список отдаётся без language_code: по правилам Bot API он
+ * действует для всех языков, которым нет отдельного набора. Язык интерфейса
+ * приложения выбирается так же - ru для русской копии клиента, дальше английский.
+ */
+export const BOT_COMMANDS_EN: ReadonlyArray<{ command: string; description: string }> = [
+  { command: 'start', description: 'Open the game' },
+  { command: 'play', description: 'Resume your run' },
+  { command: 'help', description: 'Rules and support' },
+  { command: 'terms', description: 'Terms of use' },
+  { command: 'privacy', description: 'Privacy policy' },
+  { command: 'paysupport', description: 'Payments and refunds' },
+  { command: 'support', description: 'Contact support' },
+];
 
 export interface TgButton {
   text: string;
@@ -117,6 +152,17 @@ export async function sendWelcome(
   });
 }
 
+/**
+ * Строка команд в справке печатается из того же списка, что ставится в меню
+ * (`setMyCommands`). Перечислить их руками - значит через полгода получить
+ * «такого команды нет» в меню, где она есть, и наоборот.
+ */
+function commandLines(list: ReadonlyArray<{ command: string; description: string }>): string {
+  const items = list.map((entry) => `/${entry.command} - ${entry.description}`);
+  const half = Math.ceil(items.length / 2);
+  return `${items.slice(0, half).join(' · ')}\n${items.slice(half).join(' · ')}`;
+}
+
 export async function sendHelp(env: WorkerEnv, chatId: number, lang: BotLang = 'ru'): Promise<void> {
   await callTelegram(env, 'sendMessage', {
     chat_id: chatId,
@@ -128,17 +174,94 @@ export async function sendHelp(env: WorkerEnv, chatId: number, lang: BotLang = '
           'Reach the top row and the level is cleared.\n\n' +
           'Lives come back one at a time every 30 minutes.\n' +
           'Coins are paid for wins and spent on bonuses.\n\n' +
-          'Commands: /play opens the game, /help is this note.\n' +
-          'Support: silviojurk70@gmail.com.'
+          `Commands:\n${commandLines(BOT_COMMANDS_EN)}\n` +
+          `Support: ${LEGAL_CONTACT}`
         : '<b>Как играть</b>\n\n' +
           'Пешка ходит только вперёд и по диагонали вперёд. Назад и вбок нельзя.\n' +
           'Фигуры ходят по классическим шахматным правилам и охотятся на игрока.\n' +
           'Дойдите до верхнего ряда, и уровень пройден.\n\n' +
           'Жизни восстанавливаются по одной каждые 30 минут.\n' +
           'Монеты дают за победы, они тратятся на бонусы.\n\n' +
-          'Команды: /play открыть игру, /help эта справка.\n' +
-          'Поддержка: silviojurk70@gmail.com.',
+          `Команды:\n${commandLines(BOT_COMMANDS)}\n` +
+          `Поддержка: ${LEGAL_CONTACT}`,
     parse_mode: 'HTML',
+  });
+}
+
+/**
+ * Документ (условия или политика) в чат. Печатается тем же текстом, что и
+ * экран в игре: `src/legal/content.ts` - один источник на оба. Кнопка «открыть
+ * в игре» ведёт на `?startapp=terms`: приложение по этому параметру само
+ * раскрывает нужный экран, и человеку не надо искать его в меню.
+ */
+export async function sendLegal(
+  env: WorkerEnv,
+  chatId: number,
+  kind: LegalKind,
+  lang: BotLang = 'ru',
+): Promise<void> {
+  const chunks = legalChunks(legalDocument(kind));
+  const app = appLink(env, kind);
+  const markup = app
+    ? {
+        inline_keyboard: [
+          [
+            {
+              text: pick(lang, 'Открыть в игре', 'Open in the game'),
+              web_app: { url: app },
+            },
+          ],
+        ],
+      }
+    : null;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const last = index === chunks.length - 1;
+    await callTelegram(env, 'sendMessage', {
+      chat_id: chatId,
+      text: chunks[index],
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...(last && markup ? { reply_markup: markup } : {}),
+    });
+    if (last && !markup && chunks.length > 1) {
+      await callTelegram(env, 'sendMessage', {
+        chat_id: chatId,
+        text: pick(
+          lang,
+          'Это весь документ: в игре он на экране «Условия».',
+          'That is the whole document: in the game it lives on the Terms screen.',
+        ),
+      });
+    }
+  }
+}
+
+/** /paysupport: обязательная Telegram команда про оплату и возвраты. */
+export async function sendPaySupport(env: WorkerEnv, chatId: number, lang: BotLang = 'ru'): Promise<void> {
+  await callTelegram(env, 'sendMessage', {
+    chat_id: chatId,
+    text: paySupportText(lang),
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  });
+}
+
+/** /support: куда писать, и что написать, чтобы не гонять игрока кругами. */
+export async function sendSupport(
+  env: WorkerEnv,
+  chatId: number,
+  lang: BotLang = 'ru',
+): Promise<void> {
+  const text = supportText(lang);
+  const app = appLink(env);
+  await callTelegram(env, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    ...(app
+      ? { reply_markup: { inline_keyboard: [[{ text: pick(lang, 'Играть', 'Play'), web_app: { url: app } }]] } }
+      : {}),
   });
 }
 

@@ -106,16 +106,21 @@ import { createInvoice, fulfillPayment, getPayment, isProductSku, publishSkinSha
 import {
   answerCallbackQuery,
   answerPreCheckout,
+  appLink,
   authReturnUrl,
   editAuthMessage,
   sendAuthPrompt,
   sendPlain,
   botStartLink,
   sendHelp,
+  sendLegal,
+  sendPaySupport,
+  sendSupport,
   sendWelcome,
   notifyReferrer,
 } from './telegram';
 import { botLang, pick } from './i18n';
+import { legalHtml } from './legal';
 import type { AppEnv, RunRow, UserRow, WorkerEnv } from './types';
 
 const app = new Hono<AppEnv>();
@@ -160,6 +165,25 @@ app.onError((err, c) => {
   console.error('Unhandled error', err instanceof Error ? err.stack ?? err.message : String(err));
   return c.json({ error: 'internal', message: 'Внутренняя ошибка сервера' }, 500);
 });
+
+/**
+ * Публичные условия и политика. Отдаёт воркер, а не собранный клиент: ссылку
+ * должны открывать модератор каталога и человек в обычном браузере, где нет ни
+ * сессии, ни Telegram. Текст берётся из того же источника, что экран в игре и
+ * ответ бота на /terms, - трёх копий документов в репозитории быть не должно.
+ */
+for (const kind of ['terms', 'privacy'] as const) {
+  app.get(`/${kind}`, (c) => {
+    const html = legalHtml(kind, appLink(withRequestOrigin(c.env, new URL(c.req.url).origin)));
+    return new Response(html, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600',
+        'X-Robots-Tag': 'index, follow',
+      },
+    });
+  });
+}
 
 app.notFound((c) => c.json({ error: 'not_found', message: 'Такого метода нет' }, 404));
 
@@ -1891,6 +1915,25 @@ async function handleUpdate(env: WorkerEnv, update: Record<string, unknown>): Pr
     }
     if (chatId && text.startsWith('/help')) {
       await sendHelp(env, chatId, lang);
+      return;
+    }
+
+    // Документы и обязательства продающего Stars бота: Telegram требует, чтобы
+    // они отвечались прямо в чате, а не только экраном внутри приложения.
+    if (chatId && text.startsWith('/terms')) {
+      await sendLegal(env, chatId, 'terms', lang);
+      return;
+    }
+    if (chatId && text.startsWith('/privacy')) {
+      await sendLegal(env, chatId, 'privacy', lang);
+      return;
+    }
+    if (chatId && text.startsWith('/paysupport')) {
+      await sendPaySupport(env, chatId, lang);
+      return;
+    }
+    if (chatId && text.startsWith('/support')) {
+      await sendSupport(env, chatId, lang);
       return;
     }
 

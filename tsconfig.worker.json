@@ -13,5 +13,5 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["worker", "src/engine"]
+  "include": ["worker", "src/engine", "src/legal"]
 }

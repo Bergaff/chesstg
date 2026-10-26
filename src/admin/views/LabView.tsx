@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   PIECE_GLYPH,
   applyAction,
-  availablePieceTypes,
   describeSolution,
-  difficultyBand,
   pieceCountForLevel,
   heightForLevel,
   sizeForLevel,
@@ -13,23 +11,27 @@ import {
   type GameState,
   type PlacementReport,
   MODE_ORDER,
-  boardForMode,
   modeDef,
-  piecesFor,
   placementSpace,
+  pluralRu,
+  summarizeRange,
   type ModeId,
-  type PieceType,
+  type RangeReport,
 } from '../../engine';
-import { PIECE_UNLOCKS } from '../../engine';
+import { labLevel, labSpec } from '../labSpec';
 import { AdminError, deleteReport, fetchLevels, saveReport } from '../api';
 import type { AuditReportRow, LevelsResponse } from '../types';
-import { runPlacementAudit } from '../auditClient';
+import { runPlacementAudit, runRangeAudit, type RangeHandle, type RangeProgress } from '../auditClient';
 import { VariantsPanel } from './VariantsPanel';
 import { ShopModelPanel } from './ShopModelPanel';
 import { Metric, Panel, StatusLine, Table, formatDateTime, formatNumber, formatPercent } from '../ui';
 import { cn } from '../../lib/format';
 
 const LIMITS = [1500, 4000, 12000];
+/** Потолок уровня в лаборатории: дальше генератор не растёт, а поле упирается. */
+const MAX_LAB_LEVEL = 60;
+/** Проверок на уровень в прогоне диапазона: 60 уровней по 12 000 - это часы. */
+const RANGE_LIMITS = [150, 400, 1200];
 
 const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
 
@@ -75,6 +77,8 @@ export function LabView({ onUnauthorized }: { onUnauthorized: (message: string) 
       {error && <StatusLine kind="error">{error}</StatusLine>}
 
       <PlacementLab onUnauthorized={onUnauthorized} onSaved={() => void load()} />
+
+      <PlacementRange onUnauthorized={onUnauthorized} onSaved={() => void load()} />
 
       <ShopModelPanel onUnauthorized={onUnauthorized} />
 
@@ -163,21 +167,18 @@ function PlacementLab({
   const [saved, setSaved] = useState('');
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  // Поле, фигуры и полоса уровня - из `labLevel`: та же формула, что у прогона
+  // диапазона, иначе два инструмента лаборатории меряли бы разное.
   const [mode, setMode] = useState<ModeId>('campaign');
-  const { width: size, height } = boardForMode(mode, level);
-  const labTypes: PieceType[] = PIECE_UNLOCKS.map((entry) => entry.type);
-  const types = useMemo(
-    () => (mode === 'campaign' || mode === 'endless' ? availablePieceTypes(level) : labTypes),
-    [labTypes, level, mode],
+  const { width: size, height, types, maxPieces, band } = useMemo(
+    () => labLevel(mode, level),
+    [level, mode],
   );
-  const maxPieces = Math.max(1, Math.min(piecesFor(mode, level), (height - 2) * size - 1));
   const [pieces, setPieces] = useState(maxPieces);
 
   useEffect(() => {
     setPieces(maxPieces);
   }, [maxPieces]);
-
-  const band = useMemo(() => difficultyBand(level, mode), [level, mode]);
 
   /**
    * Сравнение режимов по одному уровню: объём пространства и время, за которое
@@ -187,10 +188,15 @@ function PlacementLab({
   const scale = useMemo(
     () =>
       MODE_ORDER.map((id) => {
-        const geo = boardForMode(id, level);
-        const count = Math.max(1, Math.min(piecesFor(id, level), (geo.height - 2) * geo.width - 1));
-        const typesForMode = id === 'campaign' || id === 'endless' ? availablePieceTypes(level) : PIECE_UNLOCKS.map((entry) => entry.type);
-        const space = placementSpace({ width: geo.width, height: geo.height, count, types: typesForMode, mode: id });
+        const entry = labLevel(id, level);
+        const geo = { width: entry.width, height: entry.height };
+        const space = placementSpace({
+          width: entry.width,
+          height: entry.height,
+          count: entry.maxPieces,
+          types: entry.types,
+          mode: id,
+        });
         const rate = report && report.checked > 0 ? elapsedMs / report.checked : 0;
         const checked = Math.min(space.total, limit);
         return {
@@ -199,7 +205,7 @@ function PlacementLab({
           playable: modeDef(id).playable,
           note: modeDef(id).note,
           geo,
-          count,
+          count: entry.maxPieces,
           total: space.total,
           exhaustive: space.total <= limit,
           /** Одна проверенная расстановка на сколько-то вариантов: то, что
@@ -220,9 +226,10 @@ function PlacementLab({
     setReport(null);
     setProgress({ checked: 0, total: 0 });
     try {
+      const built = labSpec(mode, level, Math.min(pieces, maxPieces));
       const result = await runPlacementAudit(
-        { width: size, height, count: Math.min(pieces, maxPieces), types, mode },
-        { limit, seed: level * 7919, band, maxDepth: height + 3 },
+        built.spec,
+        { limit, seed: level * 7919, band: built.band, maxDepth: built.spec.height + 3 },
         (next) => setProgress(next),
       );
       setReport(result);
@@ -415,6 +422,327 @@ function PlacementLab({
               <PlacementCard key={item.placement.key} item={item} />
             ))}
           </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+
+/* ─────────────────────────── прогон всего диапазона ─────────────────────────── */
+
+/**
+ * Разбор всех уровней разом.
+ *
+ * Одиночный прогон отвечает на вопрос «как устроен этот уровень», и на нём
+ * легко поймать ровно тот уровень, который сам набрал. Диапазон отвечает на
+ * другой вопрос: держит ли генератор полосу от L1 до L60 и где он из неё
+ * выпадает. Поэтому строки не прореживаются: пропуск в таблице читался бы как
+ * «проверили, всё в порядке».
+ *
+ * Считает воркер, строка за строкой: 60 уровней по несколько сотен
+ * расстановок - минуты, и без отдачи по частям страница выглядела бы зависшей.
+ * Прогон можно оборвать, уже собранные строки остаются на экране.
+ */
+function PlacementRange({
+  onUnauthorized,
+  onSaved,
+}: {
+  onUnauthorized: (message: string) => void;
+  onSaved: () => void;
+}): ReactNode {
+  const [mode, setMode] = useState<ModeId>('campaign');
+  const [from, setFrom] = useState(1);
+  const [to, setTo] = useState(MAX_LAB_LEVEL);
+  const [perLevel, setPerLevel] = useState(RANGE_LIMITS[1]);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<RangeProgress | null>(null);
+  const [rows, setRows] = useState<Array<BatchReport | null>>([]);
+  const [stopped, setStopped] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState('');
+  const handleRef = useRef<RangeHandle | null>(null);
+
+  const levels = useMemo(() => {
+    const first = Math.min(MAX_LAB_LEVEL, Math.max(1, Math.round(from) || 1));
+    const last = Math.min(MAX_LAB_LEVEL, Math.max(first, Math.round(to) || first));
+    return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+  }, [from, to]);
+
+  const report = useMemo<RangeReport | null>(() => {
+    if (rows.length === 0) return null;
+    const filled = rows
+      .map((row, index) => {
+        if (!row) return null;
+        const entry = labLevel(mode, levels[index]);
+        return { level: levels[index], width: entry.width, height: entry.height, pieces: entry.maxPieces, band: entry.band, report: row };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+    return summarizeRange({
+      mode,
+      from: levels[0] ?? 1,
+      to: levels[levels.length - 1] ?? 1,
+      perLevelLimit: perLevel,
+      rows: filled,
+    });
+  }, [levels, mode, perLevel, rows]);
+
+  const start = useCallback(async () => {
+    if (running) return;
+    setRunning(true);
+    setError('');
+    setSaved('');
+    setStopped(false);
+    setRows(levels.map(() => null));
+    const jobs = levels.map((level) => {
+      const built = labSpec(mode, level);
+      return {
+        spec: built.spec,
+        options: { limit: perLevel, seed: level * 7919, band: built.band, maxDepth: built.spec.height + 3 },
+      };
+    });
+    const handle = runRangeAudit(jobs, {
+      onProgress: setProgress,
+      onRow: (index, row) =>
+        setRows((prev) => {
+          const next = [...prev];
+          next[index] = row;
+          return next;
+        }),
+    });
+    handleRef.current = handle;
+    const startedAt = performance.now();
+    try {
+      const result = await handle.promise;
+      setStopped(result.aborted);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Прогон не удался');
+    } finally {
+      handleRef.current = null;
+      setProgress(null);
+      setRunning(false);
+      setElapsed(performance.now() - startedAt);
+    }
+  }, [levels, mode, perLevel, running]);
+
+  const save = useCallback(async () => {
+    if (!report || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      // kind='placements': в списке это прогон расстановок, а не замер
+      // генератора; различает их поле `kind` внутри spec.
+      await saveReport(
+        'placements',
+        { kind: 'range', mode, from: report.from, to: report.to, perLevel: report.perLevelLimit },
+        {
+          levels: report.rows.length,
+          checked: report.checked,
+          solved: report.solved,
+          solveRate: report.solveRate,
+          exhaustiveLevels: report.exhaustiveLevels,
+          thin: report.thin,
+          offBand: report.offBand,
+          rows: report.rows.map((row) => ({
+            level: row.level,
+            solveRate: row.solveRate,
+            average: row.averageScore,
+            median: row.medianScore,
+            inBand: row.fair,
+            harder: row.brutal,
+            offBand: row.offBand,
+          })),
+          verdicts: report.verdicts,
+        },
+      );
+      setSaved('Отчёт сохранён');
+      onSaved();
+    } catch (err) {
+      if (err instanceof AdminError && err.status === 401) {
+        onUnauthorized('Сеанс истёк, войдите снова');
+        return;
+      }
+      setError(err instanceof Error ? err.message : 'Не удалось сохранить отчёт');
+    } finally {
+      setSaving(false);
+    }
+  }, [onSaved, onUnauthorized, report, saving]);
+
+  const done = report?.rows.length ?? 0;
+
+  return (
+    <Panel
+      title="Прогон всего диапазона"
+      note="Каждый уровень от первого до последнего: решаемость, средняя оценка и попадание в полосу"
+      actions={
+        <>
+          <button type="button" className="adm-btn adm-btn-outline" onClick={() => void save()} disabled={!report || saving}>
+            {saving ? 'Сохраняем' : 'Сохранить отчёт'}
+          </button>
+          {running ? (
+            <button
+              type="button"
+              className="adm-btn adm-btn-outline"
+              onClick={() => handleRef.current?.abort()}
+            >
+              Остановить
+            </button>
+          ) : (
+            <button type="button" className="adm-btn adm-btn-primary" onClick={() => void start()}>
+              Прогнать L{levels[0]}-L{levels[levels.length - 1]}
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="adm-toolbar is-tight">
+        <label className="adm-field is-inline">
+          <span className="adm-label">Режим</span>
+          <select value={mode} onChange={(event) => setMode(event.target.value as ModeId)}>
+            {MODE_ORDER.map((id) => (
+              <option key={id} value={id}>
+                {modeDef(id).name}
+                {modeDef(id).playable ? '' : ' (лаборатория)'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="adm-field is-inline">
+          <span className="adm-label">С</span>
+          <input
+            type="number"
+            min={1}
+            max={MAX_LAB_LEVEL}
+            value={from}
+            onChange={(event) => setFrom(Math.min(MAX_LAB_LEVEL, Math.max(1, Math.round(Number(event.target.value) || 1))))}
+          />
+        </label>
+        <label className="adm-field is-inline">
+          <span className="adm-label">По</span>
+          <input
+            type="number"
+            min={1}
+            max={MAX_LAB_LEVEL}
+            value={to}
+            onChange={(event) => setTo(Math.min(MAX_LAB_LEVEL, Math.max(1, Math.round(Number(event.target.value) || 1))))}
+          />
+        </label>
+        <label className="adm-field is-inline">
+          <span className="adm-label">Проверок на уровень</span>
+          <select value={perLevel} onChange={(event) => setPerLevel(Number(event.target.value))}>
+            {RANGE_LIMITS.map((value) => (
+              <option key={value} value={value}>
+                {formatNumber(value)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <p className="adm-note">
+        {levels.length} {pluralRu(levels.length, ['уровень', 'уровня', 'уровней'])} × {formatNumber(perLevel)} = до{' '}
+        {formatNumber(levels.length * perLevel)}{' '}
+        {pluralRu(levels.length * perLevel, ['расстановка', 'расстановки', 'расстановок'])}.{' '}
+        {levels.length * perLevel > 40_000
+          ? 'Многовато для одного клика - уменьшите проверку на уровень или берите кусками.'
+          : 'Фигур на уровень берётся максимум, что влезает в поле: прогон мерит генератор, а не подбор полегче.'}
+      </p>
+
+      {running && (
+        <p className="adm-progress" aria-live="polite">
+          Уровень {(progress?.index ?? 0) + 1} из {progress?.levelTotal ?? levels.length} · разобрано{' '}
+          {formatNumber(progress?.checked ?? 0)} из {formatNumber(progress?.of ?? perLevel)}
+        </p>
+      )}
+      {stopped && !running && <StatusLine kind="info">Прогон оборван: ниже то, что успело собраться.</StatusLine>}
+      {error && <StatusLine kind="error">{error}</StatusLine>}
+      {saved && <StatusLine kind="ok">{saved}</StatusLine>}
+
+      {report && (
+        <div className="adm-report">
+          <div className="adm-metrics is-compact">
+            <Metric label="Уровней разобрано" value={`${done} / ${levels.length}`} />
+            <Metric label="Расстановок" value={formatNumber(report.checked)} />
+            <Metric
+              label="Время"
+              value={`${(elapsed / 1000).toFixed(1)} c`}
+              hint={report.checked > 0 ? `${(elapsed / report.checked).toFixed(2)} мс на расстановку` : undefined}
+            />
+            <Metric
+              label="С решением"
+              value={formatPercent(report.solveRate, 1)}
+              hint={`${formatNumber(report.solved)} из ${formatNumber(report.checked)}`}
+            />
+            <Metric
+              label="Полный перебор"
+              value={`${report.exhaustiveLevels} ур.`}
+              hint="остальные - выборка"
+              tone={report.exhaustiveLevels === done && done > 0 ? 'ok' : undefined}
+            />
+            <Metric
+              label="С тупиками"
+              value={report.thin.length === 0 ? 'нет' : `${report.thin.length} ур.`}
+              tone={report.thin.length > 0 ? 'danger' : 'ok'}
+              hint={report.thin.length > 0 ? report.thin.map((level) => `L${level}`).join(' ') : undefined}
+            />
+            <Metric
+              label="Вне полосы"
+              value={report.offBand.length === 0 ? 'нет' : `${report.offBand.length} ур.`}
+              tone={report.offBand.length > 0 ? 'danger' : 'ok'}
+              hint={report.offBand.length > 0 ? report.offBand.slice(0, 8).map((level) => `L${level}`).join(' ') : undefined}
+            />
+          </div>
+
+          <Table
+            head={['Уровень', 'Поле', 'Фигур', 'Вариантов', 'Проверено', 'С решением', 'Средняя', 'Полоса', 'В полосе', 'Жёстче']}
+            empty="Прогон ещё не запускался"
+          >
+            {levels.map((level, index) => {
+              const row = report.rows.find((entry) => entry.level === level);
+              if (!row) {
+                return (
+                  <tr key={level} className="is-queued">
+                    <td className="adm-num">L{level}</td>
+                    <td colSpan={9}>{running ? 'в очереди' : 'нет данных'}</td>
+                  </tr>
+                );
+              }
+              const thin = row.checked > 0 && row.solveRate < 0.5;
+              return (
+                <tr key={level} className={row.offBand > 0 ? 'is-off' : thin ? 'is-thin' : undefined}>
+                  <td className="adm-num">L{level}</td>
+                  <td className="is-mono">
+                    {row.width}×{row.height}
+                  </td>
+                  <td>{row.pieces}</td>
+                  <td className="is-mono">{formatNumber(row.space)}</td>
+                  <td className="is-mono">
+                    {formatNumber(row.checked)}
+                    {row.exhaustive ? '' : ' *'}
+                  </td>
+                  <td className={thin ? 'is-danger' : 'is-mono'}>{formatPercent(row.solveRate, 1)}</td>
+                  <td>{row.averageScore}</td>
+                  <td className="is-mono">
+                    {row.band.min}-{row.band.max}
+                  </td>
+                  <td>{row.fair}</td>
+                  <td>{row.brutal}</td>
+                </tr>
+              );
+            })}
+          </Table>
+          <p className="adm-note">
+            «*» - неполный перебор уровня: доля решаемых измерена на выборке, и «ноль решений» такой строкой не
+            доказывается. Строка без подсветки значит, что средняя оценка уровня лежит в его полосе.
+          </p>
+
+          <ul className="adm-verdicts">
+            {report.verdicts.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </div>
       )}
     </Panel>

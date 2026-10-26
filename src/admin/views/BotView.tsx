@@ -259,7 +259,9 @@ npm run deploy</pre>
             <div className="adm-checks">
               <label className="adm-check">
                 <input type="checkbox" checked={commands} onChange={(event) => setCommands(event.target.checked)} />
-                <span>Команды start, play, help</span>
+                <span>
+                  Команды start, play, help, terms, privacy, paysupport, support - на ru и en
+                </span>
               </label>
               <label className="adm-check">
                 <input

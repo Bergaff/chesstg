@@ -38,6 +38,16 @@ export function initTelegram(): void {
   }
 }
 
+/**
+ * Экран документа по `startapp`. Бот отвечает на `/terms` и `/privacy` кнопкой
+ * «Открыть в игре», и ссылка обязана вести на сам документ: кнопка, которая
+ * приводит в меню и говорит «ищи сам», не считается выполнением требования
+ * показать условия.
+ */
+export function legalScreenFromStartParam(startParam: string): 'terms' | 'privacy' | null {
+  return startParam === 'terms' || startParam === 'privacy' ? startParam : null;
+}
+
 export function getStartParam(): string {
   const tg = getTg();
   const fromTg = tg?.initDataUnsafe?.start_param;

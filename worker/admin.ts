@@ -14,6 +14,7 @@ import { checkSkin } from '../src/engine';
 import { parseModeLevels, profileModes, resumableRun } from './db';
 import { SCHEMA_VERSION } from './schema';
 import { fail, readJson } from './http';
+import { BOT_COMMANDS, BOT_COMMANDS_EN } from './telegram';
 import { botToken, hasBotToken } from './token';
 import type { AppEnv, UserRow, WorkerEnv } from './types';
 import { webAppKeyStatus } from './webAppKey';
@@ -1393,17 +1394,23 @@ adminApp.post('/bot/setup', async (c) => {
   });
 
   if (body.commands !== false) {
-    const commands = await telegramCall(c.env, 'setMyCommands', {
-      commands: [
-        { command: 'start', description: 'Открыть игру' },
-        { command: 'play', description: 'Продолжить партию' },
-        { command: 'help', description: 'Правила и поддержка' },
-      ],
-    });
+    // Порядок и состав - как в `BOT_COMMANDS`: меню команд в чате и ответы
+    // вебхука обязаны совпадать, иначе игрок жмёт пункт, а бот молчит.
+    // Английский ставится первым и без language_code: это список по умолчанию
+    // для всех языков, у которых нет своего.
+    const fallback = await telegramCall(c.env, 'setMyCommands', { commands: [...BOT_COMMANDS_EN] });
+    const russian = await telegramCall(
+      c.env,
+      'setMyCommands',
+      { commands: [...BOT_COMMANDS], language_code: 'ru' },
+    );
+    const commands = { ok: fallback.ok && russian.ok, description: fallback.description ?? russian.description };
     steps.push({
       name: 'Команды',
       ok: commands.ok,
-      detail: commands.ok ? 'start, play, help' : commands.description ?? 'не удалось',
+      detail: commands.ok
+        ? `${BOT_COMMANDS.map((entry) => entry.command).join(', ')} · ru + en`
+        : (commands.description ?? 'не удалось'),
     });
   }
 

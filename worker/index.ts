@@ -38,7 +38,9 @@ export default {
     const redirect = enforceHttps(url, request);
     if (redirect) return redirect;
 
-    if (url.pathname.startsWith('/api/')) {
+    // Публичные документы отдаёт воркер: в собранном клиенте их нет, а
+    // single-page-application fallback показал бы вместо документа игру.
+    if (url.pathname.startsWith('/api/') || url.pathname === '/terms' || url.pathname === '/privacy') {
       return app.fetch(request, env, ctx);
     }
     // Админка живёт отдельной страницей и не индексируется.

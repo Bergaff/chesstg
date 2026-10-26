@@ -759,3 +759,197 @@ export function describeSolution(solution: GameAction[]): string[] {
       : `${index + 1}. пропуск`,
   );
 }
+
+/* ─────────────── прогон диапазона уровней ─────────────── */
+
+/** Одна строка прогона: отчёт по уровню плюс геометрия, из которой он взят. */
+export interface RangeRowInput {
+  level: number;
+  width: number;
+  height: number;
+  pieces: number;
+  band: DifficultyBand;
+  report: BatchReport;
+}
+
+export interface RangeRow {
+  level: number;
+  width: number;
+  height: number;
+  pieces: number;
+  /** Всего расстановок в пространстве уровня. */
+  space: number;
+  checked: number;
+  exhaustive: boolean;
+  solvable: number;
+  unsolvable: number;
+  solveRate: number;
+  averageScore: number;
+  medianScore: number;
+  simple: number;
+  fair: number;
+  brutal: number;
+  band: { min: number; max: number; target: number };
+  /** Насколько средняя по уровню ушла от полосы: доли от ширины полосы. */
+  offBand: number;
+}
+
+export interface RangeReport {
+  mode?: ModeId;
+  from: number;
+  to: number;
+  perLevelLimit: number;
+  rows: RangeRow[];
+  checked: number;
+  solved: number;
+  solveRate: number;
+  /** Уровни, где решается меньше половины расстановок: генератору тесно. */
+  thin: number[];
+  /** Уровни целиком вне полосы сложности, в порядке удалённости. */
+  offBand: number[];
+  exhaustiveLevels: number;
+  verdicts: string[];
+}
+
+/** Доля решаемых, ниже которой уровень считается «с тупиками». */
+export const RANGE_THIN_SOLVE_RATE = 0.5;
+
+/**
+ * Сводит отчёты по уровням в один диагноз диапазона.
+ *
+ * Функция ничем не управляет: она только переводит 60 отчётов в список того,
+ * что стоит посмотреть. Порядок строк сохраняется, уровни не прореживаются -
+ * пустой пропуск в таблице читается как «проверили и всё хорошо», и это врёт.
+ */
+export function summarizeRange(input: {
+  mode?: ModeId;
+  from: number;
+  to: number;
+  perLevelLimit: number;
+  rows: RangeRowInput[];
+}): RangeReport {
+  const rows: RangeRow[] = input.rows.map((row) => {
+    const width = Math.max(1, row.band.max - row.band.min);
+    const off =
+      row.report.averageScore < row.band.min
+        ? (row.band.min - row.report.averageScore) / width
+        : row.report.averageScore > row.band.max
+          ? (row.report.averageScore - row.band.max) / width
+          : 0;
+    return {
+      level: row.level,
+      width: row.width,
+      height: row.height,
+      pieces: row.pieces,
+      space: row.report.space.total,
+      checked: row.report.checked,
+      exhaustive: row.report.exhaustive,
+      solvable: row.report.solvable,
+      unsolvable: row.report.unsolvable,
+      solveRate: row.report.solveRate,
+      averageScore: row.report.averageScore,
+      medianScore: row.report.medianScore,
+      simple: row.report.simple,
+      fair: row.report.fair,
+      brutal: row.report.brutal,
+      band: { min: row.band.min, max: row.band.max, target: row.band.target },
+      offBand: Number(off.toFixed(3)),
+    };
+  });
+
+  const checked = rows.reduce((sum, row) => sum + row.checked, 0);
+  const solved = rows.reduce((sum, row) => sum + row.solvable, 0);
+  const thin = rows.filter((row) => row.checked > 0 && row.solveRate < RANGE_THIN_SOLVE_RATE).map((row) => row.level);
+  const offBand = rows
+    .filter((row) => row.checked > 0 && row.offBand > 0)
+    .sort((a, b) => b.offBand - a.offBand)
+    .map((row) => row.level);
+
+  return {
+    mode: input.mode,
+    from: input.from,
+    to: input.to,
+    perLevelLimit: input.perLevelLimit,
+    rows,
+    checked,
+    solved,
+    solveRate: checked > 0 ? Number((solved / checked).toFixed(4)) : 0,
+    thin,
+    offBand,
+    exhaustiveLevels: rows.filter((row) => row.exhaustive).length,
+    verdicts: rangeVerdicts(input, rows, { checked, solved, thin, offBand }),
+  };
+}
+
+/**
+ * Русская числительная в вердиктах: «2 уровня», «5 уровней», «21 уровень».
+ * Строки читают люди, и «2 уровней» бросается в глаза раньше, чем сама цифра.
+ */
+export function pluralRu(count: number, forms: readonly [string, string, string]): string {
+  const n = Math.abs(Math.round(count)) % 100;
+  const tail = n % 10;
+  if (n >= 11 && n <= 14) return forms[2];
+  if (tail === 1) return forms[0];
+  if (tail >= 2 && tail <= 4) return forms[1];
+  return forms[2];
+}
+
+const LEVELS = ['уровень', 'уровня', 'уровней'] as const;
+const LEVELS_FROM = ['уровня', 'уровней', 'уровней'] as const;
+const PLACEMENTS = ['расстановка', 'расстановки', 'расстановок'] as const;
+
+function listLevels(levels: number[], limit = 8): string {
+  if (levels.length <= limit) return levels.map((level) => `L${level}`).join(', ');
+  return `${levels.slice(0, limit).map((level) => `L${level}`).join(', ')} и ещё ${levels.length - limit}`;
+}
+
+function rangeVerdicts(
+  input: { from: number; to: number; perLevelLimit: number },
+  rows: RangeRow[],
+  totals: { checked: number; solved: number; thin: number[]; offBand: number[] },
+): string[] {
+  const out: string[] = [];
+  if (rows.length === 0) {
+    return ['Прогон пуст: ни один уровень не разобран.'];
+  }
+  const rate = totals.checked > 0 ? Math.round((totals.solved / totals.checked) * 100) : 0;
+  out.push(
+    `Диапазон L${input.from}-L${input.to}: ${rows.length} ${pluralRu(rows.length, LEVELS)}, ` +
+      `${totals.checked} ${pluralRu(totals.checked, PLACEMENTS)}, ${rate}% с решением (${totals.solved}).`,
+  );
+  const exhaustive = rows.filter((row) => row.exhaustive).length;
+  out.push(
+    exhaustive === rows.length
+      ? 'Полный перебор на каждом уровне диапазона: это доказательства, а не оценки.'
+      : `Полный перебор у ${exhaustive} ${pluralRu(exhaustive, LEVELS_FROM)} из ${rows.length}; ` +
+        `остальные - выборка ${input.perLevelLimit} ${pluralRu(input.perLevelLimit, PLACEMENTS)} на уровень, ` +
+        'то есть доля решаемых измерена с погрешностью, а «нет решения» на ней не докажешь.',
+  );
+  if (totals.thin.length > 0) {
+    out.push(
+      `С тупиками (${listLevels(totals.thin)}): решается меньше половины расстановок. ` +
+        'Либо уровень даёт слишком плотное поле, либо отбор должен проверять решаемость до выдачи.',
+    );
+  }
+  if (totals.offBand.length > 0) {
+    const worst = rows.filter((row) => row.offBand > 0).sort((a, b) => b.offBand - a.offBand)[0];
+    const side = worst.averageScore < worst.band.min ? 'ниже' : 'выше';
+    out.push(
+      `Вне полосы сложности (${listLevels(totals.offBand)}). Сильнее всех L${worst.level}: средняя ${worst.averageScore} ` +
+        `при полосе ${worst.band.min}-${worst.band.max} - это ${(worst.offBand * 100).toFixed(0)}% ширины полосы ${side} цели. ` +
+        (side === 'выше'
+          ? 'Уровень даёт перебор плотнее, чем обещает своя полоса.'
+          : 'Уровень проще, чем обещает своя полоса: он не тренирует то, что заявлено.'),
+    );
+  } else {
+    out.push(`Полосу держат все ${rows.length} уровней - править генератор не по чему.`);
+  }
+  const easy = rows.filter((row) => row.checked > 0 && row.averageScore < row.band.min).length;
+  const hard = rows.filter((row) => row.checked > 0 && row.averageScore > row.band.max).length;
+  out.push(
+    `Проще полосы: ${easy} ${pluralRu(easy, LEVELS)}. Жёстче: ${hard} ${pluralRu(hard, LEVELS)}. ` +
+      'Смотреть стоит на форму кривой по всему диапазону,' +
+      ' а не на одну точку: одинокий провал на L3 и провал, тянущийся до L40, - это разные правки.',
+  );
+  return out;
+}

@@ -1148,3 +1148,24 @@ body {
   background: var(--accent-wash);
   color: var(--ink);
 }
+
+/* Прогон диапазона: строка должна говорить о себе сама, без чтения десяти
+   колонок. «Вне полосы» - уровень выпал из собственной сложности, «тонко» -
+   меньше половины расстановок решаются. Красим кромку и фон строки, а не
+   отдельную цифру: взгляд цепляет уровень, а не только процент. */
+.adm-table tr.is-off td {
+  background: var(--accent-wash);
+}
+.adm-table tr.is-off td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.adm-table tr.is-thin td {
+  color: var(--danger);
+}
+.adm-table tr.is-thin td:first-child {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+.adm-table tr.is-queued td {
+  color: var(--dim);
+  font-style: italic;
+}

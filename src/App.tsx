@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { modeDef, resolveSkin, type GameMode } from './engine';
 import { AppContext, type AppContextValue, type ShopTab } from './context/AppContext';
 import { api, apiWithRetry, ApiError, isLinked, SESSION_KEY, takeLinkFromUrl } from './lib/api';
-import { initTelegram, getStartParam, hapticNotify } from './lib/telegram';
+import { initTelegram, getStartParam, legalScreenFromStartParam, hapticNotify } from './lib/telegram';
 import { showAdsgram } from './lib/ads';
 import type { SessionResponse } from './lib/types';
 import { ToastStack, type ToastItem, type ToastKind } from './components/Toast';
@@ -42,6 +42,10 @@ export default function App(): ReactNode {
   const toastId = useRef(0);
   const sessionRef = useRef<SessionResponse | null>(null);
   const screenRef = useRef<Screen>('menu');
+  // Документ по глубокой ссылке из чата: ставим в очередь и открываем, когда
+  // профиль загружен. До этого показывать нечего, а поверх экрана ошибки входа
+  // - тем более.
+  const [pendingLegal, setPendingLegal] = useState<'terms' | 'privacy' | null>(null);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -147,6 +151,7 @@ export default function App(): ReactNode {
         if (cancelled) return;
         setSession(response);
         setBootError(null);
+        setPendingLegal(legalScreenFromStartParam(startParam));
         if (response.referral?.rewarded) {
           toast(trf('Приглашение сработало: +{0} монет', [response.referral.bonus]), 'success');
         }
@@ -254,6 +259,13 @@ export default function App(): ReactNode {
     setScreen(kind);
     window.scrollTo(0, 0);
   }, []);
+
+  useEffect(() => {
+    if (!pendingLegal || !session) return;
+    const kind = pendingLegal;
+    setPendingLegal(null);
+    openLegal(kind);
+  }, [openLegal, pendingLegal, session]);
 
   const switchLegal = useCallback((kind: 'terms' | 'privacy') => {
     setScreen(kind);

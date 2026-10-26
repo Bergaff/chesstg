@@ -7,10 +7,13 @@ import {
   difficultyTarget,
   enumeratePlacements,
   placementSpace,
+  pluralRu,
+  summarizeRange,
   heightForLevel,
   sizeForLevel,
   availablePieceTypes,
   pieceCountForLevel,
+  type BatchReport,
   type GameState,
 } from './index';
 
@@ -191,5 +194,131 @@ describe('отбор уровней кампании', () => {
       expect(state.enemies.length).toBeLessThanOrEqual(pieceCountForLevel(level));
       expect(state.enemies.length).toBeLessThanOrEqual((state.height - 2) * state.width - 1);
     }
+  });
+});
+
+describe('прогон диапазона', () => {
+  const space = placementSpace({ width: 3, height: 3, count: 1, types: ['pawn'] });
+
+  /** Отчёт уровня с ручной оценкой: полоса и решаемость важнее содержания. */
+  function fakeReport(over: Partial<BatchReport> = {}): BatchReport {
+    return {
+      space,
+      exhaustive: true,
+      limit: 150,
+      checked: 9,
+      solvable: 8,
+      unsolvable: 1,
+      simple: 2,
+      fair: 5,
+      brutal: 1,
+      averageScore: 50,
+      medianScore: 50,
+      best: [],
+      worst: [],
+      solveRate: 8 / 9,
+      ...over,
+    };
+  }
+
+  function row(level: number, over: Partial<BatchReport> = {}) {
+    const band = difficultyBand(level);
+    return { level, width: 3, height: 3, pieces: 1, band, report: fakeReport(over) };
+  }
+
+  it('суммирует уровни и не теряет строк', () => {
+    const report = summarizeRange({
+      mode: 'campaign',
+      from: 1,
+      to: 3,
+      perLevelLimit: 150,
+      rows: [row(1, { checked: 9, solvable: 8 }), row(2, { checked: 20, solvable: 10 }), row(3, { checked: 1, solvable: 1 })],
+    });
+    expect(report.rows.map((entry) => entry.level)).toEqual([1, 2, 3]);
+    expect(report.checked).toBe(30);
+    expect(report.solved).toBe(19);
+    expect(report.solveRate).toBeCloseTo(19 / 30, 4);
+    expect(report.exhaustiveLevels).toBe(3);
+  });
+
+  it('считает уход от полосы долями её ширины и сортирует по нему', () => {
+    const band = difficultyBand(5);
+    const width = band.max - band.min;
+    const report = summarizeRange({
+      from: 5,
+      to: 6,
+      perLevelLimit: 150,
+      rows: [
+        row(5, { averageScore: band.max + 2 * width }),
+        row(6, { averageScore: difficultyBand(6).min - 0.5 * (difficultyBand(6).max - difficultyBand(6).min) }),
+      ],
+    });
+    expect(report.rows[0].offBand).toBeCloseTo(2, 3);
+    expect(report.rows[1].offBand).toBeCloseTo(0.5, 3);
+    expect(report.offBand).toEqual([5, 6]);
+    const joined = report.verdicts.join(' ');
+    expect(joined).toContain('Сильнее всех L5');
+    expect(joined).toContain('выше цели');
+    expect(joined).not.toMatch(/NaN|undefined|\[object/);
+  });
+
+  it('не считает провалом уровень, который не успели разобрать', () => {
+    const band = difficultyBand(9);
+    const report = summarizeRange({
+      from: 9,
+      to: 10,
+      perLevelLimit: 150,
+      rows: [
+        row(9, { checked: 0, solvable: 0, solveRate: 0, averageScore: band.min - 40 }),
+        row(10, { solveRate: 0.2, solvable: 2, checked: 10 }),
+      ],
+    });
+    expect(report.thin).toEqual([10]);
+    expect(report.offBand).toEqual([]);
+  });
+
+  it('на пустом прогоне говорит, что делать, а не делит на ноль', () => {
+    const report = summarizeRange({ from: 1, to: 60, perLevelLimit: 400, rows: [] });
+    expect(report.checked).toBe(0);
+    expect(report.solveRate).toBe(0);
+    expect(report.verdicts).toEqual(['Прогон пуст: ни один уровень не разобран.']);
+  });
+
+  it('на живых отчётах формулировки собираются без мусора', () => {
+    const rows = [1, 2, 3].map((level) => ({
+      level,
+      ...(() => {
+        const built = difficultyBand(level);
+        return { width: 3, height: 3, pieces: 1, band: built };
+      })(),
+      report: auditPlacements({ width: 3, height: 3, count: 2, types: ['pawn', 'rook'] }, { limit: 120, seed: level, band: difficultyBand(level) }),
+    }));
+    const report = summarizeRange({ mode: 'campaign', from: 1, to: 3, perLevelLimit: 120, rows });
+    expect(report.rows.length).toBe(3);
+    expect(report.checked).toBeGreaterThan(0);
+    expect(report.verdicts.length).toBeGreaterThanOrEqual(4);
+    for (const line of report.verdicts) {
+      expect(line.trim().length).toBeGreaterThan(10);
+      expect(line).not.toMatch(/NaN|undefined/);
+    }
+  });
+});
+
+describe('числительная в вердиктах', () => {
+  it('склоняет существительное по числу', () => {
+    const forms = ['уровень', 'уровня', 'уровней'] as const;
+    expect([1, 21, 101].map((n) => pluralRu(n, forms))).toEqual(['уровень', 'уровень', 'уровень']);
+    expect([2, 5, 24, 100].map((n) => pluralRu(n, forms))).toEqual([
+      'уровня',
+      'уровней',
+      'уровня',
+      'уровней',
+    ]);
+    expect([11, 12, 14, 111].map((n) => pluralRu(n, forms))).toEqual([
+      'уровней',
+      'уровней',
+      'уровней',
+      'уровней',
+    ]);
   });
 });

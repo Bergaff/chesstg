@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -641,6 +641,53 @@ describe('админка', () => {
     // Решаемость у генератора обязана быть полной: план ищет решатель, а не удача.
     expect(screen.getAllByText('100.0%').length).toBe(2);
   }, 60_000);
+
+  it('держит прогон диапазона собранным до запуска', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    // Панель обязана показывать замысел до первой строки отчёта: без этого
+    // «Прогнать» выглядит как кнопка, которая неизвестно что считает.
+    expect(await screen.findByText('Прогон всего диапазона')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Прогнать L1-L60/ })).toBeTruthy();
+    expect(screen.getByText(/60 уровней × 400 = до 24\s?000 расстановок/)).toBeTruthy();
+    expect(screen.queryByText('Уровней разобрано')).toBeNull();
+
+    // Подпись кнопки обязана следовать за полями: «Прогнать L1-L60» на
+    // диапазоне 1-5 означало бы, что кнопка и прогон разные вещи.
+    fireEvent.change(screen.getByLabelText('По'), { target: { value: '5' } });
+    expect(screen.getByRole('button', { name: /Прогнать L1-L5/ })).toBeTruthy();
+    expect(screen.getByText(/5 уровней × 400 = до 2\s?000 расстановок/)).toBeTruthy();
+    // Кнопок «Сохранить отчёт» на странице две (одиночный разбор и диапазон):
+    // проверяем ту, что внутри этой панели.
+    const panel = (await screen.findByText('Прогон всего диапазона')).closest('section') as HTMLElement;
+    const save = within(panel).getByRole('button', { name: 'Сохранить отчёт' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+  });
+
+  it('прогоняет диапазон уровней и показывает сводку', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+    const panel = (await screen.findByText('Прогон всего диапазона')).closest('section') as HTMLElement;
+
+    // Два уровня: в jsdom нет Worker, и это как раз проверка запасного пути -
+    // цикла с уступкой потока. На L1-L2 перебор полный и заканчивается сам.
+    fireEvent.change(screen.getByLabelText('По'), { target: { value: '2' } });
+    fireEvent.click(within(panel).getByRole('button', { name: /Прогнать L1-L2/ }));
+
+    expect(await within(panel).findByText(/Диапазон L1-L2: 2 уровня, 6\d расстановки/, undefined, { timeout: 60_000 })).toBeTruthy();
+    expect(within(panel).getByText('2 / 2')).toBeTruthy();
+    // Ни одна строка не осталась «в очереди»: прогон обязан закрыть все уровни.
+    expect(within(panel).queryByText('в очереди')).toBeNull();
+    expect(within(panel).getAllByText('L1').length).toBeGreaterThan(0);
+    expect(within(panel).getAllByText('L2').length).toBeGreaterThan(0);
+    // Сохранение разблокируется только когда есть что сохранять.
+    expect((within(panel).getByRole('button', { name: 'Сохранить отчёт' }) as HTMLButtonElement).disabled).toBe(false);
+  }, 90_000);
 
   it('меряет «Гонки» длиной партии до нерешаемой позиции', async () => {
     await mount();

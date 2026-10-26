@@ -12,7 +12,10 @@ export interface LegalDocument {
   sections: LegalSection[];
 }
 
-const CONTACT = 'silviojurk70@gmail.com';
+/** Почта в документах и в ответах бота одна: `worker/legal.ts` берёт её отсюда. */
+export const LEGAL_CONTACT = 'silviojurk70@gmail.com';
+
+const CONTACT = LEGAL_CONTACT;
 const UPDATED = '19 октября 2026 года';
 
 export const TERMS: LegalDocument = {

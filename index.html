@@ -18,6 +18,19 @@
       content="Три режима на одной доске: пешка сквозь фигуры, пробка и король в полосе."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://chesstg.tgmg.workers.dev/" />
+    <!--
+      Превью ссылки в чате: без og:image Telegram рисует серый прямоугольник с
+      доменом, и в ленте такая карточка не читается как игра. Картинка лежит в
+      public/ и собрана в фирменных цветах «Латуни»; размер 1200x630 - тот, что
+      просят превью-роботы (Telegram, Twitter, Facebook).
+    -->
+    <meta property="og:image" content="https://chesstg.tgmg.workers.dev/og-cover.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Край доски: шахматные головоломки в Telegram" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://chesstg.tgmg.workers.dev/" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Край доски</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
