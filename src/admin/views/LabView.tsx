@@ -31,6 +31,25 @@ import { cn } from '../../lib/format';
 
 const LIMITS = [1500, 4000, 12000];
 
+const SUPERSCRIPT = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+/**
+ * Покрытие выборки одним числом: «1 : 10¹⁸» читается быстрее, чем
+ * «1 : 1 300 000 000 000 000 000», а смысл тот же - во сколько раз пространство
+ * больше того, что успели проверить.
+ */
+function coverageLabel(exhaustive: boolean, ratio: number): string {
+  if (exhaustive) return 'полный перебор';
+  if (!(ratio > 1)) return 'после разбора';
+  if (ratio < 1e5) return `1 : ${formatNumber(Math.round(ratio))}`;
+  const power = Math.round(Math.log10(ratio));
+  const digits = String(power)
+    .split('')
+    .map((char) => SUPERSCRIPT[Number(char)] ?? char)
+    .join('');
+  return `1 : 10${digits}`;
+}
+
 export function LabView({ onUnauthorized }: { onUnauthorized: (message: string) => void }): ReactNode {
   const [data, setData] = useState<LevelsResponse | null>(null);
   const [error, setError] = useState('');
@@ -173,6 +192,7 @@ function PlacementLab({
         const typesForMode = id === 'campaign' || id === 'endless' ? availablePieceTypes(level) : PIECE_UNLOCKS.map((entry) => entry.type);
         const space = placementSpace({ width: geo.width, height: geo.height, count, types: typesForMode, mode: id });
         const rate = report && report.checked > 0 ? elapsedMs / report.checked : 0;
+        const checked = Math.min(space.total, limit);
         return {
           id,
           name: modeDef(id).name,
@@ -181,7 +201,11 @@ function PlacementLab({
           geo,
           count,
           total: space.total,
-          seconds: rate > 0 ? (Math.min(space.total, limit) * rate) / 1000 : 0,
+          exhaustive: space.total <= limit,
+          /** Одна проверенная расстановка на сколько-то вариантов: то, что
+              отличает доказательство от оценки. */
+          ratio: checked > 0 ? space.total / checked : 0,
+          seconds: rate > 0 ? (checked * rate) / 1000 : 0,
         };
       }),
     [elapsedMs, level, limit, report],
@@ -318,7 +342,7 @@ function PlacementLab({
         <div className="adm-panel-head">
           <h3 className="adm-panel-title">Масштаб режимов на уровне {level}</h3>
         </div>
-        <Table head={['Режим', 'Поле', 'Фигур', 'Вариантов', 'Прогон']} empty="Нет данных">
+        <Table head={['Режим', 'Поле', 'Фигур', 'Вариантов', 'Покрытие', 'Прогон']} empty="Нет данных">
           {scale.map((row) => (
             <tr key={row.id} className={row.id === mode ? 'is-active' : undefined}>
               <td>{row.name}</td>
@@ -327,6 +351,9 @@ function PlacementLab({
               </td>
               <td>{row.count}</td>
               <td className="is-mono">{formatNumber(row.total)}</td>
+              <td className={row.exhaustive ? 'is-mono' : 'is-mono is-thin'}>
+                {coverageLabel(row.exhaustive, row.ratio)}
+              </td>
               <td className="is-mono">
                 {row.seconds > 0
                   ? `${formatNumber(Math.min(row.total, limit))} расстановок, ~${row.seconds.toFixed(1)} c`
@@ -339,6 +366,14 @@ function PlacementLab({
           Время пересчитано из последнего прогона в этом окне: {formatNumber(Math.min(report?.checked ?? 0, limit))}{' '}
           расстановок за {(elapsedMs / 1000).toFixed(2)} c в потоке браузера. Прогресса в сервере здесь нет
           намеренно: перебор остаётся на устройстве, а сервер только хранит отчёты.
+        </p>
+        <p className="adm-note">
+          «Покрытие» - одна проверенная расстановка на сколько-то вариантов. «Полный перебор» означает, что
+          вывод по режиму является доказательством: решаемость проверена для всех расстановок уровня. Остальные
+          строки - оценка по случайной выборке: каждая расстановка в ней проверена точно, но отсутствие решения
+          среди 12 000 ещё не значит, что уровня нет. Поэтому астрономическое число вариантов - не приговор режиму:
+          оно отнимает доказательность, а не смысл проверки. Приговор - другая строка: если полосу сложности
+          режима приходится спорить с соседним режимом, а не мерить перебором, править нечем.
         </p>
       </div>
 

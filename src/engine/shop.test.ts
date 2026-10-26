@@ -3,6 +3,8 @@ import {
   AD_COINS_DAILY_LIMIT,
   COINS_PRICE_STEP,
   DEFAULT_ECON,
+  ECON_PRESETS,
+  MAX_BUYER_RATE,
   PAID_SKINS,
   SKIN_COINS,
   SKIN_CUSTOM_COINS,
@@ -11,21 +13,23 @@ import {
   SKIN_SET_STARS,
   SKIN_STARS,
   UNDO_MAX_HELD,
-  coinEconomy,
-  coinEconomyMarkdown,
-  skinCoinPrice,
-  undoTopUp,
-  undoTokensFor,
-  MAX_BUYER_RATE,
+  applyEconPreset,
   bestOffer,
   buyerRateAt,
   calibrateEcon,
+  coinEconomy,
+  coinEconomyMarkdown,
+  econFromPreset,
   econMarkdown,
+  econPresetOf,
   offerAt,
   offerLadder,
   priceSweep,
   projectShop,
   publishEconomics,
+  skinCoinPrice,
+  undoTokensFor,
+  undoTopUp,
 } from './index';
 
 describe('прогноз магазина', () => {
@@ -177,5 +181,71 @@ describe('прогноз магазина', () => {
     const md = coinEconomyMarkdown();
     expect(md).toContain('| Уровень |');
     expect(md).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('пресеты допущений', () => {
+  it('база пресета - это сам DEFAULT_ECON, без второго комплекта цифр', () => {
+    expect(econFromPreset('base')).toEqual(DEFAULT_ECON);
+  });
+
+  it('пресет трогает только допущения', () => {
+    for (const preset of ECON_PRESETS) {
+      const full = econFromPreset(preset.id, { visitors: 4242, singlePrice: 30, months: 3 });
+      expect(full.visitors).toBe(4242);
+      expect(full.singlePrice).toBe(30);
+      expect(full.months).toBe(3);
+      expect(econPresetOf(full)).toBe(preset.id);
+    }
+  });
+
+  it('смена взгляда сохраняет измеренное и выбранное руками', () => {
+    const tuned = {
+      ...DEFAULT_ECON,
+      visitors: 900,
+      buyerRate: 0.031,
+      refPrice: 20,
+      singlePrice: 25,
+      months: 6,
+      elasticity: 1.8,
+    };
+    const next = applyEconPreset(tuned, 'optimistic');
+    expect(next.visitors).toBe(900);
+    expect(next.buyerRate).toBe(0.031);
+    expect(next.refPrice).toBe(20);
+    expect(next.singlePrice).toBe(25);
+    expect(next.months).toBe(6);
+    // Допущение - из пресета, даже если его только что правили руками.
+    expect(next.elasticity).toBe(1.1);
+    expect(econPresetOf(next)).toBe('optimistic');
+  });
+
+  it('ручная правка коэффициента помечает расчёт своими допущениями', () => {
+    expect(econPresetOf({ ...DEFAULT_ECON, reviewMinutes: 5 })).toBe('custom');
+    // Цена и горизонт - не «свои допущения»: их выбирает витрина и человек.
+    expect(econPresetOf({ ...DEFAULT_ECON, singlePrice: 30, months: 3 })).toBe('base');
+  });
+
+  it('пресеты спорят по-человечески: пессимист держит цену ниже, оптимист выше', () => {
+    const flow = { visitors: 1200, buyerRate: 0.02, refPrice: 25, months: 1 };
+    const worst = econFromPreset('pessimistic', flow);
+    const base = econFromPreset('base', flow);
+    const bright = econFromPreset('optimistic', flow);
+    const bestOf = (input: typeof base) => bestOffer(priceSweep(input))!.price;
+    expect(bestOf(worst)).toBeLessThanOrEqual(bestOf(base));
+    expect(bestOf(bright)).toBeGreaterThanOrEqual(bestOf(base));
+    // Уровень спроса пресет не двигает намеренно: buyerRate берётся из базы, и
+    // «пессимист» без измерений был бы просто выдумкой пострашнее. Спорить
+    // пресеты должны там, где они и спорят - в цене труда над галереей.
+    expect(publishEconomics(worst).netCents).toBeLessThan(publishEconomics(bright).netCents);
+    expect(publishEconomics(worst).creators).toBeLessThan(publishEconomics(bright).creators);
+    // Набор - второе, что пессимист не верит: связка приносит меньше.
+    const gain = (input: typeof base) =>
+      offerLadder(input).find((row) => row.name === 'поштучно + набор')!.deltaVsSingle;
+    expect(gain(worst)).toBeLessThan(gain(bright));
+  });
+
+  it('курс звезды совпадает с тем, что платит платформа', () => {
+    expect(DEFAULT_ECON.centsPerStar).toBeCloseTo(1.3, 4);
   });
 });

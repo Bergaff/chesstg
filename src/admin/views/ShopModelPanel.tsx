@@ -5,12 +5,18 @@ import {
   coinEconomy,
   DEFAULT_ECON,
   ECON_ASSUMED_KEYS,
+  ECON_ASSUMED_COUNT,
+  ECON_PRESETS,
   PAID_SKINS,
   PRODUCTS,
   SKIN_COINS,
   SKIN_SET_COINS,
+  applyEconPreset,
   calibrateEcon,
+  econFromPreset,
   econMarkdown,
+  econPresetDef,
+  econPresetOf,
   projectShop,
   type ShopEconInput,
 } from '../../engine';
@@ -27,42 +33,71 @@ import { Metric, Panel, StatusLine, Table, formatNumber, formatPercent } from '.
  * поправкой на низкую цену: без неё ответ всегда «режь цену», и это не вывод, а
  * артефакт кривой.
  *
- * Всё, что не измерено, помечено «допущение» и правится руками. Кнопка «взять
- * из базы» подставляет только измеримое: открытия витрины, долю купивших и
- * средний чек.
+ * Восемнадцать полей руками не отдаём: здесь три решения - взгляд (пресет
+ * допущений), цены витрины и горизонт. Измеряемое подставляется кнопкой «взять
+ * из базы». Все остальные коэффициенты живы и доступны, но спрятаны: ручная
+ * правка переключает состояние на «свои допущения», и вывод в отчёте подписывается
+ * тем же словом - иначе отчёт с подкрученной эластичностью выглядит базовым.
  */
 
+/** Поля, которые правят в «тонких настройках»: подписываем их числом. */
 const FIELDS: Array<{ key: keyof ShopEconInput; label: string; step: number; hint?: string }> = [
   { key: 'visitors', label: 'Открытий витрины в месяц', step: 50, hint: 'из базы: событие shop_open' },
   { key: 'buyerRate', label: 'Доля купивших', step: 0.001, hint: 'из базы: платящие / открытия' },
   { key: 'refPrice', label: 'Цена калибровки, звёзд', step: 1, hint: 'из базы: средний чек' },
   { key: 'elasticity', label: 'Эластичность спроса', step: 0.1 },
   { key: 'anchorPrice', label: 'Якорь позиционирования', step: 1 },
-  { key: 'centsPerStar', label: 'Центов за звезду', step: 0.1 },
+  { key: 'centsPerStar', label: 'Центов за звезду', step: 0.1, hint: 'правило платформы: $0.013 за звезду' },
   { key: 'months', label: 'Горизонт, месяцев', step: 1 },
   { key: 'singlePrice', label: 'Тема поштучно, звёзд', step: 1 },
   { key: 'setPrice', label: 'Набор, звёзд', step: 1 },
   { key: 'setShare', label: 'Доля тех, кто берёт набор', step: 0.05 },
   { key: 'creatorRate', label: 'Доля, что собирает свою тему', step: 0.01 },
   { key: 'publisherRate', label: 'Из них хочет поделиться', step: 0.01 },
-  { key: 'shareFee', label: 'Взнос за публикацию', step: 10 },
+  { key: 'shareFee', label: 'Взнос за публикацию', step: 10, hint: 'в витрине его нет: это модель «что если»' },
   { key: 'seriousShare', label: 'Доля осмысленных заявок', step: 0.05 },
   { key: 'reviewMinutes', label: 'Минут на проверку', step: 1 },
   { key: 'hourCostCents', label: 'Ваш час, центов', step: 50 },
 ];
 
+const HORIZONS = [1, 3, 6, 12];
+const PERIODS = [7, 30, 90];
+
+/** Что витрина продаёт на самом деле: цены берём отсюда, а не из головы. */
+function shelfPrices() {
+  return {
+    single: PRODUCTS['skin:gold'].stars,
+    set: PRODUCTS.skins.stars,
+    slot: PRODUCTS.custom.stars,
+  };
+}
+
 export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: string) => void }): ReactNode {
-  const [input, setInput] = useState<ShopEconInput>(DEFAULT_ECON);
+  const shelf = shelfPrices();
+  const [input, setInput] = useState<ShopEconInput>(() =>
+    econFromPreset('base', { singlePrice: shelf.single, setPrice: shelf.set }),
+  );
   const [measured, setMeasured] = useState<ShopEconResponse | null>(null);
+  // Период, чьими цифрами подставлены visitors/buyerRate/refPrice. null означает
+  // «в этих трёх полях база не участвовала», и подпись в панели должна быть
+  // про допущение, а не про несуществующее измерение.
+  const [calibratedFor, setCalibratedFor] = useState<number | null>(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
 
   const report = useMemo(() => projectShop(input), [input]);
   const markdown = useMemo(
-    () => econMarkdown(report, { date: new Date().toLocaleDateString('ru-RU'), calibrated: measured !== null }),
-    [report, measured],
+    () =>
+      econMarkdown(report, {
+        date: new Date().toLocaleDateString('ru-RU'),
+        calibrated: calibratedFor !== null,
+      }),
+    [report, calibratedFor],
   );
+
+  const preset = econPresetOf(input);
+  const custom = preset === 'custom';
 
   const loadBase = useCallback(async () => {
     setError('');
@@ -92,6 +127,7 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
         refundedCount: measured.refundedCount,
       });
       if (!cal) {
+        setCalibratedFor(null);
         setNotice('В базе пока нечего калибровать: нужны и открытия витрины, и оплаченные счета.');
         return;
       }
@@ -101,6 +137,7 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
         buyerRate: cal.buyerRate,
         refPrice: cal.refPrice,
       }));
+      setCalibratedFor(days);
       setNotice(
         `Подставлено из базы за ${days} дней: открытий ${shopOpens}, платящих ${measured.payers}, ` +
           `средний чек ${cal.refPrice.toFixed(1)} звёзд, доля покупателей ${(cal.buyerRate * 100).toFixed(2)}%, возвратов ${(cal.refundRate * 100).toFixed(1)}%.`,
@@ -118,16 +155,19 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
   // запрос на каждый её рендер означал бы цикл перерисовок. Цифры подставляют
   // кнопкой - заодно видно, какой период подставлен.
 
+  const setField = useCallback((key: keyof ShopEconInput, value: number) => {
+    setInput((prev) => ({ ...prev, [key]: Number.isFinite(value) ? value : 0 }));
+  }, []);
+
   const publish = report.publish;
   // Монетная полка считается движком (та же функция, что печатает таблицу в
   // README): панель не имеет права держать свою арифметику цен.
   const coinRows = coinEconomy();
-  const single = PRODUCTS['skin:gold'].stars;
-  const set = PRODUCTS.skins.stars;
-  // Взнос за публикацию из продажи убран: галерея бесплатна. Число остаётся
-  // допущением модели - панель считает «что было бы, если бы витрину продавали»,
-  // и берёт его из своих допущений, а не из витрины игры.
-  const fee = DEFAULT_ECON.shareFee;
+  const fromShelf = input.singlePrice === shelf.single && input.setPrice === shelf.set;
+  const source = (key: keyof ShopEconInput) =>
+    (key === 'visitors' || key === 'buyerRate' || key === 'refPrice') && calibratedFor !== null
+      ? `из базы за ${calibratedFor} дн.`
+      : 'допущение';
 
   return (
     <div className="adm-stack">
@@ -135,26 +175,159 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
       {notice && <StatusLine kind="ok">{notice}</StatusLine>}
 
       <Panel
+        title="Расчёт"
+        note="Три решения: насколько пессимистично смотреть, по чём продаём и за какой горизонт считать. Остальное - пресет"
+      >
+        <div className="adm-econ-simple">
+          <div className="adm-econ-choice">
+            <span className="adm-label">Взгляд</span>
+            <div className="adm-range" role="group" aria-label="Пресет допущений">
+              {ECON_PRESETS.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={`adm-chip${preset === entry.id ? ' is-active' : ''}`}
+                  onClick={() => setInput((prev) => applyEconPreset(prev, entry.id))}
+                >
+                  {entry.name}
+                </button>
+              ))}
+            </div>
+            <p className="adm-note">
+              {custom
+                ? `Свои допущения: ${customAssumptions(input)} из ${ECON_ASSUMED_COUNT} коэффициентов изменены вручную.`
+                : econPresetDef(preset).note}
+            </p>
+            {custom && (
+              <button
+                type="button"
+                className="adm-link"
+                onClick={() => setInput((prev) => applyEconPreset(prev, 'base'))}
+              >
+                Вернуть базу
+              </button>
+            )}
+          </div>
+
+          <div className="adm-econ-choice">
+            <span className="adm-label">Цены витрины, звёзд</span>
+            <div className="adm-econ-prices">
+              <label className="adm-econ-field">
+                <span>Тема поштучно</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={input.singlePrice}
+                  step={1}
+                  onChange={(event) => setField('singlePrice', Number(event.target.value))}
+                />
+              </label>
+              <label className="adm-econ-field">
+                <span>Набор тем</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={input.setPrice}
+                  step={5}
+                  onChange={(event) => setField('setPrice', Number(event.target.value))}
+                />
+              </label>
+            </div>
+            <p className="adm-note">
+              В витрине: тема {shelf.single} · набор {shelf.set} · слот своей темы {shelf.slot}.{' '}
+              {fromShelf ? (
+                'Модель считает те же цены, что видит игрок.'
+              ) : (
+                <button type="button" className="adm-link" onClick={() => setInput((prev) => ({ ...prev, singlePrice: shelf.single, setPrice: shelf.set }))}>
+                  Взять с витрины
+                </button>
+              )}{' '}
+              Слот в расчёт не входит: он продаётся повторимо и не конкурирует с темами.
+            </p>
+          </div>
+
+          <div className="adm-econ-choice">
+            <span className="adm-label">Горизонт</span>
+            <div className="adm-range" role="group" aria-label="Горизонт прогноза">
+              {HORIZONS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`adm-chip${input.months === value ? ' is-active' : ''}`}
+                  onClick={() => setField('months', value)}
+                >
+                  {value} {value === 1 ? 'месяц' : 'мес.'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="adm-econ-choice">
+            <span className="adm-label">Данные базы</span>
+            <div className="adm-econ-inline">
+              <div className="adm-range" role="group" aria-label="Период">
+                {PERIODS.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`adm-chip${days === value ? ' is-active' : ''}`}
+                    onClick={() => setDays(value)}
+                  >
+                    {value} дней
+                  </button>
+                ))}
+              </div>
+              <button type="button" className="adm-btn adm-btn-outline" onClick={() => void loadBase()}>
+                Взять из базы
+              </button>
+            </div>
+            <p className="adm-note">
+              Подставляются три числа, остальные {ECON_ASSUMED_COUNT} - из пресета: открытий{' '}
+              {formatNumber(input.visitors)} ({source('visitors')}), доля купивших{' '}
+              {formatPercent(input.buyerRate, 2)} ({source('buyerRate')}), средний чек{' '}
+              {input.refPrice} ★ ({source('refPrice')}).
+            </p>
+          </div>
+        </div>
+
+        <details className="adm-econ-md">
+          <summary>
+            Тонкие настройки: {FIELDS.length} коэффициентов{custom ? ' - правлены руками' : ''}
+          </summary>
+          <p className="adm-note">
+            Здесь живут {ECON_ASSUMED_COUNT} допущений модели - эластичность, якорь, охота брать набор,
+            цена вашего часа. Их не нужно подбирать, чтобы получить вывод: пресет меняет их сразу
+            связкой. Трогайте по одному, только если спорите с конкретной цифрой - и помните, что
+            отчёт тогда подписан «допущения вручную».
+          </p>
+          <div className="adm-econ-grid">
+            {FIELDS.map((field) => {
+              const value = input[field.key] as number;
+              const assumed = (ECON_ASSUMED_KEYS as readonly string[]).includes(field.key);
+              return (
+                <label className="adm-econ-field" key={field.key}>
+                  <span>
+                    {field.label}
+                    {assumed && <em> допущение</em>}
+                  </span>
+                  <input
+                    type="number"
+                    value={value}
+                    step={field.step}
+                    onChange={(event) => setField(field.key, Number(event.target.value))}
+                  />
+                  {field.hint && <small>{field.hint}</small>}
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      </Panel>
+
+      <Panel
         title="Что подставляет база"
         note="Открытия витрины считаются событием shop_open, покупки - оплаченными счетами за период"
       >
-        <div className="adm-toolbar">
-          <div className="adm-range" role="group" aria-label="Период">
-            {[7, 30, 90].map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`adm-chip${days === value ? ' is-active' : ''}`}
-                onClick={() => setDays(value)}
-              >
-                {value} дней
-              </button>
-            ))}
-          </div>
-          <button type="button" className="adm-btn adm-btn-outline" onClick={() => void loadBase()}>
-            Взять из базы
-          </button>
-        </div>
         {measured ? (
           <div className="adm-metrics">
             <Metric label="Открытий витрины" value={formatNumber(measured.shopOpens)} tone="accent" />
@@ -188,54 +361,36 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
         )}
       </Panel>
 
-      <Panel title="Допущения и цены" note="Всё, что не подставлено из базы, вы ставите сами - модель только пересчитывает следствия">
-        <div className="adm-econ-grid">
-          {FIELDS.map((field) => {
-            const value = input[field.key] as number;
-            const assumed = (ECON_ASSUMED_KEYS as readonly string[]).includes(field.key);
-            return (
-              <label className="adm-econ-field" key={field.key}>
-                <span>
-                  {field.label}
-                  {assumed && <em> допущение</em>}
-                </span>
-                <input
-                  type="number"
-                  value={value}
-                  step={field.step}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    setInput((prev) => ({ ...prev, [field.key]: Number.isFinite(next) ? next : 0 }));
-                  }}
-                />
-                {field.hint && <small>{field.hint}</small>}
-              </label>
-            );
-          })}
-        </div>
-      </Panel>
-
       <Panel title="Кривая цены" note="Спрос на ту же тему при другой цене, на одном и том же потоке открытий">
         <div className="adm-metrics">
-          <Metric label="Цены сейчас" value={`${single} / ${set} / ${fee}`} hint="тема · набор · взнос" tone="accent" />
+          <Metric
+            label="Цены витрины"
+            value={`${shelf.single} / ${shelf.set} / ${shelf.slot}`}
+            hint="тема · набор · слот"
+            tone="accent"
+          />
           <Metric
             label="Оптимум"
             value={report.best ? `${report.best.price} звёзд` : 'нет'}
             hint={report.best ? `${Math.round(report.best.cents)} центов в месяц` : undefined}
           />
-          <Metric label="Выручка за горизонт" value={`${report.money.cents.toFixed(0)} ц`} hint={`${formatNumber(report.money.stars)} звёзд`} />
+          <Metric
+            label={`Выручка за ${input.months} мес.`}
+            value={`${report.money.cents.toFixed(0)} ц`}
+            hint={`${formatNumber(report.money.stars)} звёзд`}
+          />
           <Metric
             label="Чистыми с публикаций"
             value={`${publish.netCents.toFixed(0)} ц`}
             tone={publish.netCents >= 0 ? 'ok' : 'danger'}
-            hint={`взнос ${input.shareFee}, заявок ${publish.submissions.toFixed(0)}`}
+            hint={`взнос «что если» ${input.shareFee} ★, заявок ${publish.submissions.toFixed(0)}`}
           />
         </div>
         <Table head={['Цена, звёзд', 'Доля покупателей', 'Покупателей', 'Звёзд', 'Центов']} empty="">
           {report.sweep.map((row) => (
             <tr key={row.price} className={report.best && row.price === report.best.price ? 'is-best' : undefined}>
               <td>{row.price}</td>
-              <td>{formatPercent(row.buyerRate * 100, 2)}</td>
+              <td>{formatPercent(row.buyerRate, 2)}</td>
               <td>{row.buyers}</td>
               <td>{formatNumber(row.stars)}</td>
               <td>{row.cents.toFixed(0)}</td>
@@ -294,13 +449,16 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
         </p>
       </Panel>
 
-      <Panel title="Публикация своей темы" note="Взнос работает фильтром: он режет поток «накидал за минуту» и оплачивает проверку">
+      <Panel
+        title="Публикация своей темы"
+        note="В витрине взноса нет - панель считает «что было бы, если бы показ продавался»"
+      >
         <Table head={['Заявок', 'Отсечено', 'Звёзд', 'Минут на проверку', 'Чистыми', 'Окупаемость с']} empty="">
           <tr>
             <td>
               {publish.submissions.toFixed(1)} из {publish.freeSubmissions.toFixed(1)}
             </td>
-            <td>{formatPercent(publish.filtered * 100, 0)}</td>
+            <td>{formatPercent(publish.filtered, 0)}</td>
             <td>{formatNumber(publish.stars)}</td>
             <td>{publish.reviewMinutes}</td>
             <td>{publish.netCents.toFixed(0)} ц</td>
@@ -309,13 +467,18 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
         </Table>
         <p className="adm-note">
           Цена фильтра - молчание части авторов: вместе со спамом уходит{' '}
-          {formatPercent(publish.seriousLost * 100, 0)} осмысленных заявок. Это единственная цифра, которую
+          {formatPercent(publish.seriousLost, 0)} осмысленных заявок. Это единственная цифра, которую
           нельзя вернуть скидкой, и её стоит смотреть раньше, чем выручку.
         </p>
       </Panel>
 
       <Panel title="Выводы" note="Посчитаны из этих же цифр, а не набраны руками">
         <ul className="adm-verdicts">
+          <li>
+            {custom
+              ? `Допущения правлены руками (${customAssumptions(input)} из ${ECON_ASSUMED_COUNT}), пресет «${econPresetDef('base').name}» больше не описывает этот расчёт.`
+              : `Взгляд «${econPresetDef(preset).name}»: ${econPresetDef(preset).note}.`}
+          </li>
           {report.verdicts.map((line) => (
             <li key={line}>{line}</li>
           ))}
@@ -327,4 +490,27 @@ export function ShopModelPanel({ onUnauthorized }: { onUnauthorized: (message: s
       </Panel>
     </div>
   );
+}
+
+/**
+ * Сколько допущений разошлись с пресетом. Считаем по фактическому состоянию
+ * полей, а не по флагу «пользователь что-то нажал»: флаг пережил бы перезагрузку
+ * неправильно, а подпись обязана врать ровно столько, сколько врёт вход.
+ */
+function customAssumptions(input: ShopEconInput): number {
+  const base = DEFAULT_ECON;
+  let changed = 0;
+  for (const key of ECON_ASSUMED_KEYS) {
+    if (input[key] !== base[key]) changed += 1;
+  }
+  // Пресет, отличный от базы, меняет свои поля - и это не «ручная правка»:
+  // сравниваем с тем же пресетом, который нажат.
+  const preset = econPresetOf(input);
+  if (preset === 'custom') return changed;
+  const same = econFromPreset(preset);
+  let delta = 0;
+  for (const key of ECON_ASSUMED_KEYS) {
+    if (input[key] !== same[key]) delta += 1;
+  }
+  return delta;
 }

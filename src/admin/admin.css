@@ -696,6 +696,12 @@ body {
   white-space: nowrap;
 }
 
+/* Строка без доказательства: цифра есть, но она из выборки - не кричим о ней,
+   но и не ставим в один вес с полным перебором. */
+.adm-table .is-thin {
+  color: var(--dim);
+}
+
 .adm-user {
   display: flex;
   flex-direction: column;
@@ -1079,6 +1085,44 @@ body {
 .adm-econ-field small {
   font-size: 10px;
   color: var(--dim);
+}
+
+/* Простой вид расчёта: три решения, каждое - своей полосой, остальное
+   спрятано в «тонких настройках». Полоса слева - не украшение: блок выбора
+   обязан читаться как «здесь я решаю», а не как очередная подпись к полю. */
+.adm-econ-simple {
+  display: grid;
+  gap: 14px;
+}
+
+.adm-econ-choice {
+  display: grid;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line-strong);
+}
+
+.adm-econ-choice .adm-note {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.adm-econ-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.adm-econ-prices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  max-width: 340px;
+}
+
+.adm-econ-prices .adm-econ-field {
+  flex: 1 1 130px;
 }
 
 .adm-econ-md {

@@ -9,9 +9,14 @@
  * публикацию, где кривая складывается из двух слоёв платёжеспособности.
  *
  * Цифры, которые модель не знает, она не выдумывает: `buyerRate`, `visitors` и
- * средний чек берутся из базы (`calibrateEcon`), остальное помечено как допущение
- * и в лаборатории подставляется руками. Поэтому здесь нет «выручки в месяц» без
+ * средний чек берутся из базы (`calibrateEcon`), остальное - из пресета
+ * допущений (`ECON_PRESETS`). Поэтому здесь нет «выручки в месяц» без
  * источника: каждая строка либо измерена, либо подписана допущением.
+ *
+ * Править восемнадцать коэффициентов руками бесполезно: человек честно называет
+ * три вещи - насколько пессимистично смотреть, по чём продаёт витрина и за какой
+ * горизонт считать. Всё остальное меняет пресет, а ручная правка помечается как
+ * «свои допущения», чтобы отчёт не притворялся базовым.
  */
 
 export interface ShopEconInput {
@@ -30,7 +35,11 @@ export interface ShopEconInput {
    * С якорем оптимум появляется внутри диапазона, и это то, зачем модель нужна.
    */
   anchorPrice: number;
-  /** CENTов разработчика за одну звезду после вычета комиссии платформы. */
+  /**
+   * Центов разработчика за одну звезду после вычета комиссии платформы: Telegram
+   * считает звезду как $0.013 (вывод через Fragment). Завышать цифру нельзя -
+   * весь отчёт в «центах» масштабирован ею.
+   */
   centsPerStar: number;
   /** Горизонт прогноза, месяцы. */
   months: number;
@@ -77,7 +86,7 @@ export const DEFAULT_ECON: ShopEconInput = {
   refPrice: 25,
   elasticity: 1.3,
   anchorPrice: 15,
-  centsPerStar: 1.7,
+  centsPerStar: 1.3,
   months: 1,
   singlePrice: 20,
   setPrice: 50,
@@ -91,6 +100,113 @@ export const DEFAULT_ECON: ShopEconInput = {
   reviewMinutes: 4,
   hourCostCents: 900,
 };
+
+/**
+ * Пресеты допущений - то, за что человек думать не должен.
+ *
+ * `base` описан пустым патчем и означает «как в `DEFAULT_ECON`», поэтому база
+ * пресета и цифры в README не разъедутся: пресет хранит только отклонения.
+ * «Пессимист» и «Оптимист» меняют не одну цифру, а связку - эластичность, силу
+ * якоря, охоту брать набор и цену вашего часа, - потому что вручную такие
+ * коэффициенты правуются по одному и модель начинает врать согласованнее, чем раньше.
+ */
+export type EconPreset = 'pessimistic' | 'base' | 'optimistic';
+
+export interface EconPresetDef {
+  id: EconPreset;
+  /** Как пресет называется в интерфейсе. */
+  name: string;
+  /** Одна строка о том, на что смотрит пессимист и на что - оптимист. */
+  note: string;
+  patch: Partial<ShopEconInput>;
+}
+
+export const ECON_PRESETS: readonly EconPresetDef[] = [
+  {
+    id: 'pessimistic',
+    name: 'Пессимист',
+    note: 'цена бьёт по спросу, набор берут неохотно, свою тему рисуют редкие, проверка дорогая',
+    patch: {
+      elasticity: 1.8,
+      anchorPrice: 10,
+      setShare: 0.2,
+      creatorRate: 0.05,
+      publisherRate: 0.2,
+      seriousShare: 0.3,
+      reviewMinutes: 6,
+      hourCostCents: 1500,
+    },
+  },
+  {
+    id: 'base',
+    name: 'База',
+    note: 'то, что записано в README и docs/skins-economy.md: ни запаса, ни надежды',
+    patch: {},
+  },
+  {
+    id: 'optimistic',
+    name: 'Оптимист',
+    note: 'на косметику цена почти не влияет, набор берут охотно, авторов много и они щедрые',
+    patch: {
+      elasticity: 1.1,
+      anchorPrice: 30,
+      setShare: 0.5,
+      creatorRate: 0.2,
+      publisherRate: 0.45,
+      seriousShare: 0.6,
+      reviewMinutes: 3,
+      hourCostCents: 600,
+    },
+  },
+];
+
+/**
+ * Ключи, которые пресет не трогает: их измеряет база (`visitors`, `buyerRate`,
+ * `refPrice`) или выбирает сам человек (цены, горизонт, курс звезды, взнос).
+ */
+export const ECON_KEPT_KEYS = [
+  'visitors',
+  'buyerRate',
+  'refPrice',
+  'singlePrice',
+  'setPrice',
+  'months',
+  'centsPerStar',
+  'shareFee',
+] as const;
+
+export type EconKeptKey = (typeof ECON_KEPT_KEYS)[number];
+
+export function econPresetDef(id: EconPreset): EconPresetDef {
+  return ECON_PRESETS.find((entry) => entry.id === id) ?? ECON_PRESETS[1];
+}
+
+/** Полный вход из пресета: допущения пресета, поверх - то, что выбрали вы. */
+export function econFromPreset(id: EconPreset, base: Partial<ShopEconInput> = {}): ShopEconInput {
+  return { ...DEFAULT_ECON, ...econPresetDef(id).patch, ...base };
+}
+
+/** Сменить взгляд, не потеряв измеренное и выбранное руками. */
+export function applyEconPreset(input: ShopEconInput, id: EconPreset): ShopEconInput {
+  const kept: Partial<ShopEconInput> = {};
+  for (const key of ECON_KEPT_KEYS) kept[key as EconKeptKey] = input[key as EconKeptKey];
+  return econFromPreset(id, kept);
+}
+
+/**
+ * Какому пресету вход равен по всем допущениям. 'custom' означает «правили
+ * руками»: интерфейс обязан показывать это состоянием, а не подписью в подсказке.
+ */
+export function econPresetOf(input: ShopEconInput): EconPreset | 'custom' {
+  for (const preset of ECON_PRESETS) {
+    const full = econFromPreset(preset.id);
+    if (ECON_ASSUMED_KEYS.every((key) => input[key] === full[key])) return preset.id;
+  }
+  return 'custom';
+}
+
+/** Сколько коэффициентов модель считает допущениями - для подписи в интерфейсе. */
+export const ECON_ASSUMED_COUNT = ECON_ASSUMED_KEYS.length;
 
 /** Сетка цен для разведки: тот же шаг, что и в реальной витрине. */
 export const PRICE_GRID = [10, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150];

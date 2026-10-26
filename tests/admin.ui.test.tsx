@@ -342,6 +342,18 @@ async function mount(): Promise<void> {
   render(createElement(AdminApp));
 }
 
+/**
+ * Занятые ячейки расчёта. Раньше искали по тексту всего документа - и любая
+ * проза со словом «считаем» в соседней панели вешала waitFor на свои 30 секунд,
+ * потому что «занято» выглядело сказанным. Смотрим туда, где мигает настоящий
+ * статус перебора: клетки таблиц и кнопки запуска.
+ */
+function busyCells(): Element[] {
+  return Array.from(document.querySelectorAll('.adm-table td, .adm-table th, .adm-btn')).filter((node) =>
+    /^считаем/i.test(node.textContent ?? ''),
+  );
+}
+
 describe('админка', () => {
   it('показывает предупреждение, когда доступ не настроен', async () => {
     statusResponse = { configured: false, authenticated: false, expiresAt: null };
@@ -534,7 +546,7 @@ describe('админка', () => {
     ).toBe(true);
     await waitFor(
       () => {
-        const stuck = screen.queryAllByText(/считаем/);
+        const stuck = busyCells();
         if (stuck.length > 0) throw new Error(`полоса прогресса не ушла: ${stuck.map((node) => node.textContent).join(' / ')}`);
       },
       { timeout: 30_000 },
@@ -566,7 +578,7 @@ describe('админка', () => {
     const items = screen.getAllByRole('listitem');
     expect(items.length).toBeGreaterThanOrEqual(4);
     expect(items[0].textContent).toContain('Сравнение снято на 2 уровнях');
-    await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
+    await waitFor(() => expect(busyCells()).toHaveLength(0), { timeout: 30_000 });
   }, 60_000);
 
   it('тяжёлый расчёт на 1000 досок отдаёт отчёт с выводами', async () => {
@@ -593,7 +605,7 @@ describe('админка', () => {
     expect(text.textContent).toContain('Исходы 1000 забегов');
     await waitFor(
       () => {
-        const stuck = screen.queryAllByText(/считаем/);
+        const stuck = busyCells();
         if (stuck.length > 0) throw new Error(`полоса прогресса не ушла: ${stuck.map((node) => node.textContent).join(' / ')}`);
       },
       { timeout: 30_000 },
@@ -625,7 +637,7 @@ describe('админка', () => {
     const text = await screen.findByText(/^Отчёт лаборатории: Парковка/, undefined, { timeout: 30_000 });
     expect(text.textContent).toContain('Замер генератора «Парковки»');
     expect(text.textContent).toContain('«План, ходы» - длина решения решателя');
-    await waitFor(() => expect(screen.queryByText('считаем')).toBeNull(), { timeout: 30_000 });
+    await waitFor(() => expect(busyCells()).toHaveLength(0), { timeout: 30_000 });
     // Решаемость у генератора обязана быть полной: план ищет решатель, а не удача.
     expect(screen.getAllByText('100.0%').length).toBe(2);
   }, 60_000);
@@ -755,5 +767,35 @@ describe('админка', () => {
     expect(markdown?.textContent).toContain('Прогноз магазина от');
     expect(markdown?.textContent).toContain('калибровано по базе');
     expect(markdown?.textContent).toContain('Публикации: заявок');
+  });
+
+  it('пресет допущений меняет взгляд целиком, а ручная правка помечает расчёт своими', async () => {
+    await mount();
+    fireEvent.change(await screen.findByPlaceholderText('Введите пароль'), { target: { value: 'pw' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Лаборатория' }));
+
+    const elasticity = () => screen.getByLabelText(/Эластичность спроса/) as HTMLInputElement;
+    const anchor = () => screen.getByLabelText(/Якорь позиционирования/) as HTMLInputElement;
+    const minutes = () => screen.getByLabelText(/Минут на проверку/) as HTMLInputElement;
+    // База - это то, что записано в README: панель не держит второй комплект цифр.
+    expect(elasticity().value).toBe('1.3');
+    expect(anchor().value).toBe('15');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Пессимист' }));
+    await waitFor(() => expect(elasticity().value).toBe('1.8'));
+    // Пресет - связка, а не одна цифра: якорь и труд над галереей уехали вместе.
+    expect(anchor().value).toBe('10');
+    expect(minutes().value).toBe('6');
+    // Выбранное руками пресет не трогает: цена темы осталась ценой витрины.
+    // Ищем точным именем поля простого блока - в «тонких настройках» есть своё,
+    // с суффиксом «, звёзд».
+    expect((screen.getByLabelText(/^Тема поштучно$/) as HTMLInputElement).value).toBe('20');
+
+    fireEvent.change(elasticity(), { target: { value: '2.4' } });
+    expect(await screen.findByText(/Свои допущения/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть базу' }));
+    await waitFor(() => expect(elasticity().value).toBe('1.3'));
+    expect(screen.queryByText(/Свои допущения/)).toBeNull();
   });
 });
