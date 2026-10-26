@@ -23,7 +23,8 @@ interface JamBoardProps {
   onPlace: (cell: Cell) => void;
 }
 
-const FRAME_PAD = 8;
+/** См. `Board.tsx`: поле и рамка - один размер, пиксель держим под линию рамки. */
+const FRAME_PAD = 1;
 const GAP = 2;
 
 /**
@@ -81,12 +82,10 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
         <div
           className="board jam-board"
           style={{
-            width: boardWidth || undefined,
-            height: boardHeight || undefined,
             gap: GAP,
             fontSize: cell ? Math.round(cell * 0.6) : undefined,
-            gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
-            gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
           }}
           role="grid"
           aria-label={tr('Поле парковки')}
@@ -122,7 +121,6 @@ export function JamBoard({ state, selected, hint, interactive, onPick, onPlace }
                     hintHere && 'cell-hint',
                     hintPiece && 'cell-hint-source',
                   )}
-                  style={{ width: cell || undefined, height: cell || undefined }}
                   disabled={!interactive || (!piece && !target)}
                   aria-label={
                     piece

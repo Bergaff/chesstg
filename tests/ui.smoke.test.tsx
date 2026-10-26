@@ -406,16 +406,27 @@ describe('UI smoke', () => {
     expect(root.style.getPropertyValue('--bg')).toBe('#100d07');
   });
 
-  it('на старте уровня выход в меню лежит в строке статуса, а не только в шапке', async () => {
+  it('окно запуска уровня отдаёт в меню само, без стрелки в шапке', async () => {
+    // Брифинг не закрывается тапом мимо, поэтому выход обязан жить внутри него:
+    // без него игрок заперт на окне правил. В это время кнопка в строке статуса
+    // скрыта - иначе два одинаковых выхода спорили бы за фокус.
+    await boot();
+    fireEvent.click(screen.getByRole('button', { name: /Играть|Продолжить/ }));
+    await screen.findByText(/Ход 1/);
+    const exit = screen.getByRole('button', { name: 'В меню' });
+    expect(exit.closest('.modal')).not.toBeNull();
+    fireEvent.click(exit);
+    await waitFor(() => expect(screen.getByText(/Бонусы за монеты/)).toBeTruthy());
+  });
+
+  it('после «Начать» выход в меню лежит в строке статуса, а не только в шапке', async () => {
     // До первого хода выход ничего не стоит: на новом поле игрок решает, играть
     // ли вообще, и искать для этого стрелку в шапке - лишний шаг. В «Гонках»
     // подсказка была, в кампании - нет.
     await boot();
     fireEvent.click(screen.getByRole('button', { name: /Играть|Продолжить/ }));
-    await screen.findByText(/Ход 1/);
-    const exit = screen.getByRole('button', { name: 'В меню' });
-    fireEvent.click(exit);
-    await waitFor(() => expect(screen.getByText(/Бонусы за монеты/)).toBeTruthy());
+    fireEvent.click(await screen.findByRole('button', { name: 'Начать' }));
+    await waitFor(() => expect(document.querySelector('.game-exit')).not.toBeNull());
   });
 
   it('светлая тема красит меню, а не только доску', async () => {

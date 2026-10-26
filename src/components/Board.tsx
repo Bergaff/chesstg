@@ -73,7 +73,9 @@ interface BoardProps {
   settling?: boolean;
 }
 
-const FRAME_PAD = 8;
+/** Поле и рамка - один размер: запаса-мата под сетку больше нет, рамка
+ * держит ровно пиксель под линию (`.board-frame::after`, `inset: 0`). */
+const FRAME_PAD = 1;
 const MOVE_GLYPH: Record<MoveDx, string> = { [-1]: '↖', [0]: '↑', [1]: '↗' };
 /** Король ходит во все стороны, поэтому знак зависит и от ряда, и от колонки. */
 const KING_GLYPH: Record<string, string> = {
@@ -189,16 +191,17 @@ export function Board({
           opacity: cell > 0 ? 1 : 0,
         }}
       >
+        {/* Размер поля не дублируется в пикселях: сетка тянется на всю рамку
+            (`minmax(0, 1fr)`), поэтому между полем и рамкой не остаётся щели от
+            округления клетки, а клетка всегда ровно делит ширину поля. */}
         <div
           className="board"
           style={{
-            width: boardWidth || undefined,
-            height: boardHeight || undefined,
             gap,
             position: 'relative',
             fontSize: cell ? Math.round(cell * 0.56) : undefined,
-            gridTemplateColumns: `repeat(${cols}, ${cell || 1}px)`,
-            gridTemplateRows: `repeat(${rows}, ${cell || 1}px)`,
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
           }}
           role="grid"
           aria-label={tr('Игровое поле')}
@@ -241,7 +244,6 @@ export function Board({
                     hintIndex === 1 && 'cell-hint-2',
                     captured && 'cell-captured',
                   )}
-                  style={{ width: cell || undefined, height: cell || undefined }}
                   onClick={() => {
                     if (move && interactive) onMove(move.dx, move.dy ?? 1);
                   }}
@@ -355,17 +357,23 @@ export function Board({
                   key={`${piece.id}-${turn}`}
                   className="piece enemy-piece piece-swept"
                   style={
-                    {
-                      left: piece.x * (cell + gap),
-                      top: (viewport.to - 1 - piece.y) * (cell + gap),
-                      width: cell,
-                      height: cell,
-                      fontSize: Math.round(cell * 0.56),
-                      // До низа поля, а не на клетку вниз: снятая фигура может
-                      // стоять в полосе короля, и сдвиг на ряд там читался как
-                      // дрожание на месте.
-                      '--sweep-travel': `${boardHeight - (viewport.to - 1 - piece.y) * (cell + gap) + FRAME_PAD}px`,
-                    } as CSSProperties
+                    (() => {
+                      // Слой призраков лежит на рамке, а не на поле, поэтому их
+                      // координаты смещаются на пиксель запаса: иначе уносимая
+                      // фигура стартовала бы выше своей клетки.
+                      const top = (viewport.to - 1 - piece.y) * (cell + gap) + FRAME_PAD;
+                      return {
+                        left: piece.x * (cell + gap) + FRAME_PAD,
+                        top,
+                        width: cell,
+                        height: cell,
+                        fontSize: Math.round(cell * 0.56),
+                        // До низа рамки, а не на клетку вниз: снятая фигура может
+                        // стоять в полосе короля, и сдвиг на ряд там читался как
+                        // дрожание на месте.
+                        '--sweep-travel': `${boardHeight + FRAME_PAD * 2 - top}px`,
+                      } as CSSProperties;
+                    })()
                   }
                 >
                   <span className="piece-glyph">{PIECE_GLYPH[piece.type]}</span>

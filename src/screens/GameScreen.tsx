@@ -892,9 +892,10 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
           же, но на новом поле игрок решает «играть или посмотреть другое», и
           искать для этого стрелку в шапке - лишний шаг; после первого хода
           кнопка уходит, чтобы не толкаться с подсветкой и не давать случайный
-          тап у края поля.
+          тап у края поля. Пока открыто окно запуска, выход один - в модалке:
+          дубль за незакрываемым окном только попадал бы в фокус.
         */}
-        {state.moves === 0 && state.status === 'playing' && (
+        {state.moves === 0 && state.status === 'playing' && !preOpen && (
           <button type="button" className="game-exit" onClick={requestExit}>
             {tr('В меню')}
           </button>
@@ -1067,9 +1068,17 @@ export function GameScreen({ mode, onExit, onNoLives, onTerms, onPrivacy }: Game
             <button type="button" className="btn btn-primary" onClick={beginPlay}>
               {tr('Начать')}
             </button>
-            <button type="button" className="btn btn-quiet" onClick={() => setRulesOpen(true)}>
-              {tr('Как играть')}
-            </button>
+            <div className="modal-actions-row">
+              <button type="button" className="btn btn-quiet" onClick={() => setRulesOpen(true)}>
+                {tr('Как играть')}
+              </button>
+              {/* Окно запуска не закрывается тапом мимо - без выхода игрок заперт
+                  внутри брифинга. До «Начать» хода нет, партия не начата, выхода
+                  из забега этот тап не делает: он ровно возвращает в меню. */}
+              <button type="button" className="btn btn-quiet" onClick={onExit}>
+                {tr('В меню')}
+              </button>
+            </div>
           </div>
         </Modal>
       )}
