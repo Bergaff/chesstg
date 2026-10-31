@@ -1,0 +1,363 @@
+import { createMiddleware } from 'hono/factory';
+import type { AppEnv, TelegramUser, WorkerEnv } from './types';
+import { fail } from './http';
+import { botToken } from './token';
+import { verifySignedInitData, webAppKeyStatus } from './webAppKey';
+import { getOrCreateUser, getUserById } from './db';
+import { readSession } from './session';
+
+const encoder = new TextEncoder();
+
+function toHex(buffer: ArrayBuffer): string {
+  return [...new Uint8Array(buffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hmac(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key instanceof Uint8Array ? key : new Uint8Array(key),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+}
+
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+export interface InitDataCheck {
+  user: TelegramUser;
+  authDate: number;
+}
+
+/** Почему Telegram-данные не подошли. В ответе клиенту это русским текстом. */
+export type InitDataReason =
+  | 'no_params'
+  | 'no_hash'
+  | 'bad_signature'
+  | 'no_auth_date'
+  | 'too_old'
+  | 'clock_skew'
+  | 'no_user'
+  | 'bad_user'
+  | 'third_party';
+
+export const INIT_DATA_MESSAGES: Record<InitDataReason, string> = {
+  no_params: 'Не пришли подписанные данные Telegram: приложение открыто не из бота',
+  no_hash: 'В данных Telegram нет подписи',
+  bad_signature: 'Подпись данных Telegram не совпадает с BOT_TOKEN воркера',
+  no_auth_date: 'В данных Telegram нет отметки времени',
+  too_old: 'Данные Telegram устарели, это кэш недавних приложений',
+  clock_skew: 'Часы устройства сильно расходятся с сервером',
+  no_user: 'В данных Telegram нет профиля игрока',
+  bad_user: 'Профиль в данных Telegram повреждён',
+  third_party: 'Данные подписаны не этим ботом: приложение открыто через чужого бота',
+};
+
+export interface InitDataResult {
+  check: InitDataCheck | null;
+  reason: InitDataReason | null;
+  ageSec: number | null;
+  fields: string[];
+  /** Схема склейки, по которой сошлась подпись. Нужна, чтобы видеть, что присылают клиенты. */
+  variant: InitDataVariant | null;
+}
+
+type InitDataVariant =
+  | 'canonical'
+  | 'no_signature'
+  | 'keep_empty'
+  | 'no_signature_keep_empty'
+  | 'raw'
+  | 'raw_no_signature'
+  | 'signed';
+
+interface VariantRule {
+  name: InitDataVariant;
+  dropSignature: boolean;
+  dropEmpty: boolean;
+  raw: boolean;
+}
+
+/** Значения из query string: `+` это плюс, а не пробел, URLSearchParams портит base64. */
+function decodeValue(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, '%2B'));
+  } catch {
+    return value;
+  }
+}
+
+interface Pair {
+  key: string;
+  value: string;
+  decoded: string;
+}
+
+function parsePairs(initData: string): Pair[] {
+  return initData
+    .split('&')
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => {
+      const index = chunk.indexOf('=');
+      const key = index < 0 ? chunk : chunk.slice(0, index);
+      const value = index < 0 ? '' : chunk.slice(index + 1);
+      return { key, value, decoded: decodeValue(value) };
+    });
+}
+
+/**
+ * Документы Telegram говорят: в `data_check_string` идут все поля кроме `hash` и пустых значений.
+ * На практике приложения, открытые по ссылке из канала, дополнительно приносят `signature`,
+ * и разные клиенты Telegram считают подпись то с ним, то без него. Поэтому перебираем четыре
+ * варианта и принимаем любой совпавший: подделать их без токена нельзя, а отказ игроку стоит
+ * ровно «игра не открывается».
+ */
+const VARIANTS: VariantRule[] = [
+  { name: 'canonical', dropSignature: false, dropEmpty: true, raw: false },
+  { name: 'no_signature', dropSignature: true, dropEmpty: true, raw: false },
+  { name: 'keep_empty', dropSignature: false, dropEmpty: false, raw: false },
+  { name: 'no_signature_keep_empty', dropSignature: true, dropEmpty: false, raw: false },
+  { name: 'raw', dropSignature: false, dropEmpty: true, raw: true },
+  { name: 'raw_no_signature', dropSignature: true, dropEmpty: true, raw: true },
+];
+
+function checkString(pairs: Pair[], rule: VariantRule): string {
+  return pairs
+    .filter((pair) => pair.key !== 'hash')
+    .filter((pair) => !(rule.dropSignature && pair.key === 'signature'))
+    .filter((pair) => !(rule.dropEmpty && (rule.raw ? pair.value : pair.decoded) === ''))
+    .map((pair) => [pair.key, rule.raw ? pair.value : pair.decoded] as [string, string])
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+}
+
+/**
+ * Ключ для HMAC по initData. Документы требуют HMAC-SHA256, где криптографический
+ * ключ это константа `WebAppData`, а сообщением выступает токен бота. Порядок именно
+ * такой: переставленные местами вариант и старый SHA-256 от токена держим рядом только
+ * ради совместимости с ранними сборками, подделать подпись без токена нельзя ни там, ни тут.
+ */
+async function secretKeys(token: string): Promise<Uint8Array[]> {
+  return [
+    new Uint8Array(await hmac(encoder.encode('WebAppData'), token)),
+    new Uint8Array(await hmac(encoder.encode(token), 'WebAppData')),
+    new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(token))),
+  ];
+}
+
+/** Проверка подписи Telegram WebApp initData. */
+export async function validateInitData(
+  initData: string,
+  token: string,
+  verifySigned?: (candidates: string[], signature: string) => Promise<boolean>,
+): Promise<InitDataResult> {
+  const empty: InitDataResult = { check: null, reason: null, ageSec: null, fields: [], variant: null };
+  if (!token || !initData) return { ...empty, reason: 'no_params' };
+
+  const params = parsePairs(initData);
+  const get = (key: string) => params.find((pair) => pair.key === key)?.decoded ?? '';
+  const fields = [...new Set(params.map((pair) => pair.key))].sort();
+  if (fields.length === 0) return { ...empty, reason: 'no_params' };
+
+  const hash = get('hash');
+  if (!hash) return { ...empty, fields, reason: 'no_hash' };
+  const expected = hash.toLowerCase();
+
+  let matched: VariantRule | null = null;
+  const secrets = await secretKeys(token);
+  for (const rule of VARIANTS) {
+    for (const secretKey of secrets) {
+      const signature = toHex(await hmac(secretKey, checkString(params, rule)));
+      if (safeEqual(signature, expected)) {
+        matched = rule;
+        break;
+      }
+    }
+    if (matched) break;
+  }
+  if (!matched) {
+    // У сторонних приложений `hash` это не HMAC по токену, а обычный SHA-256,
+    // а подпись несёт поле `signature`. Так отличаем чужое приложение от опечатки в токене.
+    const candidates = VARIANTS.slice(0, 2).map((rule) => checkString(params, rule));
+    let thirdParty = false;
+    for (const text of candidates) {
+      const plain = toHex(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
+      if (plain === expected) {
+        thirdParty = true;
+        break;
+      }
+    }
+    // Подпись Ed25519 ставится над строкой, перед которой стоит префикс `botId:WebAppData`.
+    const botId = token.split(':')[0]?.trim() ?? '';
+    const joined = VARIANTS.map((rule) => checkString(params, rule));
+    const signedCandidates = [...candidates, ...joined, ...(botId ? joined.map((text) => `${botId}:WebAppData\n${text}`) : [])];
+    const signature = get('signature');
+    if (signature && verifySigned && (await verifySigned(signedCandidates, signature))) {
+      matched = { name: 'signed', dropSignature: true, dropEmpty: true, raw: false };
+    }
+    if (!matched) return { ...empty, fields, reason: thirdParty ? 'third_party' : 'bad_signature' };
+  }
+
+  const authDateRaw = get('auth_date');
+  const authDate = authDateRaw ? Number(authDateRaw) : 0;
+  if (!Number.isFinite(authDate) || authDate <= 0) {
+    return { ...empty, fields, variant: matched.name, reason: 'no_auth_date' };
+  }
+  const ageSec = Math.round(Date.now() / 1000 - authDate);
+  if (ageSec > 60 * 60 * 48) {
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'too_old' };
+  }
+  if (ageSec < -300) {
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'clock_skew' };
+  }
+
+  const rawUser = get('user');
+  if (!rawUser) return { ...empty, fields, ageSec, variant: matched.name, reason: 'no_user' };
+  try {
+    const parsed = JSON.parse(rawUser) as Record<string, unknown>;
+    const bad = (reason: InitDataReason) => ({ ...empty, fields, ageSec, variant: matched?.name ?? null, reason });
+    if (typeof parsed.id !== 'number' || !Number.isFinite(parsed.id)) return bad('bad_user');
+    if (typeof parsed.first_name !== 'string') return bad('bad_user');
+    return {
+      check: {
+        user: {
+          id: parsed.id,
+          first_name: parsed.first_name.slice(0, 100),
+          last_name: typeof parsed.last_name === 'string' ? parsed.last_name.slice(0, 100) : undefined,
+          username: typeof parsed.username === 'string' ? parsed.username.slice(0, 64) : undefined,
+          language_code: typeof parsed.language_code === 'string' ? parsed.language_code : undefined,
+          is_premium: parsed.is_premium === true,
+        },
+        authDate,
+      },
+      reason: null,
+      ageSec,
+      fields,
+      variant: matched.name,
+    };
+  } catch {
+    return { ...empty, fields, ageSec, variant: matched.name, reason: 'bad_user' };
+  }
+}
+
+const GUEST_ID_RE = /^[a-f0-9]{32}$/i;
+
+export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
+  const authorization = c.req.header('Authorization') ?? '';
+
+  if (authorization.startsWith('tma ')) {
+    const initData = authorization.slice(4).trim();
+    const token = botToken(c.env);
+    if (!token) {
+      fail(503, 'auth_not_configured', 'Бот ещё не настроен: добавь BOT_TOKEN или открой демо');
+    }
+    // Строка нужна всегда: переменные панели до сборки не доходят, а по логам
+    // Cloudflare разбирать неудобно. В строке данные одной сессии, токена там нет.
+    console.info('init_data_raw', initData.slice(0, 1200));
+    const result = await validateInitData(initData, token, (candidates, signature) =>
+      verifySignedInitData(c.env, candidates, signature),
+    );
+    if (!result.check) {
+      const reason = result.reason ?? 'bad_signature';
+      // Без этого в логах видно только факт отказа, а причины разные: кэш недавних
+      // приложений, чужой токен, другой способ открыть приложение.
+      console.warn(
+        'init_data_rejected',
+        reason,
+        `age=${result.ageSec ?? '?'}`,
+        `fields=${result.fields.join(',')}`,
+      );
+      {
+        // Записываем без переключателя: переменные панели до боевой сборки не доходят,
+        // а блок в админке должен работать сам по себе.
+        // Записываем в events, чтобы владелец видел это в админке, а не в логах Cloudflare.
+        // Дожидаться нужно обязательно: после fail() изолятор имеет право
+        // не дослать незавершённый запрос, и запись теряется.
+        await c.env.DB.prepare('INSERT INTO events (user_id, kind, value, meta, created_at) VALUES (?, ?, ?, ?, ?)')
+          .bind(
+            'anonymous',
+            'init_data_rejected',
+            1,
+            JSON.stringify({
+              raw: initData.slice(0, 900),
+              reason,
+              fields: result.fields,
+              signed: await webAppKeyStatus(c.env),
+            }),
+            Date.now(),
+          )
+          .run()
+          .catch(() => undefined);
+      }
+      fail(401, 'invalid_init_data', INIT_DATA_MESSAGES[reason], {
+        reason,
+        authDateAgeSec: result.ageSec,
+        raw: initData.slice(0, 900),
+      });
+    }
+    if (result.variant && result.variant !== 'canonical') {
+      // Клиент подписал не то, что описано в документах. Работаем, но смотрим, кто так делает.
+      console.info('init_data_variant', result.variant, `fields=${result.fields.join(',')}`);
+    }
+    const check = result.check;
+    const { user, created } = await getOrCreateUser(c.env, {
+      id: `tg:${check.user.id}`,
+      tgUser: check.user,
+      isGuest: false,
+    });
+    c.set('auth', { user, kind: 'telegram', fresh: created, tgUser: check.user });
+    await next();
+    return;
+  }
+
+  // Сеанс сайта: подписанный токен после входа через виджет Telegram Login.
+  // Без него прогресс на сайте живёт только до перезапуска браузера.
+  if (authorization.startsWith('Bearer ')) {
+    const bearer = authorization.slice(7).trim();
+    const userId = await readSession(c.env, bearer);
+    if (!userId) {
+      fail(401, 'session_expired', 'Сеанс истёк, войдите через Telegram заново');
+    }
+    const user = await getUserById(c.env, userId);
+    if (!user) fail(401, 'session_unknown', 'Профиль не найден, войдите заново');
+    c.set('auth', { user, kind: 'session', fresh: false });
+    await next();
+    return;
+  }
+
+  const guestId = c.req.header('X-Guest-Id')?.trim() ?? '';
+  if (guestId) {
+    if (c.env.ALLOW_GUESTS !== 'true') {
+      fail(401, 'guests_disabled', 'Гостевой режим выключен. Открой игру в Telegram.');
+    }
+    if (!GUEST_ID_RE.test(guestId)) fail(400, 'bad_guest_id', 'Некорректный гостевой идентификатор');
+    const { user, created } = await getOrCreateUser(c.env, {
+      id: `guest:${guestId.toLowerCase()}`,
+      isGuest: true,
+    });
+    c.set('auth', { user, kind: 'guest', fresh: created });
+    await next();
+    return;
+  }
+
+  fail(401, 'unauthorized', 'Нужна авторизация Telegram');
+});
+
+/** Обновляет имя/username при заходе из Telegram. */
+export async function syncTelegramName(env: WorkerEnv, auth: AppEnv['Variables']['auth']): Promise<void> {
+  if (!auth.tgUser) return;
+  const name = auth.tgUser.first_name.slice(0, 40);
+  const username = auth.tgUser.username?.slice(0, 40) ?? null;
+  if (name === auth.user.first_name && username === auth.user.username) return;
+  await env.DB.prepare('UPDATE users SET first_name = ?, username = ?, updated_at = ? WHERE id = ?')
+    .bind(name, username, Date.now(), auth.user.id)
+    .run();
+  auth.user = { ...auth.user, first_name: name, username };
+}

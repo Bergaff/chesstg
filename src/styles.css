@@ -1,0 +1,3253 @@
+/* =========================================================
+   Край доски
+   Плоская редакционная тема: тёплый графит, латунь, кость.
+   Без градиентов, теней, скруглений и анимаций.
+   ========================================================= */
+
+:root {
+  --bg: #17160f;
+  --bg-deep: #12110b;
+  --panel: #1c1a13;
+  --panel-2: #222017;
+  --line: #353126;
+  --line-strong: #4b4537;
+  --ink: #e9e2d1;
+  --muted: #a69e8c;
+  --dim: #7e7664;
+  --accent: #c6a45e;
+  --accent-solid: #c6a45e;
+  --on-accent: #1a1508;
+  --accent-dim: #8e7541;
+  --accent-wash: #2a2517;
+  --danger: #b46a5c;
+  --danger-wash: #2b1d19;
+  --ok: #93a07d;
+  --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --app-height: 100dvh;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  /* Тема партии вешает переменные на :root (см. GameScreen), поэтому фон
+     экрана - часть темы, а не только доска. */
+  background: var(--skin-backdrop, var(--bg));
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.45;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  border-radius: 0;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+p,
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-dim);
+}
+
+.app {
+  height: var(--app-height, 100dvh);
+  max-height: var(--app-height, 100dvh);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.screen {
+  width: 100%;
+  max-width: 520px;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-screen,
+.shop-screen,
+.records-screen,
+.legal-screen {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: calc(14px + var(--safe-top)) 20px calc(20px + var(--safe-bottom));
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* ─────────────── типографика ─────────────── */
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.label-accent {
+  color: var(--accent);
+}
+
+.serif {
+  font-family: var(--serif);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.rule {
+  height: 1px;
+  background: var(--line);
+  border: 0;
+  margin: 0;
+}
+
+/* ─────────────── кнопки ─────────────── */
+
+.btn {
+  min-height: 46px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.btn-primary {
+  // --accent-solid может быть чуть светлее или темнее акцента темы: подпись на
+  // кнопке обязана читаться, а не красоваться фирменным цветом.
+  border-color: var(--accent-solid, var(--accent));
+  background: var(--accent-solid, var(--accent));
+  color: var(--on-accent, #1a1508);
+}
+
+.btn-outline {
+  background: transparent;
+}
+
+.btn-quiet {
+  border-color: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.text-link {
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 1px;
+}
+
+.arrow {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* ─────────────── верхняя строка ─────────────── */
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.identity-name {
+  display: block;
+  max-width: 150px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.identity-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.topbar-stat {
+  text-align: right;
+}
+
+.topbar-stat .label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.topbar-stat b {
+  display: block;
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.lang-btn {
+  // Тот же кружок, что и «?», но плашкой: две буквы в круг читаются хуже.
+  height: 24px;
+  padding: 0 9px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  font-family: var(--serif);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.help-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ─────────────── меню ─────────────── */
+
+.masthead {
+  // Шапка стоит близко к верхнему краю, а «чуть ниже» даёт отступ над надписью:
+  // 10px - это ровно та пауза, что держит «Разделы» над кнопками режимов.
+  padding: 10px 0 16px;
+}
+
+.masthead-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.masthead-figure {
+  flex: 0 0 auto;
+}
+
+.masthead-kicker {
+  // Зазор до заголовка - как между последним словом подзаголовка и кнопками
+  // режимов (8 + 6): строка должна читаться надписью над названием, а не подписью
+  // к верхней панели.
+  display: block;
+  margin-bottom: 14px;
+}
+
+.masthead-title {
+  font-family: var(--serif);
+  font-weight: 400;
+  // Название держим в одну строку: на двух оно читается как два разных
+  // заголовка, а «доски» уезжают за край там, где «Край доски» влезает целиком.
+  font-size: clamp(28px, 8.4vw, 40px);
+  line-height: 1.02;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.masthead-title em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.masthead-sub {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  // Выключенный перенос слов: в узкой колонке движок рвёт строку где попало, и
+  // «ферзь» доезжал до отдельной строчки как «ерзь». По ширине текст здесь тоже
+  // не расставляется - колонка короткая, дыры в межсловных пробелах заметнее,
+  // чем рваный край.
+  hyphens: none;
+  overflow-wrap: break-word;
+}
+
+.cta-block {
+  width: 100%;
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--accent-dim);
+  background: var(--accent-wash);
+  text-align: left;
+}
+
+.cta-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cta-body .label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--accent);
+}
+
+.cta-title {
+  font-family: var(--serif);
+  font-size: 26px;
+  line-height: 1.05;
+  font-weight: 400;
+}
+
+.cta-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cta-arrow {
+  font-family: var(--serif);
+  font-size: 24px;
+  color: var(--accent);
+}
+
+/*
+ * Четыре входа в игру - сеткой 2×2. Полосы на всю ширину съедали экран так,
+ * что «Магазин» и «Рекорды» уезжали за нижний край: их приходилось искать
+ * скроллом. Квадратная сетка оставляет те же четыре кнопки в двух строках, а
+ * кампания отличается не размером, а акцентной рамкой и плашкой.
+ */
+.menu-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.menu-modes .cta-block {
+  /* Высота по содержимому. «Почти квадрат» (aspect-ratio: 1 / 0.78) хорошо
+     смотрелся на телефоне, но на широком экране растягивал плитку в два-три раза
+     выше текста: под подписью зияла пустота, и карточка казалась сломанной.
+     Низ отдан под стрелку, она прижата к углу. */
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 12px 12px 28px;
+}
+
+.menu-modes .cta-body {
+  flex: 1 1 auto;
+}
+
+.menu-modes .cta-title {
+  font-size: 21px;
+}
+
+.menu-modes .cta-meta {
+  // Подпись режимов длиннее карточки: три строки и обрыв многоточием, а не
+  // бесконечная карточка, из-за которой сетка распухает.
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.menu-modes .cta-arrow {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  font-size: 18px;
+}
+
+.menu-modes .cta-primary {
+  border-color: var(--accent);
+}
+
+.cta-mode {
+  padding: 12px;
+  background: transparent;
+}
+
+.cta-mode .cta-title {
+  font-size: 20px;
+}
+
+.cta-mode.locked {
+  border-color: var(--line);
+  color: var(--muted);
+}
+
+.cta-mode.locked .cta-arrow {
+  color: var(--muted);
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  // Блок про вход стоит ниже режимов: сначала игрок видит, куда идти, и только
+  // под этим - что прогресс никуда не денется.
+  margin-top: 18px;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--line);
+}
+
+.account-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tg-link {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.tg-link-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.note-error {
+  color: var(--danger);
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-row {
+  width: 100%;
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.menu-row[href] {
+  color: inherit;
+  text-decoration: none;
+}
+
+.menu-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-row-title {
+  display: block;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.menu-row-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.menu-row-end {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+
+.menu-row.locked .menu-row-title,
+.menu-row.locked .menu-row-end {
+  color: var(--dim);
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.resource-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.hearts {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+/* Вечные сердца (`QA_LIVES_IDS`): одно сердце и бесконечность вместо ряда.
+   Тот же акцент, что и у обычных сердец: это не награда, а пометка аккаунта. */
+.hearts-eternal {
+  gap: 4px;
+}
+
+.heart-infinity {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.heart-filled,
+.heart-full {
+  color: var(--accent);
+}
+
+.heart-empty {
+  color: var(--line-strong);
+}
+
+.resource-caption {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.resource-caption b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-note {
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.ad-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.ad-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ad-row-title {
+  display: block;
+  font-family: var(--serif);
+  font-size: 16px;
+}
+
+.ad-row-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.ad-row-reward {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.guest-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.guest-note::before {
+  content: 'i';
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-family: var(--serif);
+  font-size: 10px;
+  color: var(--accent);
+}
+
+.menu-footer {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.menu-footer button,
+.menu-footer a {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.menu-footer .sep {
+  color: var(--line-strong);
+}
+
+.footer-mode {
+  margin-left: auto;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ─────────────── общие страницы ─────────────── */
+
+.page-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 20px;
+}
+
+.page-heading .label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.page-title {
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.05;
+}
+
+.back-btn {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.page-side {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.page-side .label {
+  display: block;
+  font-size: 9px;
+}
+
+.page-side b {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabs {
+  // Три вкладки на всю ширину, а не три подписи по левому краю: пальцем в
+  // них должно попадать легко, а на узком экране 12-px подпись с
+  // девятимиллиметровым подложечным полем - это не кнопка.
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.tab.active {
+  border-color: var(--accent-dim);
+  background: var(--accent-wash);
+  color: var(--ink);
+}
+
+.section-label {
+  display: block;
+  margin: 22px 0 8px;
+}
+
+.lede {
+  max-width: 340px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* ─────────────── магазин ─────────────── */
+
+.shop-intro {
+  margin: 18px 0 4px;
+}
+
+.shop-intro h2 {
+  margin-top: 6px;
+  font-family: var(--serif);
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.shop-intro p {
+  margin-top: 8px;
+  // Без планки в 350px: описание вкладки должно занимать ширину колонки, как
+  // карточки ниже. Планка появилась, когда рядом был боковой блок, и на
+  // десктопе оставляла справа пустой край - текст обрывался на середине строки.
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.shop-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.shop-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.shop-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.owned-count {
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.shop-row-desc {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.shop-row-price {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.buy-btn {
+  flex: 0 0 auto;
+  min-width: 76px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--accent-dim);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.buy-btn.owned {
+  border-color: var(--line);
+  color: var(--dim);
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.notice .label {
+  flex: 0 0 auto;
+}
+
+.skin-list {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.skin-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.skin-row.active {
+  border-bottom-color: var(--accent-dim);
+}
+
+.skin-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skin-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.skin-name {
+  display: block;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.skin-desc {
+  display: block;
+  margin-top: 1px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* Две цены одной темы стоят столбиком: звёзды и монеты - разные решения, и в
+   одну строку они превращаются в «20 / 1200», что никто не разберёт. */
+.studio-code-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.studio-code-actions .btn {
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+.studio-code-size {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.skin-buy-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/*
+ * Свои темы по слотам (магазин) и полоса их выбора (студия). Отступ здесь
+ * нужен потому, что список мест стоит сразу под строкой «своя тема», и без
+ * него две группы строк сливались в одну простыню.
+ */
+.skin-slots {
+  margin-top: 6px;
+}
+
+/*
+ * Строка слота отличается от строки полки: кнопок в ней три, и столбиком они
+ * поднимают строку в три роста; и весь левый блок - не кнопка, поэтому курсор на
+ * нём обещал бы клик, которого там нет.
+ */
+.skin-slots .skin-side {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.skin-slots .skin-row-main {
+  cursor: default;
+}
+
+.studio-slots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+}
+
+.studio-slot {
+  position: relative;
+  min-width: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.studio-slot.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Некупленное место не притворяется пустым: оно заблокировано, и цена за ним. */
+.studio-slot.locked {
+  border-style: dotted;
+  opacity: 0.55;
+}
+
+.studio-slot-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.skin-side {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6px;
+}
+
+.skin-state {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.skin-row.active .skin-state {
+  color: var(--accent);
+}
+
+.skin-locked {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+}
+
+/* Превью темы - честный кусок доски: две клетки, своя фигура на плашке и чужая
+   рядом. Список цветов вместо превью в магазине однажды привёл бы к тому, что
+   купленную тему не видно: она «не подошла к полю», а деньги уже отданы. */
+.skin-preview {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, var(--sp-cell, 22px));
+  grid-auto-rows: var(--sp-cell, 22px);
+  border: 1px solid var(--skin-edge, var(--line-strong));
+  background: var(--skin-frame, var(--bg-deep));
+  overflow: hidden;
+}
+
+.sp-cell {
+  display: grid;
+  place-items: center;
+}
+
+.sp-cell-light {
+  background: var(--skin-cell-light, #292619);
+}
+
+.sp-cell-dark {
+  background: var(--skin-cell-dark, #201e16);
+}
+
+.sp-player,
+.sp-enemy {
+  width: 78%;
+  height: 78%;
+  display: grid;
+  place-items: center;
+  font-family: var(--serif);
+  font-size: calc(var(--sp-cell, 22px) * 0.5);
+  line-height: 1;
+}
+
+.sp-player {
+  background: var(--skin-plate, transparent);
+  border: 1px solid var(--skin-edge, var(--accent));
+  color: var(--skin-piece, var(--accent));
+}
+
+.sp-player-shape {
+  border-color: transparent;
+}
+
+.sp-player svg {
+  width: 74%;
+  height: 74%;
+  // Своя тема рисуется штрихом: игрок ведёт линию пальцем, и она обязана
+  // остаться линией. Заливка (`fill`) превращала любой замкнутый контур в
+  // диск, а незамкнутый - в «почти диск»: пешка выходила пятнашкой. Толщину
+  // штриха задаёт движок (`PATH_STROKE_WIDTH`) атрибутом пути - та же цифра на
+  // доске, в превью и в шапке меню.
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Чужая фигура всегда в стандартных цветах: по ней и проверяют, что тема не
+   слилась с тем, что охотится. */
+.sp-enemy {
+  background: #121109;
+  border: 1px solid #6c6248;
+  color: #e6dcc6;
+}
+
+.skin-feature {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--accent-dim);
+  background: var(--accent-wash);
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.skin-feature .skin-preview {
+  margin-top: 2px;
+}
+
+.feature-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.skin-feature h2 {
+  margin: 5px 0 6px;
+  font-family: var(--serif);
+  font-size: 23px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.skin-feature p {
+  max-width: 330px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.skin-feature-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.skin-feature .btn,
+.skin-feature-actions .btn {
+  margin-top: 0;
+}
+
+/* ─────────────────────── Студия своей темы ─────────────────────── */
+
+.studio-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+}
+
+.studio-head-side {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio-field {
+  display: block;
+}
+
+.studio-field span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.studio-field input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 15px;
+}
+
+.studio-read {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.studio-read.is-ok {
+  color: var(--ok);
+}
+
+.studio-read.is-bad {
+  color: var(--danger);
+}
+
+.studio-colors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin-top: 8px;
+}
+
+.studio-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.studio-color span {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio-color input[type='color'] {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  background: none;
+}
+
+.studio-color code {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.studio-glyphs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.studio-glyph {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.studio-glyph.active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.studio-draw {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+}
+
+.studio-canvas {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 132px;
+  border: 1px solid var(--skin-edge, var(--line-strong));
+  // Клетка под плашкой: без плашки холст выглядит клеткой поля, с плашкой -
+  // ровно тем, чем фигура будет на доске.
+  background-color: var(--skin-cell-dark, #201e16);
+  background-image: linear-gradient(var(--skin-plate, transparent), var(--skin-plate, transparent));
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.studio-draw-side {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio-draw-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.studio-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.studio-quiet {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.studio-code {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+  color: var(--dim);
+  font-family: var(--sans);
+  font-size: 10px;
+  line-height: 1.4;
+  word-break: break-all;
+  resize: none;
+}
+
+.studio-code-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.studio-code-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.buy-btn-quiet {
+  border-color: var(--line-strong);
+  background: none;
+  color: var(--muted);
+}
+
+@media (max-width: 360px) {
+  .studio-colors {
+    grid-template-columns: 1fr;
+  }
+
+  .skin-feature {
+    flex-direction: column;
+  }
+}
+
+.ledger {
+  margin-top: 18px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+.stars-note {
+  margin-top: 14px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+/* ─────────────── рекорды ─────────────── */
+
+.metric-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.metric-row:first-child {
+  border-top: 1px solid var(--line);
+}
+
+.metric-key {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.metric-val {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 16px 0 6px;
+}
+
+.filter {
+  font-size: 11.5px;
+  color: var(--muted);
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
+}
+
+.filter.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.records-share {
+  // Кнопка живёт в строке фильтра: правый край занят, и кнопка подтянута к нему,
+  // а «ваше место» стоит сразу за ней - так видно, чем именно ты делишься.
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.filter-row .my-rank {
+  margin-left: 12px;
+}
+
+.my-rank {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-list {
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.rank-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rank-row.is-me {
+  background: var(--accent-wash);
+}
+
+.rank-no {
+  width: 26px;
+  flex: 0 0 auto;
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.rank-name em {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.rank-value {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 0 6px;
+}
+
+.loading-line {
+  padding: 28px 0;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.empty-state {
+  padding: 22px 0 20px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.empty-state h3 {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.empty-state p {
+  margin-top: 6px;
+  max-width: 340px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.empty-state .btn {
+  margin-top: 12px;
+}
+
+.invite-block {
+  margin-top: 22px;
+  padding: 14px;
+  border: 1px solid var(--line);
+}
+
+.invite-block b {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.invite-block p {
+  margin: 4px 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.records-footnote {
+  margin: 18px 0 4px;
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
+.records-shop-link {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+/* ─────────────── игра ─────────────── */
+
+.game-screen {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: calc(10px + var(--safe-top)) 14px calc(10px + var(--safe-bottom));
+  gap: 10px;
+  overflow: hidden;
+}
+
+.game-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.game-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.game-heading .label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.game-title {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.game-hud {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.hud-item {
+  text-align: right;
+}
+
+.hud-item .label {
+  display: block;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+}
+
+.hud-item b {
+  font-family: var(--serif);
+  font-size: 14px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-status {
+  display: flex;
+  /* Одна строка фиксированной высоты и горизонтальный скролл вместо переноса:
+     как только чипам не хватает места, строка разъезжалась на две - и поле
+     теряло 16px на каждом ходе, где появлялся щит или «рекорд» вырастал до двух
+     знаков. Лишнее теперь доезжает скроллом, высота не двигается никогда. */
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px 10px;
+  flex: 0 0 auto;
+  height: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  font-size: 10px;
+  /* Цифры одинаковой ширины: счётчик хода и рекорд не должны растягивать
+     строку на полбуквы - из-за этого она переезжала на вторую и поле вздыхало. */
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Выход в меню на старте поля: правый край строки статуса, чтобы не спорить с
+   счётчиками и не уехать под поле. */
+.game-exit {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+}
+
+.game-status::-webkit-scrollbar {
+  display: none;
+}
+
+.status-item {
+  white-space: nowrap;
+}
+
+.status-item.on {
+  color: var(--accent);
+}
+
+.status-sep {
+  color: var(--line-strong);
+}
+
+.board-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.goal-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+  min-height: 14px;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  /* Одна строка и ни слова больше: подпись цели - напоминание, а не правила,
+     её перенос на новую строку отнимал у поля высоту и двигал клетки. */
+  white-space: nowrap;
+}
+
+.goal-line > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.goal-line .num {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-measure {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* Тема поля красит доску переменными, которые вешает экран партии. Фолбэк в
+   каждой - «Латунь», текущий вид: сломанная или отсутствующая тема обязана
+   давать привычную доску, а не серый квадрат. Отметки правила (красная линия
+   полосы, клетки взятия, риск) темами не красятся намеренно: это не декор. */
+.board-frame {
+  flex: 0 0 auto;
+  position: relative;
+  // Поле и рамка - один размер. Запасом под сетку раньше лежало 8 px «мата»:
+  // на телефоне это была лишняя пустота вокруг клеток, а на широком экране поле
+  // выглядело маленьким внутри своей же рамки. Остался пиксель - ровно под линию.
+  padding: 1px;
+  background: var(--skin-frame, var(--bg-deep));
+}
+
+/* Линия рамки - в ::after и по внутреннему краю, а не границей элемента:
+   въезжающая сверху фигура рисуется поверх границы клетки-родителя, и верхняя
+   линия поля мигала на каждом ходу фигур. ::after пишется над полем, поэтому её
+   перекрыть нечем. */
+.board-frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--skin-edge, var(--line-strong));
+  pointer-events: none;
+}
+
+/* Бегущее поле «Гонок»: отметок-линий над доской больше нет, поле показывает
+   себя движением. Призраки уносимого ряда доезжают до края и съезжают с поля. */
+.board-ghosts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Граница полосы игрока: тонкий красный пунктир. Это не декоративная линия
+   поверх поля, а правило - за неё король не выходит. */
+.board-bandline {
+  position: absolute;
+  /* Мата вокруг поля больше нет, поэтому линия полосы упирается в край поля, а
+     не вылезает за рамку. */
+  left: 0;
+  right: 0;
+  border-top: 2px dashed var(--danger);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.piece-swept {
+  position: absolute;
+  animation: piece-sweep 560ms cubic-bezier(0.4, 0.1, 0.72, 0.24) 1 forwards;
+}
+
+@keyframes piece-sweep {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(var(--sweep-travel, calc(100% + 8px)));
+    opacity: 0;
+  }
+}
+
+.board {
+  display: grid;
+  /* Растянуто по рамке: трек = клетка = доля поля, поэтому между полем и рамкой
+     не остаётся щели от округления пиксельной клетки. */
+  width: 100%;
+  height: 100%;
+  background: var(--bg-deep);
+  position: relative;
+}
+
+.cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+}
+
+.cell-dark {
+  background: var(--skin-cell-dark, #201e16);
+}
+
+.cell-light {
+  background: var(--skin-cell-light, #292619);
+}
+
+/* Линия финиша: слой над полем, а не граница клетки - иначе въезжающая фигура
+   перекрывает её на полтакта, и линия мигает на каждом ходе фигур. */
+.board-finish {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  border-top: 1px solid var(--skin-edge, var(--accent-dim));
+  pointer-events: none;
+}
+
+.cell-move {
+  background: var(--skin-wash, var(--accent-wash));
+  outline: 1px solid var(--skin-edge, var(--accent-dim));
+  outline-offset: -1px;
+}
+
+.move-glyph {
+  font-family: var(--sans);
+  font-size: 0.6em;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.cell-hint {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.cell-hint-2 {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
+}
+
+.hint-no {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 8px;
+  color: var(--accent);
+}
+
+.cell-captured {
+  background: var(--danger-wash);
+}
+
+/* Взятие выглядит иначе, чем обычный ход: иначе игрок не понимает, почему
+   клетка с фигурой стала доступной. */
+.cell-take {
+  background: var(--danger-wash);
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+/* Клетка над линией, доступная только как выпад: фигура снимается, а король
+   остаётся на своей клетке. От обычного взятия её отличает штриховая рамка и
+   крестик: встать сюда нельзя, бить можно. Цвет тот же, что у границы полосы,
+   потому что это одна и та же линия правила. Идёт после `.cell-take`: у клетки
+   выпада есть и то, и другое, а виден должен быть выпад. */
+.cell-strike {
+  outline: 1px dashed var(--danger);
+}
+
+.cell-strike::after {
+  content: '\00d7';
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-family: var(--sans);
+  font-size: 0.62em;
+  line-height: 1;
+  color: var(--danger);
+}
+
+.cell-flash {
+  animation: cell-flash 520ms ease-out 1;
+}
+
+@keyframes cell-flash {
+  0% {
+    background: #efe2c4;
+  }
+  100% {
+    background: var(--danger-wash);
+  }
+}
+
+/* Фигура приезжает из прежней клетки, а не появляется рядом с пешкой.
+   Клетку-источник раньше обводили пунктиром, и это была не подсказка, а лишняя
+   пара горизонтальных линий на поле: рамка пропадала и возвращалась на каждом
+   ответе фигур и читалась как мигание доски. След несёт приезд фигуры - одна
+   анимация, а не анимация плюс контур. */
+.enemy-moved {
+  animation: enemy-slide 620ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
+}
+
+@keyframes enemy-slide {
+  from {
+    /* Ряд на доске растёт вверх, экранная ось Y смотрит вниз, поэтому смещение
+       по ряду берётся со знаком минус: фигура приезжает оттуда, где стояла, а не
+       из противоположной стороны. */
+    transform: translate(var(--from-x), calc(-1 * var(--from-y)));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+
+.board-measure {
+  position: relative;
+}
+
+.board-turn-flag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -18px;
+  text-align: center;
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.side-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* Ряды кнопок держат высоту всегда: иначе при блокировке ввода доска
+   растягивается на освободившееся место и поле «прыгает» на каждый ход.
+   Ряд направления хода (`move-row`) из кампании убран - полем управляет тап. */
+.side-row {
+  min-height: 46px;
+}
+
+.game-controls {
+  min-height: 132px;
+}
+
+.piece {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.piece-glyph {
+  font-family: var(--serif);
+  font-size: 1em;
+  line-height: 1;
+  color: #ded4bd;
+}
+
+.enemy-queen .piece-glyph,
+.enemy-rook .piece-glyph {
+  color: #e5dbc4;
+}
+
+.enemy-iced .piece-glyph {
+  color: #b9c6c2;
+}
+
+.enemy-status {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  color: #b9c6c2;
+}
+
+/* Чужие фигуры стоят на тёмных плашках, свои - на светлых, и это единое правило
+   для всех режимов: на клетчатом поле один глиф не отвечает на вопрос «чей
+   этот ход», а по плашке это видно с любого размера. */
+.enemy-piece .piece-glyph {
+  width: 84%;
+  height: 84%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  // Тёмное дно здесь осталось зашитым намеренно: «чужое на тёмном, своё на
+  // светлом» - единственное, по чему принадлежность фигуры читается на поле в
+  // 36 пикселей, и тема на неё влиять не должна. А вот рамка берётся из темы:
+  // латунный волосок на графитовой или своей теме выглядел чужой линией поля.
+  background: #121109;
+  border: 1px solid var(--skin-edge, #6c6248);
+  color: #e6dcc6;
+}
+
+.enemy-iced .piece-glyph {
+  background: #16211f;
+  border-color: #4c6a63;
+  color: #b9c6c2;
+}
+
+.player-piece {
+  z-index: 2;
+}
+
+.player-mark {
+  width: 78%;
+  height: 78%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--skin-edge, var(--accent));
+  background: var(--skin-plate, #241f12);
+}
+
+/* Своя фигура, нарисованная пальцем: контур вместо глифа, поэтому плашка
+   снимается - иначе знак тонет в рамке. */
+.player-mark-shape {
+  border-color: transparent;
+}
+
+/* Фигура темы вне поля: шапка меню, превью. Плашку включаем только там, где
+   она не спорит с фоном экрана. */
+.skin-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  line-height: 1;
+  color: var(--skin-piece, var(--accent));
+}
+
+.skin-mark-plate {
+  border: 1px solid var(--skin-edge, var(--accent));
+  background: var(--skin-plate, transparent);
+}
+
+.skin-mark-glyph {
+  font-size: 1em;
+}
+
+.skin-mark-shape-svg {
+  width: 92%;
+  height: 92%;
+  display: block;
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.player-shape {
+  width: 74%;
+  height: 74%;
+  display: block;
+  // Тот же штрих, что в превью и в шапке меню: путь из студии - линия, а не
+  // залитая область, и на клетке в 36 пикселей заливка съедала фигуру целиком.
+  fill: none;
+  stroke: var(--skin-piece, var(--accent));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.player-glyph {
+  font-family: var(--serif);
+  font-size: 0.66em;
+  line-height: 1;
+  color: var(--skin-piece, var(--accent));
+}
+
+.player-badge {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  padding: 0 2px;
+  font-size: 7px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: var(--bg-deep);
+}
+
+.board-lost .player-piece {
+  opacity: 0.45;
+}
+
+.game-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.buff-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.buff-btn {
+  min-height: 46px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.buff-btn.active {
+  border-color: var(--accent-dim);
+  background: var(--accent-wash);
+}
+
+.buff-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.buff-meta {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.skip-btn {
+  width: 100%;
+  height: 52px;
+  border: 1px dashed var(--accent-dim);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.control-hint {
+  font-size: 9.5px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--dim);
+  /* Ровно два ряда: подпись меняется на каждый ход («фигуры идут на короля»
+     короче правила в три раза), и без зафиксированной высоты поле гуляло вместе
+     с числом строк. Что не влезло - обрезается, поэтому тексты держим короткими. */
+  height: calc(2 * 1.4 * 1em);
+  overflow: hidden;
+}
+
+.game-loading {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 320px;
+  padding: 20px;
+}
+
+.loading-mark {
+  font-family: var(--serif);
+  font-size: 40px;
+  color: var(--accent);
+}
+
+.loading-text {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.finishing-veil {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(12, 11, 8, 0.92);
+  font-size: 12px;
+  color: var(--muted);
+  z-index: 90;
+}
+
+/* ─────────────── модальные окна ─────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(10, 9, 6, 0.86);
+}
+
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(var(--app-height, 100dvh) - 24px);
+  overflow-y: auto;
+  padding: 20px 18px 16px;
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  background: var(--panel);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.modal-kicker {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.modal-title {
+  margin: 0 40px 8px 0;
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+}
+
+.modal-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.modal-text b {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* Второстепенные действия - в одну строку: окно запуска уровня и так высокое
+   (правила, характеристики поля, список фигур, щит), третья кнопка под ним
+   выталкивала «Начать» за край экрана на маленьком телефоне. */
+.modal-actions-row {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-actions-row .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.modal-actions .btn {
+  width: 100%;
+}
+
+.modal-note {
+  margin-top: 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.result-hero {
+  padding-bottom: 4px;
+}
+
+.result-mark {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--accent-dim);
+  font-family: var(--serif);
+  font-size: 24px;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.result-mark.danger {
+  border-color: #6b4138;
+  color: var(--danger);
+}
+
+.result-glyph {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.reward-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.reward-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.reward-item b {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.callout {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.callout .label {
+  flex: 0 0 auto;
+}
+
+.lives-line {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.lives-line b {
+  font-family: var(--serif);
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.timer-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.timer-line b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────────── до начала уровня ─────────────── */
+
+.pre-meta {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.pre-meta div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pre-meta b {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.pre-piece-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 6px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pre-piece {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pre-piece em {
+  font-family: var(--serif);
+  font-style: normal;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.pre-unlock {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.shield-offer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.shield-offer b {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shield-offer small {
+  display: block;
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.shield-offer span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.shield-offer .arrow {
+  color: var(--accent);
+}
+
+/* ─────────────── правила и правовые тексты ─────────────── */
+
+.rules-steps {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.rules-steps li {
+  display: flex;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rules-steps li > span {
+  flex: 0 0 auto;
+  width: 16px;
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.rules-steps b {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rules-steps p {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.rules-pieces {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
+
+.rules-pieces-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.rules-piece {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rules-glyph {
+  width: 20px;
+  flex: 0 0 auto;
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.1;
+  text-align: center;
+  color: var(--ink);
+}
+
+.rules-piece > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.rules-piece b {
+  font-size: 11.5px;
+  font-weight: 600;
+  // Название фигуры не переносим: «ферзь» на две строки читается как обрывок.
+  white-space: nowrap;
+}
+
+.rules-piece p {
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.rules-when {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.rules-meta {
+  margin: 16px 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.legal-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.legal-link-row button {
+  font-size: 10px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+.legal-screen {
+  max-width: 620px;
+}
+
+.legal-title {
+  margin-top: 18px;
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.05;
+}
+
+.legal-updated {
+  margin-top: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+}
+
+.legal-body {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.legal-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.legal-section h2 {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.legal-section p {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.legal-section ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.legal-section li {
+  margin-bottom: 5px;
+}
+
+.legal-section li::marker {
+  color: var(--accent-dim);
+}
+
+.legal-section b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.legal-foot {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.legal-foot button {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px;
+}
+
+/* ─────────────── тосты ─────────────── */
+
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: min(92vw, 420px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 130;
+}
+
+.toast {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--ink);
+}
+
+.toast-kind {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.toast-success .toast-kind {
+  color: var(--ok);
+}
+
+.toast-error .toast-kind {
+  color: var(--danger);
+}
+
+.toast-info .toast-kind {
+  color: var(--accent);
+}
+
+/* ─────────────── демонстрационная реклама ─────────────── */
+
+.demo-ad {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--bg-deep);
+}
+
+.demo-card {
+  width: 100%;
+  max-width: 380px;
+  border: 1px solid var(--line-strong);
+  padding: 22px 20px 18px;
+}
+
+.demo-tag {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.demo-title {
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.demo-text {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.demo-reward {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.demo-reward b {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.demo-progress {
+  height: 1px;
+  margin-top: 16px;
+  background: var(--line);
+}
+
+.demo-progress span {
+  display: block;
+  height: 1px;
+  background: var(--accent);
+}
+
+.demo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ─────────────── загрузка ─────────────── */
+
+.boot-screen {
+  min-height: var(--app-height, 100dvh);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: var(--bg);
+}
+
+.boot-mark {
+  font-family: var(--serif);
+  font-size: 44px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.boot-title {
+  margin-top: 14px;
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.boot-title em {
+  display: block;
+  font-style: italic;
+  color: var(--accent);
+}
+
+.boot-diag {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  user-select: all;
+  opacity: 0.75;
+}
+
+.boot-text {
+  margin-top: 16px;
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.boot-error {
+  margin-top: 18px;
+  max-width: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.boot-error .btn {
+  width: 100%;
+}
+
+.boot-foot {
+  margin-top: 28px;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* ─────────────── адаптив ─────────────── */
+
+@media (max-height: 720px) {
+  // На низких экранах шапка поднимается ещё сильнее: цифра сверху держится
+  // меньше базовой, иначе фигура в строке заголовка не даёт режимам влезть.
+  .masthead {
+    padding: 4px 0 12px;
+  }
+
+  .masthead-title {
+    font-size: clamp(32px, 9.5vw, 40px);
+  }
+
+  .cta-block {
+    min-height: 72px;
+    padding: 12px 14px;
+  }
+
+  .cta-title {
+    font-size: 22px;
+  }
+
+  .menu-row {
+    min-height: 52px;
+    padding: 10px 0;
+  }
+
+  .menu-row-title {
+    font-size: 16px;
+  }
+
+  .buff-btn {
+    min-height: 40px;
+  }
+
+  .control-hint {
+    display: none;
+  }
+
+  .game-screen {
+    gap: 7px;
+  }
+}
+
+@media (max-height: 620px) {
+  .masthead {
+    padding: 2px 0 10px;
+  }
+
+  .masthead-title {
+    font-size: 30px;
+  }
+
+  .masthead-sub {
+    display: none;
+  }
+
+  .goal-line {
+    display: none;
+  }
+
+  .buff-btn {
+    min-height: 36px;
+  }
+}
+
+
+/* =========================================================
+   Парковка: перегон пробки фигур
+   ========================================================= */
+
+.jam-screen .goal-line .num {
+  color: var(--accent);
+}
+
+.jam-progress {
+  flex: 0 0 auto;
+  height: 4px;
+  border: 1px solid var(--line);
+  background: var(--bg-deep);
+}
+
+.jam-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Крайние ряды это и есть выход: свой ряд для белых, свой для чёрных. Ряды
+   подкрашены латунью, чтобы направление читалось без подписи и без отдельной
+   кнопки ухода. */
+.jam-board .cell-edge-top {
+  background: #2b2415;
+}
+
+.jam-board .cell-edge-top.cell-light {
+  background: #332b19;
+}
+
+.jam-board .cell-edge-bottom {
+  background: #211c10;
+}
+
+.jam-board .cell-edge-bottom.cell-light {
+  background: #2a2415;
+}
+
+/* Клетка, на которую встанет край выбранной фигуры: уход помечен стрелкой. */
+.jam-board .cell-exit {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-wash);
+}
+
+.exit-mark {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+/* Клетка, с которой фигура только что ушла: отметка живёт до следующего хода.
+   Рамку вокруг этой клетки в «Заторе» держали той же `.cell-left`, что и на
+   основном поле, - убрали обе: след читается отметкой и приездом фигуры. */
+.left-mark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  line-height: 1;
+  color: var(--accent-dim);
+}
+
+/* Цвета фигур: белые на светлой плашке с тёмным глифом, чёрные на тёмной с
+   светлым глифом и обводкой. На тёмном поле обводка и есть различие. */
+.jam-piece {
+  border-radius: var(--radius);
+  width: 84%;
+  height: 84%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jam-white {
+  background: #efe6d2;
+  border: 1px solid #efe6d2;
+}
+
+.jam-white .piece-glyph {
+  color: #16140f;
+}
+
+.jam-black {
+  background: #121109;
+  border: 1px solid #6c6248;
+}
+
+.jam-black .piece-glyph {
+  color: #e6dcc6;
+}
+
+/* Стрелка направления на самой фигуре: вниз у белых, вверх у чёрных. */
+.jam-side-mark {
+  position: absolute;
+  right: 2px;
+  bottom: 0;
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--dim);
+}
+
+.jam-white .jam-side-mark {
+  color: #4a4335;
+}
+
+.jam-black .jam-side-mark {
+  color: #b9ad91;
+}
+
+.jam-selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Фигура, готовая уйти за свой край за один ход. */
+.jam-ready::after {
+  content: '';
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -3px;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* Фигура из подсказки: её клетка-источник помечена пунктиром, цель цифрой. */
+.cell-hint-source {
+  outline: 1px dashed var(--accent-dim);
+  outline-offset: -2px;
+}
+
+.jam-board .cell[disabled] {
+  cursor: default;
+}
+
+.jam-board .cell:not([disabled]) {
+  cursor: pointer;
+}
+
+/* =========================================================
+   Гонки: король против фигур, приходящих сверху
+   ========================================================= */
+
+/* Клетка, с которой фигура бьёт: без отметки игрок обязан был бы считать
+   линию атаки глазами, а на темном поле это работа не для пальца. */
+.cell-risk {
+  outline: 1px solid var(--danger);
+  outline-offset: -1px;
+}
+
+/* Ход игрока и въезд новой фигуры. Оба читаются движением, а не сменой кадра:
+   фигура приезжает сверху, король едет по клетке, а не перескакивает. */
+.player-slide {
+  animation: enemy-slide 240ms cubic-bezier(0.22, 0.7, 0.24, 1) 1;
+}
+
+.piece-spawn {
+  animation: piece-enter 320ms ease-out 1;
+}
+
+@keyframes piece-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-60%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Индикатор такта притока: столько клеток, через сколько ходов придёт волна. */
+.race-ticks {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.race-ticks i {
+  width: 7px;
+  height: 3px;
+  background: var(--line-strong);
+  opacity: 0.7;
+}
+
+.race-ticks i.on {
+  background: var(--accent);
+  opacity: 1;
+}
+
+@media (min-width: 600px) {
+  .modal-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+
+  .modal {
+    border-bottom: 1px solid var(--line-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
