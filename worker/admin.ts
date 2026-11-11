@@ -1381,6 +1381,10 @@ adminApp.post('/bot/setup', async (c) => {
 
   const steps: Array<{ name: string; ok: boolean; detail: string }> = [];
 
+  // `allowed_updates` не указываем намеренно: без него Telegram присылает все
+  // типы, и новые (как `widget_query` из Bot API 10.4) доходят сами. Стоит
+  // выписать список - придётся каждый раз дописывать и его, иначе бот
+  // перестанет видеть фичи, о которых ещё не знает.
   const webhookPayload: Record<string, unknown> = {
     url: webhookUrl,
     drop_pending_updates: body.dropPending === true,

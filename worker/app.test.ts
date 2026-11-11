@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyJamAction, createJamPuzzle } from '../src/engine';
 import app from './app';
 import { ADMIN_TABLES, AUTH_TABLES, GAME_TABLES, SKIN_TABLES } from './schema';
@@ -626,5 +626,70 @@ describe('данные Telegram', () => {
     );
     expect(response.status).toBe(503);
     expect(((await response.json()) as { error: string }).error).toBe('auth_not_configured');
+  });
+});
+
+describe('вебхук: апдейты незнакомых типов', () => {
+  /**
+   * Bot API 10.4 принесла `widget_query` и `shared_widget_query`, а `setWebhook`
+   * мы настраиваем без `allowed_updates` - то есть новые типы прилетят сами, в
+   * тот день, когда Telegram откроет виджеты. Вебхук обязан ответить 200 и
+   * промолчать: 500 на непонятном апдейте означало бы, что Telegram начал
+   * откладывать доставку и отстал весь остаток очереди - не только виджет.
+   */
+  async function post(update: Record<string, unknown>): Promise<{ status: number; sent: number }> {
+    let sent = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        sent += 1;
+        return new Response(JSON.stringify({ ok: true, result: true }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    const response = await app.fetch(
+      new Request('https://pawn.test/api/telegram/webhook', {
+        method: 'POST',
+        headers: { 'X-Telegram-Bot-Api-Secret-Token': 'secret', 'Content-Type': 'application/json' },
+        body: JSON.stringify(update),
+      }),
+      env({ tables: full }, configured),
+    );
+    return { status: response.status, sent };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('молча переживает запрос из виджета', async () => {
+    for (const key of ['widget_query', 'shared_widget_query']) {
+      const { status, sent } = await post({
+        update_id: 42,
+        [key]: {
+          id: 'query-1',
+          from: { id: 5, is_bot: false, first_name: 'Игрок' },
+          chat: { id: 5, type: 'private' },
+          message_id: 7,
+          chat_instance: '123',
+          data: 'refresh',
+        },
+      });
+      expect(status, key).toBe(200);
+      expect(sent, key).toBe(0);
+    }
+  });
+
+  it('молча переживает пустой и служебный апдейт', async () => {
+    for (const update of [
+      { update_id: 1 },
+      { update_id: 2, my_chat_member: { chat: { id: 5 }, new_chat_member: { status: 'left' } } },
+      { update_id: 3, message: { message_id: 1, chat: { id: 5 }, date: 1700000000 } },
+    ]) {
+      const { status, sent } = await post(update);
+      expect(status, JSON.stringify(update)).toBe(200);
+      expect(sent, JSON.stringify(update)).toBe(0);
+    }
   });
 });
